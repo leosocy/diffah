@@ -24,7 +24,7 @@ fmt:
 	goimports -w -local $(PKG) .
 
 fixtures:
-	bash scripts/build-fixtures.sh
+	go run -tags '$(TAGS)' ./scripts/build_fixtures
 
 snapshot:
 	goreleaser release --snapshot --clean
