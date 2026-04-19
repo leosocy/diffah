@@ -46,10 +46,10 @@ func Pack(srcDir string, sidecar []byte, outPath string, c Compression) error {
 	tw := tar.NewWriter(stream)
 
 	if err := addDir(tw, srcDir); err != nil {
-		return err
+		return fmt.Errorf("add srcdir to tar: %w", err)
 	}
 	if err := addBytes(tw, diff.SidecarFilename, sidecar); err != nil {
-		return err
+		return fmt.Errorf("add sidecar to tar: %w", err)
 	}
 
 	if err := tw.Close(); err != nil {
@@ -122,8 +122,10 @@ func addFile(tw *tar.Writer, root, path string, info os.FileInfo) error {
 func addBytes(tw *tar.Writer, name string, data []byte) error {
 	hdr := &tar.Header{Name: name, Mode: 0o644, Size: int64(len(data))}
 	if err := tw.WriteHeader(hdr); err != nil {
-		return err
+		return fmt.Errorf("write tar header %s: %w", name, err)
 	}
-	_, err := tw.Write(data)
-	return err
+	if _, err := tw.Write(data); err != nil {
+		return fmt.Errorf("write tar body %s: %w", name, err)
+	}
+	return nil
 }
