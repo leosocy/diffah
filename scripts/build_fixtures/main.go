@@ -74,10 +74,7 @@ func buildLayerBlob(filename string, data []byte) ([]byte, digest.Digest, digest
 		panic(fmt.Sprintf("close tar writer: %v", err))
 	}
 	rawBytes := rawBuf.Bytes()
-	diffID := digest.NewDigestFromBytes(digest.SHA256, rawBytes[:])
-	h := sha256.New()
-	h.Write(rawBytes)
-	diffID = digest.NewDigestFromEncoded(digest.SHA256, fmt.Sprintf("%x", h.Sum(nil)))
+	diffID := digest.FromBytes(rawBytes)
 
 	// Now gzip the uncompressed tar with deterministic gzip headers.
 	compBuf := &bytes.Buffer{}
@@ -99,10 +96,7 @@ func buildLayerBlob(filename string, data []byte) ([]byte, digest.Digest, digest
 		panic(fmt.Sprintf("close gzip writer: %v", err))
 	}
 	compBytes := compBuf.Bytes()
-
-	h2 := sha256.New()
-	h2.Write(compBytes)
-	blobDigest := digest.NewDigestFromEncoded(digest.SHA256, fmt.Sprintf("%x", h2.Sum(nil)))
+	blobDigest := digest.FromBytes(compBytes)
 
 	return compBytes, diffID, blobDigest
 }
@@ -485,7 +479,7 @@ func buildFixtures(ctx context.Context) error {
 	}
 	defer cf.Close()
 	for _, o := range outputs {
-		fmt.Fprintf(cf, "sha256:%s  %s\n", o.checksum, o.filename)
+		fmt.Fprintf(cf, "%s  %s\n", o.checksum, o.filename)
 	}
 	fmt.Printf("wrote %s\n", checksumPath)
 	return nil
