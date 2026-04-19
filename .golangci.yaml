@@ -1,62 +1,81 @@
+version: "2"
 run:
-  timeout: 3m
   tests: true
-
+  go: "1.24"
 linters:
-  disable-all: true
+  default: none
   enable:
-    - gofmt
-    - govet
-    - staticcheck
-    - gosec
-    - revive
-    - unused
+    - bodyclose
     - errcheck
+    - errorlint
+    - funlen
     - goconst
     - gocritic
     - gocyclo
-    - goimports
-    - misspell
-    - funlen
+    - gosec
+    - govet
     - lll
-    - bodyclose
-    - whitespace
-    - prealloc
-    - errorlint
+    - misspell
     - nestif
     - nolintlint
-
-linters-settings:
-  funlen:
-    lines: 60
-    statements: 40
-  lll:
-    line-length: 120
-  gocyclo:
-    min-complexity: 12
-  nestif:
-    min-complexity: 4
-  goimports:
-    local-prefixes: github.com/leosocy/diffah
-  errorlint:
-    errorf: true
-    asserts: true
-    comparison: true
-  gocritic:
-    enabled-tags:
-      - performance
-      - diagnostic
-      - style
-    disabled-tags:
-      - experimental
-
+    - prealloc
+    - revive
+    - staticcheck
+    - unused
+    - whitespace
+  settings:
+    errorlint:
+      errorf: true
+      asserts: true
+      comparison: true
+    funlen:
+      lines: 60
+      statements: 40
+    gocritic:
+      enabled-tags:
+        - performance
+        - diagnostic
+        - style
+      disabled-tags:
+        - experimental
+    gocyclo:
+      min-complexity: 12
+    lll:
+      line-length: 120
+    nestif:
+      min-complexity: 4
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - dupl
+          - funlen
+          - gocyclo
+          - lll
+        path: _test\.go
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0
-  exclude-rules:
-    - path: _test\.go
-      linters:
-        - funlen
-        - gocyclo
-        - lll
-        - dupl
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/leosocy/diffah
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
