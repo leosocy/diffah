@@ -7,12 +7,6 @@ repos:
       - id: end-of-file-fixer
       - id: check-yaml
       - id: check-added-large-files
-  - repo: local
-    hooks:
-      - id: golangci-lint
-        name: golangci-lint
-        description: Run golangci-lint via the locally installed binary
-        entry: golangci-lint run
-        language: system
-        files: \.go$
-        pass_filenames: false
+# Linting runs in CI (.github/workflows/lint.yml) where a Go 1.25-built
+# golangci-lint can be pinned. The locally installed binary varies by
+# contributor and may lag behind the project's Go version.
