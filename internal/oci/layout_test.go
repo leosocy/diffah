@@ -25,3 +25,21 @@ func TestReadDirManifest_ErrorOnMissingFile(t *testing.T) {
 	_, _, err := ReadDirManifest(t.TempDir())
 	require.Error(t, err)
 }
+
+func TestReadDirManifest_ErrorOnInvalidJSON(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "manifest.json"), []byte("not valid json"), 0o644))
+
+	_, _, err := ReadDirManifest(dir)
+	require.Error(t, err)
+	require.ErrorContains(t, err, "decode manifest")
+}
+
+func TestReadDirManifest_ErrorOnEmptyMediaType(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "manifest.json"), []byte(`{"schemaVersion":2,"mediaType":""}`), 0o644))
+
+	_, _, err := ReadDirManifest(dir)
+	require.Error(t, err)
+	require.ErrorContains(t, err, "empty mediaType")
+}
