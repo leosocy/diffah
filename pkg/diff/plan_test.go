@@ -56,3 +56,23 @@ func TestComputePlan_AllLayersInBaseline(t *testing.T) {
 	require.Empty(t, p.ShippedInDelta)
 	require.Len(t, p.RequiredFromBaseline, 2)
 }
+
+// TestComputePlan_ReturnsNonNilSlicesEvenWhenPartitionEmpty guards against a
+// regression where a zero-overlap partition left one of the Plan slices as
+// a nil slice, which the sidecar validator then rejected as "field missing".
+// Observed against a production image where every layer was replaced by a
+// base-image rebase; ComputePlan must still produce a marshal-able Sidecar.
+func TestComputePlan_ReturnsNonNilSlicesEvenWhenPartitionEmpty(t *testing.T) {
+	// Case 1: zero baseline overlap → RequiredFromBaseline must be non-nil.
+	targetOnly := []BlobRef{{Digest: "sha256:a", Size: 1}}
+	p := ComputePlan(targetOnly, nil)
+	require.NotNil(t, p.RequiredFromBaseline,
+		"RequiredFromBaseline must be an allocated empty slice, not nil, "+
+			"so the sidecar marshals to [] rather than null")
+
+	// Case 2: every target layer in baseline → ShippedInDelta must be non-nil.
+	baseline := []digest.Digest{"sha256:a"}
+	p2 := ComputePlan(targetOnly, baseline)
+	require.NotNil(t, p2.ShippedInDelta,
+		"ShippedInDelta must be an allocated empty slice when nothing ships")
+}

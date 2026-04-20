@@ -29,7 +29,14 @@ func ComputePlan(target []BlobRef, baseline []digest.Digest) Plan {
 		known[d] = struct{}{}
 	}
 
-	var plan Plan
+	// Pre-allocate empty (non-nil) slices so an all-one-sided partition
+	// still produces a marshal-able sidecar — sidecar.validate rejects nil
+	// slices because JSON decoding can't tell them apart from omitted
+	// fields.
+	plan := Plan{
+		ShippedInDelta:       []BlobRef{},
+		RequiredFromBaseline: []BlobRef{},
+	}
 	for _, b := range target {
 		if _, ok := known[b.Digest]; ok {
 			plan.RequiredFromBaseline = append(plan.RequiredFromBaseline, b)
