@@ -3,6 +3,8 @@ package exporter
 import (
 	"context"
 	"fmt"
+	"sort"
+	"sync"
 
 	"github.com/opencontainers/go-digest"
 
@@ -25,16 +27,40 @@ type BaselineLayerMeta struct {
 
 // Planner computes per-layer encoding decisions for ShippedInDelta. It
 // owns no I/O state directly — readBlob is injected so tests can avoid
-// the real container-image stack.
+// the real container-image stack. The fingerprinter is used to build a
+// byte-weighted content overlap score per baseline; a nil fingerprinter
+// falls back to DefaultFingerprinter{}.
 type Planner struct {
-	baseline []BaselineLayerMeta
-	readBlob func(digest.Digest) ([]byte, error)
+	baseline    []BaselineLayerMeta
+	readBlob    func(digest.Digest) ([]byte, error)
+	fingerprint Fingerprinter
+
+	// Lazily populated on first Run via ensureBaselineFP. A nil entry
+	// means "fingerprint failed for this baseline"; the planner treats
+	// that baseline as a size-only candidate.
+	fpOnce     sync.Once
+	baselineFP map[digest.Digest]Fingerprint
 }
 
 // NewPlanner builds a planner that reads blobs via readBlob, keyed by
 // digest. The function must handle both target and baseline digests.
-func NewPlanner(baseline []BaselineLayerMeta, readBlob func(digest.Digest) ([]byte, error)) *Planner {
-	return &Planner{baseline: baseline, readBlob: readBlob}
+// A nil Fingerprinter defaults to DefaultFingerprinter{}. Baselines are
+// sorted by Digest at construction time for deterministic tie-breaks.
+func NewPlanner(
+	baseline []BaselineLayerMeta,
+	readBlob func(digest.Digest) ([]byte, error),
+	fp Fingerprinter,
+) *Planner {
+	sorted := make([]BaselineLayerMeta, len(baseline))
+	copy(sorted, baseline)
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].Digest < sorted[j].Digest
+	})
+	return &Planner{
+		baseline:    sorted,
+		readBlob:    readBlob,
+		fingerprint: fp,
+	}
 }
 
 // Run returns the BlobRef entries to drop into Sidecar.ShippedInDelta and

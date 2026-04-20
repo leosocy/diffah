@@ -269,7 +269,7 @@ func resolveShipped(
 	}
 
 	readBlob := newDirBlobReader(dir, baseline)
-	entries, payloads, err := NewPlanner(blMeta, readBlob).Run(ctx, plan.ShippedInDelta)
+	entries, payloads, err := NewPlanner(blMeta, readBlob, nil).Run(ctx, plan.ShippedInDelta)
 	if err != nil {
 		// Planner failed (e.g. zstd not on PATH or blob read error).
 		// Degrade gracefully to full encoding for all shipped layers.
