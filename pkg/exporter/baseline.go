@@ -98,9 +98,11 @@ type ManifestBaseline struct {
 	parsed manifest.Manifest
 }
 
-// NewManifestBaseline parses path as a container manifest. platform selects
-// an instance when path is a manifest list; an empty platform combined with a
-// list triggers diff.ErrManifestListUnselected.
+// NewManifestBaseline parses path as a container image manifest. Manifest
+// lists are rejected with diff.ErrManifestListUnselected regardless of the
+// platform argument; callers must resolve the platform-specific instance
+// before calling this constructor. Use NewImageBaseline when the baseline
+// image is still accessible via a transport and platform selection is needed.
 func NewManifestBaseline(path, _ string) (*ManifestBaseline, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
