@@ -29,10 +29,16 @@ const (
 
 // Options carries all inputs to Import.
 type Options struct {
-	DeltaPath    string
-	BaselineRef  types.ImageReference
-	OutputPath   string
-	OutputFormat string // one of FormatDockerArchive, FormatOCIArchive, FormatDir
+	DeltaPath   string
+	BaselineRef types.ImageReference
+	OutputPath  string
+	// OutputFormat is one of FormatDockerArchive, FormatOCIArchive, FormatDir,
+	// or "" to auto-pick the format that preserves the sidecar's source bytes.
+	OutputFormat string
+	// AllowConvert permits an explicit OutputFormat that forces a manifest
+	// media-type conversion (e.g. docker schema 2 source → oci-archive).
+	// Without this flag a conflict returns diff.ErrIncompatibleOutputFormat.
+	AllowConvert bool
 }
 
 // Import performs the full import pipeline described in spec §8.
@@ -48,15 +54,20 @@ func Import(ctx context.Context, opts Options) error {
 		return err
 	}
 
+	resolvedFmt, err := resolveOutputFormat(opts.OutputFormat, sidecar.Target.MediaType, opts.AllowConvert)
+	if err != nil {
+		return err
+	}
+
 	composite, srcRef, err := openCompositeSource(ctx, tmpDir, opts.BaselineRef, sidecar)
 	if err != nil {
 		return err
 	}
 
 	tmpOut := opts.OutputPath + ".tmp"
-	if err := runCopy(ctx, srcRef, tmpOut, opts.OutputFormat); err != nil {
+	if err := runCopy(ctx, srcRef, tmpOut, resolvedFmt); err != nil {
 		_ = composite.Close()
-		_ = removeOutput(tmpOut, opts.OutputFormat)
+		_ = removeOutput(tmpOut, resolvedFmt)
 		return err
 	}
 	if err := composite.Close(); err != nil {
@@ -66,7 +77,7 @@ func Import(ctx context.Context, opts Options) error {
 	if err := os.Rename(tmpOut, opts.OutputPath); err != nil {
 		return fmt.Errorf("rename output: %w", err)
 	}
-	return verifyImport(opts, sidecar)
+	return verifyImport(opts, sidecar, resolvedFmt)
 }
 
 // extractSidecar unpacks the delta archive into tmpDir and parses the sidecar.
@@ -204,8 +215,8 @@ func buildOutputRef(path, format string) (types.ImageReference, error) {
 // verifyImport sanity-checks the produced output for dir format by comparing
 // the written manifest digest against the sidecar's target manifest digest.
 // For other formats, copy.Image's internal validation is trusted.
-func verifyImport(opts Options, sidecar *diff.Sidecar) error {
-	if opts.OutputFormat != FormatDir {
+func verifyImport(opts Options, sidecar *diff.Sidecar, resolvedFmt string) error {
+	if resolvedFmt != FormatDir {
 		return nil
 	}
 	raw, err := os.ReadFile(filepath.Join(opts.OutputPath, "manifest.json"))
@@ -245,6 +256,9 @@ func DryRun(ctx context.Context, opts Options) (DryRunReport, error) {
 
 	sidecar, err := extractSidecar(opts.DeltaPath, tmpDir)
 	if err != nil {
+		return DryRunReport{}, err
+	}
+	if _, err := resolveOutputFormat(opts.OutputFormat, sidecar.Target.MediaType, opts.AllowConvert); err != nil {
 		return DryRunReport{}, err
 	}
 

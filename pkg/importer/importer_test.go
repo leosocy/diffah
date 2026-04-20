@@ -6,8 +6,11 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/opencontainers/go-digest"
 	"github.com/stretchr/testify/require"
+	"go.podman.io/image/v5/types"
 
+	"github.com/leosocy/diffah/internal/archive"
 	"github.com/leosocy/diffah/internal/imageio"
 	"github.com/leosocy/diffah/pkg/diff"
 	"github.com/leosocy/diffah/pkg/exporter"
@@ -23,10 +26,21 @@ func repoRoot(t *testing.T) string {
 // buildDelta runs Export to produce a delta.tar at a temp path.
 func buildDelta(t *testing.T, targetTar, baselineTar string) string {
 	t.Helper()
+	return buildDeltaWithTransport(t, "oci-archive", targetTar, baselineTar)
+}
+
+// buildDeltaS2 builds a delta from schema-2 docker-archive fixtures.
+func buildDeltaS2(t *testing.T, targetTar, baselineTar string) string {
+	t.Helper()
+	return buildDeltaWithTransport(t, "docker-archive", targetTar, baselineTar)
+}
+
+func buildDeltaWithTransport(t *testing.T, transport, targetTar, baselineTar string) string {
+	t.Helper()
 	ctx := context.Background()
-	target, err := imageio.ParseReference("oci-archive:" + filepath.Join(repoRoot(t), "testdata/fixtures", targetTar))
+	target, err := imageio.ParseReference(transport + ":" + filepath.Join(repoRoot(t), "testdata/fixtures", targetTar))
 	require.NoError(t, err)
-	baseline, err := imageio.ParseReference("oci-archive:" + filepath.Join(repoRoot(t), "testdata/fixtures", baselineTar))
+	baseline, err := imageio.ParseReference(transport + ":" + filepath.Join(repoRoot(t), "testdata/fixtures", baselineTar))
 	require.NoError(t, err)
 
 	out := filepath.Join(t.TempDir(), "delta.tar")
@@ -34,6 +48,20 @@ func buildDelta(t *testing.T, targetTar, baselineTar string) string {
 		TargetRef: target, BaselineRef: baseline, OutputPath: out, ToolVersion: "test",
 	}))
 	return out
+}
+
+// readManifestDigest opens an image reference, reads its raw manifest
+// bytes, and returns their sha256 digest. The helper lets the digest
+// regression tests prove byte-exact reconstruction without depending on
+// copy.Image's internal bookkeeping.
+func readManifestDigest(ctx context.Context, t *testing.T, ref types.ImageReference) digest.Digest {
+	t.Helper()
+	src, err := ref.NewImageSource(ctx, nil)
+	require.NoError(t, err)
+	defer func() { _ = src.Close() }()
+	raw, _, err := src.GetManifest(ctx, nil)
+	require.NoError(t, err)
+	return digest.FromBytes(raw)
 }
 
 func TestImport_RoundTrip_OCIFixture(t *testing.T) {
@@ -48,7 +76,7 @@ func TestImport_RoundTrip_OCIFixture(t *testing.T) {
 		DeltaPath:    delta,
 		BaselineRef:  baseline,
 		OutputPath:   out,
-		OutputFormat: "docker-archive",
+		OutputFormat: "oci-archive",
 	})
 	require.NoError(t, err)
 
@@ -109,7 +137,7 @@ func TestImport_FailFast_MissingBaselineBlob(t *testing.T) {
 		DeltaPath:    delta,
 		BaselineRef:  unrelated,
 		OutputPath:   out,
-		OutputFormat: "docker-archive",
+		OutputFormat: "oci-archive",
 	})
 	var mbe *diff.ErrBaselineMissingBlob
 	require.ErrorAs(t, err, &mbe)
@@ -133,7 +161,7 @@ func TestImport_DryRun_OnlyProbes_Reachable(t *testing.T) {
 		DeltaPath:    delta,
 		BaselineRef:  baselineRef,
 		OutputPath:   out,
-		OutputFormat: "docker-archive",
+		OutputFormat: "oci-archive",
 	})
 	require.NoError(t, err)
 	require.True(t, report.AllReachable)
@@ -142,6 +170,116 @@ func TestImport_DryRun_OnlyProbes_Reachable(t *testing.T) {
 
 	_, statErr := os.Stat(out)
 	require.True(t, os.IsNotExist(statErr))
+}
+
+// TestImport_AutoFormat_OCI_PreservesManifestDigest checks that an OCI
+// source archive reconstructed through the auto-format code path yields
+// the exact manifest bytes recorded in the sidecar. This is the
+// regression guard for the cross-format byte-breakage issue: it would
+// have failed against the previous default --output-format=docker-archive.
+func TestImport_AutoFormat_OCI_PreservesManifestDigest(t *testing.T) {
+	ctx := context.Background()
+	delta := buildDelta(t, "v2_oci.tar", "v1_oci.tar")
+
+	raw, err := archive.ReadSidecar(delta)
+	require.NoError(t, err)
+	sidecar, err := diff.ParseSidecar(raw)
+	require.NoError(t, err)
+
+	baseline, err := imageio.ParseReference("oci-archive:" + filepath.Join(repoRoot(t), "testdata/fixtures/v1_oci.tar"))
+	require.NoError(t, err)
+
+	out := filepath.Join(t.TempDir(), "v2.tar")
+	require.NoError(t, importer.Import(ctx, importer.Options{
+		DeltaPath:   delta,
+		BaselineRef: baseline,
+		OutputPath:  out,
+		// OutputFormat empty → auto-pick to preserve OCI bytes.
+	}))
+
+	ref, err := imageio.ParseReference("oci-archive:" + out)
+	require.NoError(t, err)
+	got := readManifestDigest(ctx, t, ref)
+	require.Equal(t, sidecar.Target.ManifestDigest, got,
+		"auto-format output must reproduce the sidecar's target manifest bytes")
+}
+
+// TestImport_AutoFormat_DockerSchema2_PreservesManifestDigest is the
+// schema-2 twin of the OCI regression test.
+func TestImport_AutoFormat_DockerSchema2_PreservesManifestDigest(t *testing.T) {
+	ctx := context.Background()
+	delta := buildDeltaS2(t, "v2_s2.tar", "v1_s2.tar")
+
+	raw, err := archive.ReadSidecar(delta)
+	require.NoError(t, err)
+	sidecar, err := diff.ParseSidecar(raw)
+	require.NoError(t, err)
+
+	baseline, err := imageio.ParseReference("docker-archive:" + filepath.Join(repoRoot(t), "testdata/fixtures/v1_s2.tar"))
+	require.NoError(t, err)
+
+	out := filepath.Join(t.TempDir(), "v2.tar")
+	require.NoError(t, importer.Import(ctx, importer.Options{
+		DeltaPath:   delta,
+		BaselineRef: baseline,
+		OutputPath:  out,
+	}))
+
+	ref, err := imageio.ParseReference("docker-archive:" + out)
+	require.NoError(t, err)
+	got := readManifestDigest(ctx, t, ref)
+	require.Equal(t, sidecar.Target.ManifestDigest, got,
+		"auto-format output must reproduce the sidecar's target manifest bytes")
+}
+
+// TestImport_RejectsCrossFormatConversion confirms the compat check runs
+// before the expensive copy step: an OCI source paired with a
+// docker-archive output surfaces ErrIncompatibleOutputFormat instead of
+// silently producing an image with a different manifest digest.
+func TestImport_RejectsCrossFormatConversion(t *testing.T) {
+	ctx := context.Background()
+	delta := buildDelta(t, "v2_oci.tar", "v1_oci.tar")
+
+	baseline, err := imageio.ParseReference("oci-archive:" + filepath.Join(repoRoot(t), "testdata/fixtures/v1_oci.tar"))
+	require.NoError(t, err)
+
+	out := filepath.Join(t.TempDir(), "v2.tar")
+	err = importer.Import(ctx, importer.Options{
+		DeltaPath:    delta,
+		BaselineRef:  baseline,
+		OutputPath:   out,
+		OutputFormat: "docker-archive",
+	})
+	var conflict *diff.ErrIncompatibleOutputFormat
+	require.ErrorAs(t, err, &conflict)
+
+	// No partial output should be left behind.
+	_, statErr := os.Stat(out)
+	require.True(t, os.IsNotExist(statErr))
+}
+
+// TestImport_AllowConvert_BypassesCompatCheck verifies the explicit opt-in
+// restores the legacy converting behaviour. Digests won't match, but the
+// command succeeds — this is the escape hatch for operators whose consumer
+// only speaks one format.
+func TestImport_AllowConvert_BypassesCompatCheck(t *testing.T) {
+	ctx := context.Background()
+	delta := buildDelta(t, "v2_oci.tar", "v1_oci.tar")
+
+	baseline, err := imageio.ParseReference("oci-archive:" + filepath.Join(repoRoot(t), "testdata/fixtures/v1_oci.tar"))
+	require.NoError(t, err)
+
+	out := filepath.Join(t.TempDir(), "v2.tar")
+	require.NoError(t, importer.Import(ctx, importer.Options{
+		DeltaPath:    delta,
+		BaselineRef:  baseline,
+		OutputPath:   out,
+		OutputFormat: "docker-archive",
+		AllowConvert: true,
+	}))
+	fi, err := os.Stat(out)
+	require.NoError(t, err)
+	require.Greater(t, fi.Size(), int64(0))
 }
 
 func TestImport_DryRun_OnlyProbes_Missing(t *testing.T) {
@@ -156,7 +294,7 @@ func TestImport_DryRun_OnlyProbes_Missing(t *testing.T) {
 		DeltaPath:    delta,
 		BaselineRef:  unrelated,
 		OutputPath:   filepath.Join(t.TempDir(), "x.tar"),
-		OutputFormat: "docker-archive",
+		OutputFormat: "oci-archive",
 	})
 	require.NoError(t, err)
 	require.False(t, report.AllReachable)

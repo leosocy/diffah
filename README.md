@@ -54,9 +54,16 @@ diffah import \
   --output   ./app_v2.tar
 ```
 
-The output is a `docker-archive` by default (compatible with `docker load`).
-Use `--output-format oci-archive` or `--output-format dir` to emit other
-formats.
+By default `--output-format` is `auto`: the output format is chosen to
+match the source image's manifest media type so the reconstructed bytes
+(and therefore the manifest digest) are identical to the original. Pass
+`--output-format docker-archive`, `oci-archive`, or `dir` to override.
+
+`dir` preserves bytes regardless of source. Explicitly picking
+`docker-archive` for an OCI source (or `oci-archive` for a Docker schema 2
+source) triggers a manifest media-type conversion, which changes every
+layer and manifest digest. diffah refuses this by default; pass
+`--allow-convert` to acknowledge the digest drift.
 
 Preview what a delta contains and how much it saves:
 

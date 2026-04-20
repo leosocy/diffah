@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/leosocy/diffah/internal/imageio"
-	"github.com/leosocy/diffah/pkg/exporter"
+	"github.com/leosocy/diffah/pkg/diff"
 	"github.com/leosocy/diffah/pkg/importer"
 )
 
@@ -24,19 +24,25 @@ func TestImport_Matrix(t *testing.T) {
 		baselineFixture string
 		sourceTransport string // "oci-archive" or "docker-archive"
 		outputFormat    string
+		allowConvert    bool
+		wantConflict    bool
 	}{
-		{"oci→docker-archive", "v2_oci.tar", "v1_oci.tar", "oci-archive", "docker-archive"},
-		{"oci→oci-archive", "v2_oci.tar", "v1_oci.tar", "oci-archive", "oci-archive"},
-		{"oci→dir", "v2_oci.tar", "v1_oci.tar", "oci-archive", "dir"},
-		{"schema2→docker-archive", "v2_s2.tar", "v1_s2.tar", "docker-archive", "docker-archive"},
-		{"schema2→oci-archive", "v2_s2.tar", "v1_s2.tar", "docker-archive", "oci-archive"},
+		{"oci→docker-archive rejected", "v2_oci.tar", "v1_oci.tar", "oci-archive", "docker-archive", false, true},
+		{"oci→docker-archive with allow", "v2_oci.tar", "v1_oci.tar", "oci-archive", "docker-archive", true, false},
+		{"oci→oci-archive match", "v2_oci.tar", "v1_oci.tar", "oci-archive", "oci-archive", false, false},
+		{"oci→auto", "v2_oci.tar", "v1_oci.tar", "oci-archive", "", false, false},
+		{"oci→dir", "v2_oci.tar", "v1_oci.tar", "oci-archive", "dir", false, false},
+		{"schema2→docker-archive match", "v2_s2.tar", "v1_s2.tar", "docker-archive", "docker-archive", false, false},
+		{"schema2→auto", "v2_s2.tar", "v1_s2.tar", "docker-archive", "", false, false},
+		{"schema2→oci-archive rejected", "v2_s2.tar", "v1_s2.tar", "docker-archive", "oci-archive", false, true},
+		{"schema2→oci-archive with allow", "v2_s2.tar", "v1_s2.tar", "docker-archive", "oci-archive", true, false},
+		{"schema2→dir", "v2_s2.tar", "v1_s2.tar", "docker-archive", "dir", false, false},
 	}
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			root := repoRoot(t)
 
-			// Build delta using the matching transport for both target and baseline.
 			var delta string
 			if tc.sourceTransport == "oci-archive" {
 				delta = buildDelta(t, tc.targetFixture, tc.baselineFixture)
@@ -54,7 +60,15 @@ func TestImport_Matrix(t *testing.T) {
 				BaselineRef:  baselineRef,
 				OutputFormat: tc.outputFormat,
 				OutputPath:   out,
+				AllowConvert: tc.allowConvert,
 			})
+			if tc.wantConflict {
+				var conflict *diff.ErrIncompatibleOutputFormat
+				require.ErrorAs(t, err, &conflict)
+				_, statErr := os.Stat(out)
+				require.True(t, os.IsNotExist(statErr))
+				return
+			}
 			require.NoError(t, err)
 
 			info, err := os.Stat(out)
@@ -66,25 +80,4 @@ func TestImport_Matrix(t *testing.T) {
 			}
 		})
 	}
-}
-
-// buildDeltaS2 is a schema-2 variant of buildDelta used by the matrix test.
-// It uses docker-archive: for both target and baseline.
-func buildDeltaS2(t *testing.T, targetTar, baselineTar string) string {
-	t.Helper()
-	ctx := context.Background()
-	root := repoRoot(t)
-
-	target, err := imageio.ParseReference(
-		"docker-archive:" + filepath.Join(root, "testdata/fixtures", targetTar))
-	require.NoError(t, err)
-	baseline, err := imageio.ParseReference(
-		"docker-archive:" + filepath.Join(root, "testdata/fixtures", baselineTar))
-	require.NoError(t, err)
-
-	out := filepath.Join(t.TempDir(), "delta.tar")
-	require.NoError(t, exporter.Export(ctx, exporter.Options{
-		TargetRef: target, BaselineRef: baseline, OutputPath: out, ToolVersion: "test",
-	}))
-	return out
 }
