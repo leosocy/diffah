@@ -177,3 +177,80 @@ func TestPlanner_SizeTieBrokenByFirstSeen(t *testing.T) {
 	require.Equal(t, digest.FromBytes(a), entries[0].PatchFromDigest,
 		"tie: first-seen baseline entry wins")
 }
+
+// fakeFingerprinter serves a pre-canned fingerprint (or error) per blob,
+// keyed by the SHA-256 digest of the blob bytes. Absent keys return an
+// empty Fingerprint (not an error) — lets tests assert "this baseline
+// fingerprinted, but with no shared content."
+type fakeFingerprinter struct {
+	fps  map[digest.Digest]Fingerprint
+	errs map[digest.Digest]error
+}
+
+func (f *fakeFingerprinter) Fingerprint(
+	_ context.Context, _ string, blob []byte,
+) (Fingerprint, error) {
+	key := digest.FromBytes(blob)
+	if err, ok := f.errs[key]; ok {
+		return nil, err
+	}
+	if fp, ok := f.fps[key]; ok {
+		return fp, nil
+	}
+	return Fingerprint{}, nil
+}
+
+func TestPlanner_EagerBaselineFingerprinting(t *testing.T) {
+	// Two baselines: fp[a] has shared content, fp[b] is empty.
+	aBlob := []byte("baseline-a-raw-bytes")
+	bBlob := []byte("baseline-b-raw-bytes")
+	sharedDigest := digest.FromBytes([]byte("shared-file-content"))
+
+	blobs := blobMap{
+		digest.FromBytes(aBlob): aBlob,
+		digest.FromBytes(bBlob): bBlob,
+	}
+	fake := &fakeFingerprinter{
+		fps: map[digest.Digest]Fingerprint{
+			digest.FromBytes(aBlob): {sharedDigest: 1024},
+			digest.FromBytes(bBlob): {},
+		},
+	}
+	baseline := []BaselineLayerMeta{
+		{Digest: digest.FromBytes(aBlob), Size: int64(len(aBlob)), MediaType: "m"},
+		{Digest: digest.FromBytes(bBlob), Size: int64(len(bBlob)), MediaType: "m"},
+	}
+
+	p := NewPlanner(baseline, blobs.read, fake)
+	// Run with empty shipped list to trigger ensureBaselineFP without
+	// any per-layer work.
+	_, _, err := p.Run(context.Background(), nil)
+	require.NoError(t, err)
+
+	require.NotNil(t, p.baselineFP)
+	require.Equal(t,
+		Fingerprint{sharedDigest: 1024},
+		p.baselineFP[digest.FromBytes(aBlob)])
+	require.Equal(t, Fingerprint{}, p.baselineFP[digest.FromBytes(bBlob)])
+}
+
+func TestPlanner_EagerFingerprinting_FailedBaselineIsNil(t *testing.T) {
+	aBlob := []byte("baseline-a")
+	blobs := blobMap{digest.FromBytes(aBlob): aBlob}
+	fake := &fakeFingerprinter{
+		errs: map[digest.Digest]error{
+			digest.FromBytes(aBlob): ErrFingerprintFailed,
+		},
+	}
+	baseline := []BaselineLayerMeta{
+		{Digest: digest.FromBytes(aBlob), Size: int64(len(aBlob)), MediaType: "m"},
+	}
+
+	p := NewPlanner(baseline, blobs.read, fake)
+	_, _, err := p.Run(context.Background(), nil)
+	require.NoError(t, err)
+
+	fp, ok := p.baselineFP[digest.FromBytes(aBlob)]
+	require.True(t, ok, "key must be present even when fingerprinting failed")
+	require.Nil(t, fp, "failed fingerprint must be recorded as nil")
+}

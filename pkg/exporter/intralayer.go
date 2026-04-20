@@ -69,7 +69,7 @@ func NewPlanner(
 func (p *Planner) Run(
 	ctx context.Context, shipped []diff.BlobRef,
 ) ([]diff.BlobRef, map[digest.Digest][]byte, error) {
-	_ = ctx // reserved for future cancellation plumbing
+	p.ensureBaselineFP(ctx)
 	entries := make([]diff.BlobRef, 0, len(shipped))
 	payloads := make(map[digest.Digest][]byte, len(shipped))
 
@@ -136,6 +136,33 @@ func (p *Planner) pickClosest(want int64) (BaselineLayerMeta, bool) {
 		}
 	}
 	return best, true
+}
+
+// ensureBaselineFP fingerprints every baseline layer exactly once per
+// Planner instance. Failures are recorded as nil entries in
+// baselineFP so callers can tell "no fingerprint available" from
+// "empty fingerprint" without a separate presence check.
+func (p *Planner) ensureBaselineFP(ctx context.Context) {
+	p.fpOnce.Do(func() {
+		fp := p.fingerprint
+		if fp == nil {
+			fp = DefaultFingerprinter{}
+		}
+		p.baselineFP = make(map[digest.Digest]Fingerprint, len(p.baseline))
+		for _, b := range p.baseline {
+			blob, err := p.readBlob(b.Digest)
+			if err != nil {
+				p.baselineFP[b.Digest] = nil
+				continue
+			}
+			f, err := fp.Fingerprint(ctx, b.MediaType, blob)
+			if err != nil {
+				p.baselineFP[b.Digest] = nil
+				continue
+			}
+			p.baselineFP[b.Digest] = f
+		}
+	})
 }
 
 func absDelta(a, b int64) int64 {
