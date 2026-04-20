@@ -203,6 +203,13 @@ func buildSidecar(
 
 	plan := diff.ComputePlan(targetLayers, baselineDigests)
 
+	// Default all shipped entries to full encoding until the IntraLayerPlanner
+	// (Task 5) overrides selected entries to patch encoding.
+	for i := range plan.ShippedInDelta {
+		plan.ShippedInDelta[i].Encoding = diff.EncodingFull
+		plan.ShippedInDelta[i].ArchiveSize = plan.ShippedInDelta[i].Size
+	}
+
 	platform := opts.Platform
 	if platform == "" {
 		platform = derivePlatformFromConfig(dir, parsed)

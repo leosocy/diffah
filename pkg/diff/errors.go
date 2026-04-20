@@ -66,3 +66,32 @@ type ErrDigestMismatch struct{ Where, Want, Got string }
 func (e *ErrDigestMismatch) Error() string {
 	return fmt.Sprintf("%s: digest mismatch: want %s, got %s", e.Where, e.Want, e.Got)
 }
+
+// ErrIntraLayerAssemblyMismatch reports that a patched layer's computed
+// sha256 did not match the manifest-declared digest. Import must fail fast
+// with no partial output.
+type ErrIntraLayerAssemblyMismatch struct{ Digest, Got string }
+
+func (e *ErrIntraLayerAssemblyMismatch) Error() string {
+	return fmt.Sprintf("intra-layer assembly mismatch: expected %s, got %s",
+		e.Digest, e.Got)
+}
+
+// ErrBaselineMissingPatchRef is the patch-specific sibling of
+// ErrBaselineMissingBlob. Raised when a shipped layer with encoding=patch
+// names a patch_from_digest that is absent from the provided baseline.
+type ErrBaselineMissingPatchRef struct{ Digest, Source string }
+
+func (e *ErrBaselineMissingPatchRef) Error() string {
+	return fmt.Sprintf("baseline %q does not provide patch reference blob %s",
+		e.Source, e.Digest)
+}
+
+// ErrIntraLayerUnsupported is raised on the exporter side when the current
+// options make intra-layer mode impossible (e.g. baseline is manifest-only
+// with no blob bytes).
+type ErrIntraLayerUnsupported struct{ Reason string }
+
+func (e *ErrIntraLayerUnsupported) Error() string {
+	return fmt.Sprintf("intra-layer mode unsupported: %s", e.Reason)
+}

@@ -88,6 +88,74 @@ func (s Sidecar) validate() error {
 		return &ErrSidecarSchema{Reason: "target.manifest_digest is required"}
 	case s.RequiredFromBaseline == nil:
 		return &ErrSidecarSchema{Reason: "required_from_baseline is required (may be empty slice)"}
+	case s.ShippedInDelta == nil:
+		return &ErrSidecarSchema{Reason: "shipped_in_delta is required (may be empty slice)"}
+	}
+	for i, b := range s.RequiredFromBaseline {
+		if err := validateRequiredEntry(i, b); err != nil {
+			return err
+		}
+	}
+	for i, b := range s.ShippedInDelta {
+		if err := validateShippedEntry(i, b); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateRequiredEntry: required-from-baseline entries must not carry any
+// intra-layer fields. Those fields describe archive-side encoding and
+// baseline-fetched blobs have no archive-side bytes.
+func validateRequiredEntry(i int, b BlobRef) error {
+	switch {
+	case b.Encoding != "",
+		b.Codec != "",
+		b.PatchFromDigest != "",
+		b.ArchiveSize != 0:
+		return &ErrSidecarSchema{Reason: fmt.Sprintf(
+			"required_from_baseline[%d] must not set encoding/codec/patch_from_digest/archive_size",
+			i)}
+	}
+	return nil
+}
+
+// validateShippedEntry: every shipped entry must declare an encoding, and
+// that encoding's peer fields must be consistent with the declaration.
+func validateShippedEntry(i int, b BlobRef) error {
+	switch b.Encoding {
+	case "":
+		return &ErrSidecarSchema{Reason: fmt.Sprintf(
+			"shipped_in_delta[%d].encoding is required", i)}
+	case EncodingFull:
+		if b.Codec != "" || b.PatchFromDigest != "" {
+			return &ErrSidecarSchema{Reason: fmt.Sprintf(
+				"shipped_in_delta[%d] encoding=full must not set codec/patch_from_digest",
+				i)}
+		}
+		if b.ArchiveSize != b.Size {
+			return &ErrSidecarSchema{Reason: fmt.Sprintf(
+				"shipped_in_delta[%d] encoding=full requires archive_size == size (got %d vs %d)",
+				i, b.ArchiveSize, b.Size)}
+		}
+	case EncodingPatch:
+		if b.Codec == "" {
+			return &ErrSidecarSchema{Reason: fmt.Sprintf(
+				"shipped_in_delta[%d] encoding=patch requires codec", i)}
+		}
+		if b.PatchFromDigest == "" {
+			return &ErrSidecarSchema{Reason: fmt.Sprintf(
+				"shipped_in_delta[%d] encoding=patch requires patch_from_digest", i)}
+		}
+		if b.ArchiveSize <= 0 || b.ArchiveSize >= b.Size {
+			return &ErrSidecarSchema{Reason: fmt.Sprintf(
+				"shipped_in_delta[%d] encoding=patch requires 0 < archive_size < size (got %d vs %d)",
+				i, b.ArchiveSize, b.Size)}
+		}
+	default:
+		return &ErrSidecarSchema{Reason: fmt.Sprintf(
+			"shipped_in_delta[%d] encoding=%q is not recognized",
+			i, b.Encoding)}
 	}
 	return nil
 }
