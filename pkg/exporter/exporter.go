@@ -252,6 +252,85 @@ func derivePlatformFromConfig(dir string, parsed manifest.Manifest) string {
 	return cfg.OS + "/" + cfg.Architecture
 }
 
+// DryRunStats summarizes an export that was planned but not written.
+type DryRunStats struct {
+	ShippedCount  int
+	ShippedBytes  int64
+	RequiredCount int
+	RequiredBytes int64
+}
+
+// DryRun performs steps 1, 2, and 5 of the export pipeline (see spec §7)
+// without calling copy.Image or writing any output files. It returns the
+// partition statistics that a real export would produce.
+func DryRun(ctx context.Context, opts Options) (DryRunStats, error) {
+	baseline, err := openBaseline(ctx, opts)
+	if err != nil {
+		return DryRunStats{}, err
+	}
+	baselineDigests, err := baseline.LayerDigests(ctx)
+	if err != nil {
+		return DryRunStats{}, fmt.Errorf("load baseline digests: %w", err)
+	}
+
+	parsed, err := loadTargetManifest(ctx, opts)
+	if err != nil {
+		return DryRunStats{}, err
+	}
+
+	targetLayers := make([]diff.BlobRef, 0, len(parsed.LayerInfos()))
+	for _, l := range parsed.LayerInfos() {
+		targetLayers = append(targetLayers, diff.BlobRef{
+			Digest:    l.Digest,
+			Size:      l.Size,
+			MediaType: l.MediaType,
+		})
+	}
+	plan := diff.ComputePlan(targetLayers, baselineDigests)
+
+	stats := DryRunStats{
+		ShippedCount:  len(plan.ShippedInDelta),
+		RequiredCount: len(plan.RequiredFromBaseline),
+	}
+	for _, b := range plan.ShippedInDelta {
+		stats.ShippedBytes += b.Size
+	}
+	for _, b := range plan.RequiredFromBaseline {
+		stats.RequiredBytes += b.Size
+	}
+	return stats, nil
+}
+
+// loadTargetManifest opens the target image source, reads the primary
+// manifest (resolving manifest lists via opts.Platform when present), and
+// returns the parsed manifest.
+func loadTargetManifest(ctx context.Context, opts Options) (manifest.Manifest, error) {
+	src, err := opts.TargetRef.NewImageSource(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("open target source: %w", err)
+	}
+	defer src.Close()
+
+	raw, mime, err := src.GetManifest(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("read target manifest: %w", err)
+	}
+
+	if manifest.MIMETypeIsMultiImage(mime) {
+		chosen, err := selectPlatform(ctx, src, raw, mime, opts.Platform, opts.TargetRef.StringWithinTransport())
+		if err != nil {
+			return nil, err
+		}
+		raw, mime = chosen.raw, chosen.mime
+	}
+
+	parsed, err := manifest.FromBlob(raw, mime)
+	if err != nil {
+		return nil, fmt.Errorf("parse target manifest: %w", err)
+	}
+	return parsed, nil
+}
+
 // verifyExport re-reads the sidecar from the packed archive and confirms that
 // the manifest digest is preserved faithfully.
 func verifyExport(archivePath string, want diff.Sidecar) error {

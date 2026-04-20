@@ -2,6 +2,7 @@ package exporter_test
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -94,4 +95,91 @@ func TestExport_NoBaselineReturnsError(t *testing.T) {
 		OutputPath: filepath.Join(t.TempDir(), "d.tar"),
 	})
 	require.Error(t, err)
+}
+
+// extractManifestToFile reads the manifest from an image ref and writes it
+// to a temp file, returning the path. Used to test manifest-only baseline.
+func extractManifestToFile(t *testing.T, imageRef string) string {
+	t.Helper()
+	ctx := context.Background()
+	ref, err := imageio.ParseReference(imageRef)
+	require.NoError(t, err)
+	src, err := ref.NewImageSource(ctx, nil)
+	require.NoError(t, err)
+	defer src.Close()
+	raw, _, err := src.GetManifest(ctx, nil)
+	require.NoError(t, err)
+
+	path := filepath.Join(t.TempDir(), "manifest.json")
+	require.NoError(t, os.WriteFile(path, raw, 0o644))
+	return path
+}
+
+func TestExport_ManifestOnlyBaseline(t *testing.T) {
+	ctx := context.Background()
+	baselinePath := extractManifestToFile(t,
+		"oci-archive:"+filepath.Join(repoRoot(t), "testdata/fixtures/v1_oci.tar"))
+
+	out := filepath.Join(t.TempDir(), "delta.tar")
+	targetRef, err := imageio.ParseReference(
+		"oci-archive:" + filepath.Join(repoRoot(t), "testdata/fixtures/v2_oci.tar"))
+	require.NoError(t, err)
+
+	err = exporter.Export(ctx, exporter.Options{
+		TargetRef:            targetRef,
+		BaselineManifestPath: baselinePath,
+		OutputPath:           out,
+		Compress:             "none",
+		ToolVersion:          "test",
+	})
+	require.NoError(t, err)
+
+	sc := readSidecar(t, out)
+	require.Equal(t, baselinePath, sc.Baseline.SourceHint)
+	require.NotEmpty(t, sc.ShippedInDelta)
+	require.NotEmpty(t, sc.RequiredFromBaseline)
+}
+
+func TestExport_DryRun_DoesNotWriteOutput(t *testing.T) {
+	ctx := context.Background()
+	out := filepath.Join(t.TempDir(), "should-not-exist.tar")
+
+	targetRef, err := imageio.ParseReference(
+		"oci-archive:" + filepath.Join(repoRoot(t), "testdata/fixtures/v2_oci.tar"))
+	require.NoError(t, err)
+	baselineRef, err := imageio.ParseReference(
+		"oci-archive:" + filepath.Join(repoRoot(t), "testdata/fixtures/v1_oci.tar"))
+	require.NoError(t, err)
+
+	stats, err := exporter.DryRun(ctx, exporter.Options{
+		TargetRef:   targetRef,
+		BaselineRef: baselineRef,
+		OutputPath:  out,
+		ToolVersion: "test",
+	})
+	require.NoError(t, err)
+	require.Greater(t, stats.ShippedCount, 0)
+	require.Greater(t, stats.ShippedBytes, int64(0))
+	require.Greater(t, stats.RequiredCount, 0)
+
+	// Output must not exist.
+	_, err = os.Stat(out)
+	require.True(t, os.IsNotExist(err))
+}
+
+func TestExport_DryRun_ManifestOnlyBaseline(t *testing.T) {
+	ctx := context.Background()
+	baselinePath := extractManifestToFile(t,
+		"oci-archive:"+filepath.Join(repoRoot(t), "testdata/fixtures/v1_oci.tar"))
+
+	targetRef, err := imageio.ParseReference(
+		"oci-archive:" + filepath.Join(repoRoot(t), "testdata/fixtures/v2_oci.tar"))
+	require.NoError(t, err)
+
+	stats, err := exporter.DryRun(ctx, exporter.Options{
+		TargetRef:            targetRef,
+		BaselineManifestPath: baselinePath,
+	})
+	require.NoError(t, err)
+	require.Greater(t, stats.ShippedCount, 0)
 }
