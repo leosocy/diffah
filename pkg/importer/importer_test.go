@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/opencontainers/go-digest"
 	"github.com/stretchr/testify/require"
@@ -300,4 +301,52 @@ func TestImport_DryRun_OnlyProbes_Missing(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, report.AllReachable)
 	require.NotEmpty(t, report.MissingDigests)
+}
+
+func TestDryRun_PatchRefs_DetectedAndReported(t *testing.T) {
+	tmp := t.TempDir()
+	deltaDir := filepath.Join(tmp, "delta")
+	require.NoError(t, os.MkdirAll(deltaDir, 0o755))
+
+	sc := diff.Sidecar{
+		Version: "v1", Tool: "diffah", ToolVersion: "t", Platform: "linux/amd64",
+		CreatedAt: time.Now().UTC(),
+		Target: diff.ImageRef{
+			ManifestDigest: "sha256:tgt",
+			ManifestSize:   1,
+			MediaType:      "application/vnd.oci.image.manifest.v1+json",
+		},
+		Baseline: diff.BaselineRef{
+			ManifestDigest: "sha256:b",
+			MediaType:      "application/vnd.oci.image.manifest.v1+json",
+		},
+		RequiredFromBaseline: []diff.BlobRef{},
+		ShippedInDelta: []diff.BlobRef{{
+			Digest: "sha256:tgt", Size: 100,
+			MediaType:       "application/vnd.oci.image.layer.v1.tar+gzip",
+			Encoding:        diff.EncodingPatch,
+			Codec:           "zstd-patch",
+			PatchFromDigest: "sha256:missing-ref",
+			ArchiveSize:     50,
+		}},
+	}
+	raw, err := sc.Marshal()
+	require.NoError(t, err)
+
+	deltaPath := filepath.Join(tmp, "delta.tar")
+	require.NoError(t, archive.Pack(deltaDir, raw, deltaPath, archive.CompressNone))
+
+	baselinePath := filepath.Join(repoRoot(t), "testdata/fixtures/v1_oci.tar")
+	baselineRef, err := imageio.ParseReference("oci-archive:" + baselinePath)
+	require.NoError(t, err)
+
+	report, err := importer.DryRun(context.Background(), importer.Options{
+		DeltaPath:   deltaPath,
+		BaselineRef: baselineRef,
+		OutputPath:  filepath.Join(tmp, "out.tar"),
+	})
+	require.NoError(t, err)
+	require.False(t, report.AllReachable)
+	require.Equal(t, 1, report.RequiredPatchRefs)
+	require.Equal(t, []string{"sha256:missing-ref"}, report.MissingPatchRefs)
 }

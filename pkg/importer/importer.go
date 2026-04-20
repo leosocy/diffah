@@ -263,10 +263,12 @@ func verifyImport(opts Options, sidecar *diff.Sidecar, resolvedFmt string) error
 // DryRunReport summarizes a dry-run import: which required baseline blobs
 // are reachable and which (if any) are missing.
 type DryRunReport struct {
-	AllReachable   bool
-	MissingDigests []string
-	RequiredBlobs  int
-	BaselineSource string
+	AllReachable     bool
+	MissingDigests   []string
+	RequiredBlobs    int
+	MissingPatchRefs []string
+	RequiredPatchRefs int
+	BaselineSource   string
 }
 
 // DryRun performs steps 1-4 of the import pipeline (extract, parse, open
@@ -316,7 +318,21 @@ func DryRun(ctx context.Context, opts Options) (DryRunReport, error) {
 			report.MissingDigests = append(report.MissingDigests, string(req.Digest))
 		}
 	}
-	report.AllReachable = len(report.MissingDigests) == 0
+	seen := make(map[digest.Digest]struct{})
+	for _, e := range sidecar.ShippedInDelta {
+		if e.Encoding != diff.EncodingPatch {
+			continue
+		}
+		if _, dup := seen[e.PatchFromDigest]; dup {
+			continue
+		}
+		seen[e.PatchFromDigest] = struct{}{}
+		if _, ok := have[e.PatchFromDigest]; !ok {
+			report.MissingPatchRefs = append(report.MissingPatchRefs, string(e.PatchFromDigest))
+		}
+	}
+	report.RequiredPatchRefs = len(seen)
+	report.AllReachable = len(report.MissingDigests) == 0 && len(report.MissingPatchRefs) == 0
 	return report, nil
 }
 
