@@ -2,6 +2,9 @@
 package cmd
 
 import (
+	"fmt"
+	"io"
+
 	"github.com/spf13/cobra"
 )
 
@@ -21,9 +24,15 @@ full target image from any baseline source on the consuming side.`,
 	SilenceErrors: true,
 }
 
-// Execute runs the root command and returns any error encountered.
-func Execute() error {
-	return rootCmd.Execute()
+// Execute runs the root command. On error it writes a "diffah: <msg>"
+// line to stderr so operators see why a non-zero exit happened;
+// SilenceErrors keeps cobra itself quiet so the message is not duplicated.
+func Execute(stderr io.Writer) error {
+	err := rootCmd.Execute()
+	if err != nil {
+		fmt.Fprintln(stderr, "diffah:", err)
+	}
+	return err
 }
 
 func init() {
