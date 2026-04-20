@@ -120,7 +120,7 @@ func openCompositeSource(
 		_ = baselineSrc.Close()
 		return nil, nil, err
 	}
-	composite := NewCompositeSource(deltaSrc, baselineSrc)
+	composite := NewCompositeSource(deltaSrc, baselineSrc, sidecar)
 	return composite, &compositeRef{inner: deltaRef, composite: composite}, nil
 }
 
