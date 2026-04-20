@@ -1,3 +1,6 @@
+# Git worktrees (used for isolated development workspaces)
+.worktrees/
+
 ### VisualStudioCode template
 .vscode/*
 !.vscode/settings.json
