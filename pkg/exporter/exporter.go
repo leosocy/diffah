@@ -36,6 +36,9 @@ type Options struct {
 	//   "auto" (default, also when empty) — run the planner, choose min(patch, full_zst) per shipped layer
 	//   "off" — every shipped layer stays encoding=full (v1-equivalent)
 	IntraLayer string
+	// CreatedAt is the timestamp written to the sidecar. If zero, defaults to time.Now().
+	// Used primarily for deterministic testing.
+	CreatedAt time.Time
 }
 
 // Export performs the full export pipeline described in spec §7:
@@ -74,7 +77,11 @@ func Export(ctx context.Context, opts Options) error {
 		return err
 	}
 
-	sidecar, err := buildSidecar(ctx, tmpDir, baseline, baselineDigests, opts)
+	createdAt := opts.CreatedAt
+	if createdAt.IsZero() {
+		createdAt = time.Now().UTC()
+	}
+	sidecar, err := buildSidecar(ctx, tmpDir, baseline, baselineDigests, opts, createdAt)
 	if err != nil {
 		return err
 	}
@@ -195,7 +202,8 @@ func buildCopyOptions(platform string) (*copy.Options, error) {
 // buildSidecar reads the manifest written by copy.Image and constructs the
 // Sidecar that describes the delta partition.
 func buildSidecar(
-	ctx context.Context, dir string, baseline BaselineSet, baselineDigests []digest.Digest, opts Options,
+	ctx context.Context, dir string, baseline BaselineSet, baselineDigests []digest.Digest,
+	opts Options, createdAt time.Time,
 ) (diff.Sidecar, error) {
 	manifestBytes, mediaType, err := oci.ReadDirManifest(dir)
 	if err != nil {
@@ -236,7 +244,7 @@ func buildSidecar(
 		Version:     diff.SchemaVersionV1,
 		Tool:        "diffah",
 		ToolVersion: opts.ToolVersion,
-		CreatedAt:   time.Now().UTC(),
+		CreatedAt:   createdAt,
 		Platform:    platform,
 		Target: diff.ImageRef{
 			ManifestDigest: digest.FromBytes(manifestBytes),
