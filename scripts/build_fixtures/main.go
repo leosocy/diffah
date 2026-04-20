@@ -669,13 +669,21 @@ func buildFixtures(ctx context.Context) error {
 	// --- baseline layers ---
 	// bSmall: 9 shared + 1 unique, each 1 KB, ≈ 9.5 KB total
 	bSmallFiles := overlapFiles(9, 1, 1000, 7000, v4Unit, 512)
-	// bAppV1: 10 shared + 10 unique, each 15 KB — 50%/50% mix, ≈ 300 KB
-	bAppV1Files := overlapFiles(10, 10, 2000, 8000, 15*v4Unit, 15*v4Unit)
-	// bDataV1: 19 shared + 1 unique, each 10 KB — 95%/5% mix, ≈ 200 KB
-	bDataV1Files := overlapFiles(19, 1, 3000, 9000, 10*v4Unit, 10*v4Unit)
-	// bSizeTrap: 10 all-unique files of 10 KB → ≈ 100 KB compressed raw, but
-	// same *uncompressed* tar size as tApp so a size-based picker prefers it.
-	// We use 10 unique files × 20 KB = 200 KB to match tApp's uncompressed size.
+	// bAppV1: 10 shared (10 KB each, shareSeed=2000) + 10 unique (15 KB each).
+	// Shared files use the same seed+size as tApp, so fingerprint overlap is 50%.
+	// Unique files are larger (15 KB vs 10 KB), making bAppV1 ≈ 250 KB total —
+	// strictly larger than tApp (≈ 200 KB). A content-match picker selects bAppV1;
+	// a size-closest picker would NOT select bAppV1 because bSizeTrap is closer.
+	bAppV1Files := overlapFiles(10, 10, 2000, 8000, 10*v4Unit, 15*v4Unit)
+	// bDataV1: 10 shared + 3 unique, each 10 KB — ≈ 130 KB total.
+	// sharedSize must match tData (same shareSeed=3000, sharedSize=10*v4Unit) so
+	// fingerprint overlap is non-zero for the tData→bDataV1 pair.
+	// Kept well away from tApp's ≈ 200 KB so bDataV1 is not size-closest.
+	bDataV1Files := overlapFiles(10, 3, 3000, 9000, 10*v4Unit, 10*v4Unit)
+	// bSizeTrap: 10 all-unique files × 20 KB ≈ 210 KB compressed.
+	// No shared content with tApp (zero fingerprint overlap), but compressed size
+	// is closest to tApp's ≈ 200 KB. A size-closest picker selects bSizeTrap;
+	// a content-similarity picker must NOT (it picks bAppV1 instead).
 	bSizeTrapFiles := overlapFiles(0, 10, 0, 1_000_000, 0, 20*v4Unit)
 	// bDecoy: 5 all-unique files of 4 KB, ≈ 20 KB
 	bDecoyFiles := overlapFiles(0, 5, 0, 2_000_000, 0, 4*v4Unit)
@@ -683,11 +691,11 @@ func buildFixtures(ctx context.Context) error {
 	// --- target layers ---
 	// tSmall: matches bSmall on shared files (same shareSeed=1000), different unique
 	tSmallFiles := overlapFiles(9, 1, 1000, 11000, v4Unit, 512)
-	// tApp: 10 shared + 10 unique, each 10 KB → ≈ 200 KB; content-matches bAppV1
-	// (same shareSeed=2000) but smaller size (200 KB vs 300 KB). bSizeTrap also
-	// ≈ 200 KB but has zero shared files with tApp.
+	// tApp: 10 shared (10 KB, shareSeed=2000) + 10 unique (10 KB) → ≈ 200 KB.
+	// Content-matches bAppV1 (same shareSeed=2000, same sharedSize=10*v4Unit).
+	// bSizeTrap is closest by compressed size but has zero content overlap.
 	tAppFiles := overlapFiles(10, 10, 2000, 12000, 10*v4Unit, 10*v4Unit)
-	// tData: matches bDataV1 on shared files (same shareSeed=3000), different unique
+	// tData: matches bDataV1 on shared files (same shareSeed=3000, sharedSize=10*v4Unit)
 	tDataFiles := overlapFiles(19, 1, 3000, 13000, 10*v4Unit, 10*v4Unit)
 
 	bSmall, bSmallDiff, bSmallBlobD := buildSharedLayerBlob(bSmallFiles)
