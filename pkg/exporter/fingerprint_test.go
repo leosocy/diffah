@@ -185,13 +185,30 @@ func TestDefaultFingerprinter_TruncatedGzip_WrapsErr(t *testing.T) {
 	gw := gzip.NewWriter(&gzBuf)
 	_, _ = gw.Write(tarBlob)
 	_ = gw.Close()
-	// Truncate enough to break gzip trailer (checksum/size)
+	// Truncate deflate payload (not just the 8-byte gzip trailer): gzip.Reader
+	// validates CRC/ISIZE lazily, so a trailer-only truncation would let
+	// tar.Reader reach io.EOF before the gzip layer surfaces an error.
 	truncated := gzBuf.Bytes()[:len(gzBuf.Bytes())-20]
 
 	_, err := (DefaultFingerprinter{}).Fingerprint(
 		context.Background(),
 		"application/vnd.oci.image.layer.v1.tar+gzip",
 		truncated,
+	)
+	require.Error(t, err)
+	require.True(t, errors.Is(err, ErrFingerprintFailed))
+}
+
+func TestDefaultFingerprinter_CorruptGzipHeader_WrapsErr(t *testing.T) {
+	// Valid gzip magic is 0x1F 0x8B. Replacing it forces gzip.NewReader
+	// to fail at construction — exercising openDecompressor's gzip
+	// error-wrapping branch, distinct from the truncated-deflate path
+	// which surfaces from fingerprintTar.
+	corrupt := []byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}
+	_, err := (DefaultFingerprinter{}).Fingerprint(
+		context.Background(),
+		"application/vnd.oci.image.layer.v1.tar+gzip",
+		corrupt,
 	)
 	require.Error(t, err)
 	require.True(t, errors.Is(err, ErrFingerprintFailed))
