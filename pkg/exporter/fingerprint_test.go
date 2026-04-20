@@ -257,10 +257,13 @@ func TestDefaultFingerprinter_TruncatedZstd_WrapsErr(t *testing.T) {
 }
 
 func TestDefaultFingerprinter_CorruptZstdHeader_WrapsErr(t *testing.T) {
-	// Valid zstd magic is 0x28 0xB5 0x2F 0xFD. Replacing it forces
-	// zstd.NewReader to fail at construction — exercising
-	// openDecompressor's zstd error-wrapping branch, distinct from
-	// the truncated-frame path which surfaces from fingerprintTar.
+	// Valid zstd magic is 0x28 0xB5 0x2F 0xFD. Unlike gzip.NewReader,
+	// klauspost's NewReader is lazy — construction succeeds on garbage
+	// input and the error surfaces on the first Read. So this test
+	// exercises the same fingerprintTar error path as TruncatedZstd,
+	// not openDecompressor's construction-error branch. Kept for parity
+	// with the gzip counterpart and as a guard if library semantics
+	// change.
 	corrupt := []byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}
 	_, err := (DefaultFingerprinter{}).Fingerprint(
 		context.Background(),
