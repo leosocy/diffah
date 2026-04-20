@@ -6,11 +6,13 @@ package exporter
 import (
 	"archive/tar"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/opencontainers/go-digest"
 )
@@ -52,16 +54,35 @@ var ErrFingerprintFailed = errors.New("fingerprint failed")
 // compressors are added in later tasks.
 type DefaultFingerprinter struct{}
 
-// Fingerprint implements Fingerprinter. This first revision handles only
-// plain tar; it always opens the blob as a tar reader. Subsequent tasks
-// extend to gzip+tar and zstd+tar layers.
-// mediaType is consumed starting in Task 3 (openDecompressor dispatch).
-//
-//nolint:revive // unused-parameter becomes used in Task 3
+// Fingerprint implements Fingerprinter. Dispatches to openDecompressor to
+// pick the right decompression strategy based on media type (plain tar,
+// gzip+tar, or zstd+tar). Subsequent tasks extend beyond gzip.
 func (DefaultFingerprinter) Fingerprint(
 	ctx context.Context, mediaType string, blob []byte,
 ) (Fingerprint, error) {
-	return fingerprintTar(ctx, bytes.NewReader(blob))
+	r, closer, err := openDecompressor(mediaType, blob)
+	if err != nil {
+		return nil, err
+	}
+	defer closer()
+	return fingerprintTar(ctx, r)
+}
+
+// openDecompressor picks a decompression reader based on the media type
+// suffix. Returns (reader, closer, err). Callers must invoke closer
+// (deferrable) exactly once whether or not fingerprinting succeeded.
+// Errors wrap ErrFingerprintFailed.
+func openDecompressor(mediaType string, blob []byte) (io.Reader, func(), error) {
+	switch {
+	case strings.HasSuffix(mediaType, "+gzip"):
+		gz, err := gzip.NewReader(bytes.NewReader(blob))
+		if err != nil {
+			return nil, func() {}, fmt.Errorf("%w: gzip: %w", ErrFingerprintFailed, err)
+		}
+		return gz, func() { _ = gz.Close() }, nil
+	default:
+		return bytes.NewReader(blob), func() {}, nil
+	}
 }
 
 // fingerprintTar streams through a tar reader, hashing every regular-file

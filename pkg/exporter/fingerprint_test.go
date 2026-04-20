@@ -3,6 +3,7 @@ package exporter
 import (
 	"archive/tar"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"errors"
 	"testing"
@@ -148,6 +149,49 @@ func TestDefaultFingerprinter_TarParseFailure_WrapsErr(t *testing.T) {
 		context.Background(),
 		"application/vnd.oci.image.layer.v1.tar",
 		[]byte{0xFF, 0xFE, 0xFD, 0xFC, 0xFB, 0xFA, 0xF9, 0xF8},
+	)
+	require.Error(t, err)
+	require.True(t, errors.Is(err, ErrFingerprintFailed))
+}
+
+func TestDefaultFingerprinter_GzipTar(t *testing.T) {
+	data := []byte("hello via gzip")
+	tarBlob := buildTarBlob(t, tarEntry{
+		name: "a", data: data, typeflag: tar.TypeReg,
+	})
+	var gzBuf bytes.Buffer
+	gw := gzip.NewWriter(&gzBuf)
+	_, err := gw.Write(tarBlob)
+	require.NoError(t, err)
+	require.NoError(t, gw.Close())
+
+	fp, err := (DefaultFingerprinter{}).Fingerprint(
+		context.Background(),
+		"application/vnd.oci.image.layer.v1.tar+gzip",
+		gzBuf.Bytes(),
+	)
+	require.NoError(t, err)
+	require.Equal(t,
+		Fingerprint{digest.FromBytes(data): int64(len(data))},
+		fp,
+	)
+}
+
+func TestDefaultFingerprinter_TruncatedGzip_WrapsErr(t *testing.T) {
+	tarBlob := buildTarBlob(t, tarEntry{
+		name: "a", data: []byte("x"), typeflag: tar.TypeReg,
+	})
+	var gzBuf bytes.Buffer
+	gw := gzip.NewWriter(&gzBuf)
+	_, _ = gw.Write(tarBlob)
+	_ = gw.Close()
+	// Truncate enough to break gzip trailer (checksum/size)
+	truncated := gzBuf.Bytes()[:len(gzBuf.Bytes())-20]
+
+	_, err := (DefaultFingerprinter{}).Fingerprint(
+		context.Background(),
+		"application/vnd.oci.image.layer.v1.tar+gzip",
+		truncated,
 	)
 	require.Error(t, err)
 	require.True(t, errors.Is(err, ErrFingerprintFailed))
