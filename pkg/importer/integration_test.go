@@ -156,7 +156,10 @@ func TestImport_V4ContentMatchBeatsSizeTrap(t *testing.T) {
 	}
 	require.Greater(t, patchCount, 0, "expected at least one patch entry in v4 delta")
 
-	// Round-trip: import produces a target-byte-exact image.
+	// Round-trip: import produces a target-byte-exact image. Assert the
+	// reconstructed manifest digest equals the original target's — a
+	// stricter bar than "file exists" that proves no layer was silently
+	// rewritten by the content-match path.
 	out := filepath.Join(t.TempDir(), "v4_out.tar")
 	err = importer.Import(ctx, importer.Options{
 		DeltaPath:    delta,
@@ -165,9 +168,16 @@ func TestImport_V4ContentMatchBeatsSizeTrap(t *testing.T) {
 		OutputFormat: "oci-archive",
 	})
 	require.NoError(t, err)
-	fi, err := os.Stat(out)
+
+	targetRef, err := imageio.ParseReference(
+		"oci-archive:" + filepath.Join(repoRoot(t), "testdata/fixtures/v4_target_oci.tar"))
 	require.NoError(t, err)
-	require.Greater(t, fi.Size(), int64(0))
+	outRef, err := imageio.ParseReference("oci-archive:" + out)
+	require.NoError(t, err)
+	require.Equal(t,
+		readManifestDigest(ctx, t, targetRef),
+		readManifestDigest(ctx, t, outRef),
+		"round-trip must produce byte-exact manifest digest")
 }
 
 // TestExport_ContentMatchStrictlySmallerThanSizeOnly forces a size-only
