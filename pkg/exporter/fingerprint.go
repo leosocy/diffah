@@ -55,6 +55,9 @@ type DefaultFingerprinter struct{}
 // Fingerprint implements Fingerprinter. This first revision handles only
 // plain tar; it always opens the blob as a tar reader. Subsequent tasks
 // extend to gzip+tar and zstd+tar layers.
+// mediaType is consumed starting in Task 3 (openDecompressor dispatch).
+//
+//nolint:revive // unused-parameter becomes used in Task 3
 func (DefaultFingerprinter) Fingerprint(
 	ctx context.Context, mediaType string, blob []byte,
 ) (Fingerprint, error) {
@@ -81,6 +84,8 @@ func fingerprintTar(ctx context.Context, r io.Reader) (Fingerprint, error) {
 			continue
 		}
 		h := sha256.New()
+		// G110: bounded — bytes.NewReader(blob) in caller fixes total input
+		//nolint:gosec
 		if _, err := io.Copy(h, tr); err != nil {
 			return nil, fmt.Errorf("%w: tar body: %w", ErrFingerprintFailed, err)
 		}
