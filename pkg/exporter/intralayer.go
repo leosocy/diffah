@@ -165,6 +165,77 @@ func (p *Planner) ensureBaselineFP(ctx context.Context) {
 	})
 }
 
+// pickSimilar chooses the baseline most content-similar to the target
+// (byte-weighted tar-entry digest intersection), falling back to
+// pickClosest on any of three unrecoverable conditions:
+//
+//  1. targetFP is nil (target fingerprinting failed)
+//  2. no baseline has a non-nil fingerprint
+//  3. every candidate's score is 0 (no shared content)
+//
+// Ties on score break by size-closest; further ties break by the
+// baseline's index in the sorted-by-digest p.baseline slice.
+func (p *Planner) pickSimilar(
+	targetFP Fingerprint, targetSize int64,
+) (BaselineLayerMeta, bool) {
+	if len(p.baseline) == 0 {
+		return BaselineLayerMeta{}, false
+	}
+	if targetFP == nil {
+		return p.pickClosest(targetSize)
+	}
+
+	// Collect candidates that actually have fingerprints and score them.
+	type scored struct {
+		meta  BaselineLayerMeta
+		score int64
+	}
+	cands := make([]scored, 0, len(p.baseline))
+	for _, b := range p.baseline {
+		fp := p.baselineFP[b.Digest]
+		if fp == nil {
+			continue
+		}
+		cands = append(cands, scored{meta: b, score: score(targetFP, fp)})
+	}
+	if len(cands) == 0 {
+		return p.pickClosest(targetSize)
+	}
+
+	// Determine max score.
+	var maxScore int64
+	for _, c := range cands {
+		if c.score > maxScore {
+			maxScore = c.score
+		}
+	}
+	if maxScore == 0 {
+		return p.pickClosest(targetSize)
+	}
+
+	// Narrow to winners.
+	winners := cands[:0]
+	for _, c := range cands {
+		if c.score == maxScore {
+			winners = append(winners, c)
+		}
+	}
+	if len(winners) == 1 {
+		return winners[0].meta, true
+	}
+
+	// Tie-break on size-closest, then first in sorted-by-digest order.
+	best := winners[0].meta
+	bestDelta := absDelta(best.Size, targetSize)
+	for _, w := range winners[1:] {
+		d := absDelta(w.meta.Size, targetSize)
+		if d < bestDelta {
+			best, bestDelta = w.meta, d
+		}
+	}
+	return best, true
+}
+
 func absDelta(a, b int64) int64 {
 	if a > b {
 		return a - b
