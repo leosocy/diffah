@@ -46,6 +46,7 @@ func buildDeltaWithTransport(t *testing.T, transport, targetTar, baselineTar str
 	out := filepath.Join(t.TempDir(), "delta.tar")
 	require.NoError(t, exporter.Export(ctx, exporter.Options{
 		TargetRef: target, BaselineRef: baseline, OutputPath: out, ToolVersion: "test",
+		IntraLayer: "off",
 	}))
 	return out
 }

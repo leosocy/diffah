@@ -131,6 +131,7 @@ func TestExport_ManifestOnlyBaseline(t *testing.T) {
 		OutputPath:           out,
 		Compress:             "none",
 		ToolVersion:          "test",
+		IntraLayer:           "off",
 	})
 	require.NoError(t, err)
 
