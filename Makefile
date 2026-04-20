@@ -3,7 +3,7 @@ PKG       := github.com/leosocy/diffah
 VERSION   ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS   := -X $(PKG)/cmd.version=$(VERSION)
 GOFLAGS   := -trimpath
-TAGS      := containers_image_openpgp
+TAGS      := containers_image_openpgp exclude_graphdriver_btrfs exclude_graphdriver_devicemapper
 
 .PHONY: build test test-integration lint fmt fixtures snapshot clean
 
