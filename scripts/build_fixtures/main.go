@@ -340,7 +340,7 @@ func buildFixtures(ctx context.Context) error {
 	}
 
 	// Remove any pre-existing fixture files so transports can create fresh archives.
-	for _, name := range []string{"v1_oci.tar", "v1_s2.tar", "v2_oci.tar", "v2_s2.tar", "CHECKSUMS"} {
+	for _, name := range []string{"v1_oci.tar", "v1_s2.tar", "v2_oci.tar", "v2_s2.tar", "unrelated_oci.tar", "CHECKSUMS"} {
 		if err := removeIfExists(filepath.Join(fixtureDir, name)); err != nil {
 			return err
 		}
@@ -470,6 +470,47 @@ func buildFixtures(ctx context.Context) error {
 			})
 		}
 	}
+
+	// Build unrelated OCI fixture: 1 layer with /unrelated.bin = 16 KiB of 0xFF.
+	// Its layer digest must not overlap with any v1/v2 layer.
+	unrelatedData := bytes.Repeat([]byte{0xFF}, 16*1024)
+	unrelatedCompressed, unrelatedDiffID, unrelatedBlob := buildLayerBlob("unrelated.bin", unrelatedData)
+	fmt.Printf("unrelated layer diffID: %s\n", unrelatedDiffID)
+	fmt.Printf("unrelated layer blobDigest: %s\n", unrelatedBlob)
+
+	unrelatedLayerInfos := []types.BlobInfo{
+		{Digest: unrelatedBlob, Size: int64(len(unrelatedCompressed)), MediaType: ociLayerMediaType},
+	}
+	unrelatedConfigJSON := buildConfig([]digest.Digest{unrelatedDiffID})
+	h := sha256.New()
+	h.Write(unrelatedConfigJSON)
+	unrelatedConfigDigest := digest.NewDigestFromEncoded(digest.SHA256, fmt.Sprintf("%x", h.Sum(nil)))
+	unrelatedConfigInfo := types.BlobInfo{
+		Digest: unrelatedConfigDigest,
+		Size:   int64(len(unrelatedConfigJSON)),
+	}
+	unrelatedManifestBytes := buildManifest(unrelatedConfigInfo, unrelatedLayerInfos, ociManifestMT, ociLayerMediaType, ociConfigMediaType)
+	unrelatedPath := filepath.Join(fixtureDir, "unrelated_oci.tar")
+	unrelatedRef, err := ociarchive.NewReference(unrelatedPath, "diffah-fixture-unrelated:v1")
+	if err != nil {
+		return fmt.Errorf("unrelated oci ref: %w", err)
+	}
+	if err := writeFixture(ctx, unrelatedRef, [][]byte{unrelatedCompressed}, unrelatedLayerInfos, unrelatedConfigJSON, unrelatedManifestBytes); err != nil {
+		return fmt.Errorf("write unrelated oci fixture: %w", err)
+	}
+	if err := normalizeTar(unrelatedPath); err != nil {
+		return fmt.Errorf("normalize unrelated oci tar: %w", err)
+	}
+	fmt.Printf("wrote %s\n", unrelatedPath)
+
+	unrelatedCksum, err := fileChecksum(unrelatedPath)
+	if err != nil {
+		return fmt.Errorf("checksum unrelated_oci.tar: %w", err)
+	}
+	outputs = append(outputs, archiveOutput{
+		filename: filepath.Base(unrelatedPath),
+		checksum: unrelatedCksum,
+	})
 
 	// Write CHECKSUMS.
 	checksumPath := filepath.Join(fixtureDir, "CHECKSUMS")

@@ -27,15 +27,15 @@ type fakeDest struct {
 	closeCalled bool
 }
 
-func (f *fakeDest) Reference() types.ImageReference                  { return nil }
-func (f *fakeDest) Close() error                                     { f.closeCalled = true; return nil }
-func (f *fakeDest) SupportedManifestMIMETypes() []string             { return nil }
-func (f *fakeDest) SupportsSignatures(context.Context) error         { return nil }
-func (f *fakeDest) DesiredLayerCompression() types.LayerCompression  { return types.PreserveOriginal }
-func (f *fakeDest) AcceptsForeignLayerURLs() bool                    { return false }
-func (f *fakeDest) MustMatchRuntimeOS() bool                         { return false }
-func (f *fakeDest) IgnoresEmbeddedDockerReference() bool             { return false }
-func (f *fakeDest) HasThreadSafePutBlob() bool                       { return false }
+func (f *fakeDest) Reference() types.ImageReference                 { return nil }
+func (f *fakeDest) Close() error                                    { f.closeCalled = true; return nil }
+func (f *fakeDest) SupportedManifestMIMETypes() []string            { return nil }
+func (f *fakeDest) SupportsSignatures(context.Context) error        { return nil }
+func (f *fakeDest) DesiredLayerCompression() types.LayerCompression { return types.PreserveOriginal }
+func (f *fakeDest) AcceptsForeignLayerURLs() bool                   { return false }
+func (f *fakeDest) MustMatchRuntimeOS() bool                        { return false }
+func (f *fakeDest) IgnoresEmbeddedDockerReference() bool            { return false }
+func (f *fakeDest) HasThreadSafePutBlob() bool                      { return false }
 
 func (f *fakeDest) PutBlob(_ context.Context, stream io.Reader, info types.BlobInfo, _ types.BlobInfoCache, _ bool) (types.BlobInfo, error) {
 	f.putBlobCalls++
@@ -52,9 +52,9 @@ func (f *fakeDest) TryReusingBlob(_ context.Context, _ types.BlobInfo, _ types.B
 	return f.tryReuseReturnReused, f.tryReuseReturnInfo, f.tryReuseReturnErr
 }
 
-func (f *fakeDest) PutManifest(context.Context, []byte, *digest.Digest) error          { return nil }
-func (f *fakeDest) PutSignatures(context.Context, [][]byte, *digest.Digest) error      { return nil }
-func (f *fakeDest) Commit(context.Context, types.UnparsedImage) error                  { return nil }
+func (f *fakeDest) PutManifest(context.Context, []byte, *digest.Digest) error     { return nil }
+func (f *fakeDest) PutSignatures(context.Context, [][]byte, *digest.Digest) error { return nil }
+func (f *fakeDest) Commit(context.Context, types.UnparsedImage) error             { return nil }
 
 func TestKnownBlobsDest_TryReusingBlob_ShortCircuitsKnownDigest(t *testing.T) {
 	known := []digest.Digest{"sha256:a", "sha256:b"}

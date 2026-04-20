@@ -211,6 +211,63 @@ func verifyImport(opts Options, sidecar *diff.Sidecar) error {
 	return nil
 }
 
+// DryRunReport summarizes a dry-run import: which required baseline blobs
+// are reachable and which (if any) are missing.
+type DryRunReport struct {
+	AllReachable   bool
+	MissingDigests []string
+	RequiredBlobs  int
+	BaselineSource string
+}
+
+// DryRun performs steps 1-4 of the import pipeline (extract, parse, open
+// baseline, probe) without calling copy.Image or writing any output files.
+// Returns a report describing whether every required baseline blob is
+// reachable from the provided baseline reference.
+func DryRun(ctx context.Context, opts Options) (DryRunReport, error) {
+	tmpDir, err := os.MkdirTemp("", "diffah-import-dryrun-")
+	if err != nil {
+		return DryRunReport{}, fmt.Errorf("create tmp dir: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	sidecar, err := extractSidecar(opts.DeltaPath, tmpDir)
+	if err != nil {
+		return DryRunReport{}, err
+	}
+
+	baselineSrc, err := opts.BaselineRef.NewImageSource(ctx, nil)
+	if err != nil {
+		return DryRunReport{}, fmt.Errorf("open baseline source: %w", err)
+	}
+	defer baselineSrc.Close()
+
+	report := DryRunReport{
+		RequiredBlobs:  len(sidecar.RequiredFromBaseline),
+		BaselineSource: baselineSrc.Reference().StringWithinTransport(),
+	}
+
+	raw, mime, err := baselineSrc.GetManifest(ctx, nil)
+	if err != nil {
+		return report, fmt.Errorf("read baseline manifest: %w", err)
+	}
+	parsed, err := manifest.FromBlob(raw, mime)
+	if err != nil {
+		return report, fmt.Errorf("parse baseline manifest: %w", err)
+	}
+	have := make(map[digest.Digest]struct{}, len(parsed.LayerInfos()))
+	for _, l := range parsed.LayerInfos() {
+		have[l.Digest] = struct{}{}
+	}
+	for _, req := range sidecar.RequiredFromBaseline {
+		if _, ok := have[req.Digest]; !ok {
+			report.MissingDigests = append(report.MissingDigests, string(req.Digest))
+		}
+	}
+	report.AllReachable = len(report.MissingDigests) == 0
+	return report, nil
+}
+
 // compositeRef wraps a directory reference so copy.Image receives our
 // CompositeSource instead of the plain directory: source.
 type compositeRef struct {
