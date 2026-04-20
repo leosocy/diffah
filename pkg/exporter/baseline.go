@@ -19,6 +19,7 @@ import (
 // the manifest reference recorded in the sidecar.
 type BaselineSet interface {
 	LayerDigests(ctx context.Context) ([]digest.Digest, error)
+	LayerMeta(ctx context.Context) ([]BaselineLayerMeta, error)
 	ManifestRef() diff.BaselineRef
 }
 
@@ -85,6 +86,20 @@ func (b *ImageBaseline) LayerDigests(_ context.Context) ([]digest.Digest, error)
 	return out, nil
 }
 
+// LayerMeta returns digest, size, and media type for each baseline layer.
+func (b *ImageBaseline) LayerMeta(_ context.Context) ([]BaselineLayerMeta, error) {
+	infos := b.parsed.LayerInfos()
+	out := make([]BaselineLayerMeta, 0, len(infos))
+	for _, l := range infos {
+		out = append(out, BaselineLayerMeta{
+			Digest:    l.Digest,
+			Size:      l.Size,
+			MediaType: l.MediaType,
+		})
+	}
+	return out, nil
+}
+
 // ManifestRef returns the diff.BaselineRef recorded in the sidecar.
 func (b *ImageBaseline) ManifestRef() diff.BaselineRef {
 	return diff.BaselineRef{
@@ -133,6 +148,20 @@ func (b *ManifestBaseline) LayerDigests(_ context.Context) ([]digest.Digest, err
 	out := make([]digest.Digest, 0, len(infos))
 	for _, l := range infos {
 		out = append(out, l.Digest)
+	}
+	return out, nil
+}
+
+// LayerMeta returns digest, size, and media type for each baseline layer.
+func (b *ManifestBaseline) LayerMeta(_ context.Context) ([]BaselineLayerMeta, error) {
+	infos := b.parsed.LayerInfos()
+	out := make([]BaselineLayerMeta, 0, len(infos))
+	for _, l := range infos {
+		out = append(out, BaselineLayerMeta{
+			Digest:    l.Digest,
+			Size:      l.Size,
+			MediaType: l.MediaType,
+		})
 	}
 	return out, nil
 }

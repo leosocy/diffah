@@ -62,6 +62,34 @@ func TestManifestBaseline_ErrorOnInvalidJSON(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestManifestBaseline_LayerMeta_IncludesSizeAndMediaType(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "m.json")
+	manifestBody := `{
+		"schemaVersion": 2,
+		"mediaType": "application/vnd.docker.distribution.manifest.v2+json",
+		"config": {"mediaType":"application/vnd.docker.container.image.v1+json","size":1,"digest":"sha256:cfg"},
+		"layers": [
+			{"mediaType":"application/vnd.docker.image.rootfs.diff.tar.gzip","size":100,"digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+			{"mediaType":"application/vnd.docker.image.rootfs.diff.tar.gzip","size":200,"digest":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}
+		]
+	}`
+	require.NoError(t, os.WriteFile(path, []byte(manifestBody), 0o644))
+
+	b, err := NewManifestBaseline(path, "")
+	require.NoError(t, err)
+
+	metas, err := b.LayerMeta(context.Background())
+	require.NoError(t, err)
+	require.Len(t, metas, 2)
+	for _, m := range metas {
+		require.NotEmpty(t, m.Digest)
+		require.Greater(t, m.Size, int64(0))
+		require.NotEmpty(t, m.MediaType)
+	}
+	require.Equal(t, int64(100), metas[0].Size)
+	require.Equal(t, int64(200), metas[1].Size)
+}
+
 func TestManifestBaseline_ErrorOnEmptyMediaType(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "empty-mime.json")
 	require.NoError(t, os.WriteFile(path, []byte(`{"schemaVersion":2,"mediaType":""}`), 0o644))
