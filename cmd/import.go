@@ -17,6 +17,7 @@ var importFlags = struct {
 	outputFormat string
 	output       string
 	dryRun       bool
+	allowConvert bool
 }{}
 
 func newImportCommand() *cobra.Command {
@@ -28,10 +29,13 @@ func newImportCommand() *cobra.Command {
 	f := c.Flags()
 	f.StringVar(&importFlags.delta, "delta", "", "delta archive path (required)")
 	f.StringVar(&importFlags.baseline, "baseline", "", "baseline image reference (required)")
-	f.StringVar(&importFlags.outputFormat, "output-format", "docker-archive",
-		"docker-archive|oci-archive|dir")
+	f.StringVar(&importFlags.outputFormat, "output-format", "",
+		"auto (default, preserves source format)|docker-archive|oci-archive|dir")
 	f.StringVar(&importFlags.output, "output", "", "output path (required)")
 	f.BoolVar(&importFlags.dryRun, "dry-run", false, "verify baseline reachability only (no copy)")
+	f.BoolVar(&importFlags.allowConvert, "allow-convert", false,
+		"allow an --output-format that forces manifest media-type conversion "+
+			"(breaks byte-exact reconstruction)")
 	_ = c.MarkFlagRequired("delta")
 	_ = c.MarkFlagRequired("baseline")
 	_ = c.MarkFlagRequired("output")
@@ -52,6 +56,7 @@ func runImport(cmd *cobra.Command, _ []string) error {
 		BaselineRef:  baselineRef,
 		OutputFormat: importFlags.outputFormat,
 		OutputPath:   importFlags.output,
+		AllowConvert: importFlags.allowConvert,
 	}
 	ctx := context.Background()
 
