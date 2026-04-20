@@ -5,7 +5,9 @@
 //
 //	go run -tags containers_image_openpgp ./scripts/build_fixtures
 //
-// Outputs: testdata/fixtures/v{1,2,3}_oci.tar, v{1,2,3}_s2.tar, unrelated_oci.tar, CHECKSUMS
+// Outputs: testdata/fixtures/v{1,2,3}_oci.tar, v{1,2,3}_s2.tar,
+// v4_baseline_{oci,s2}.tar, v4_target_{oci,s2}.tar,
+// unrelated_oci.tar, CHECKSUMS
 package main
 
 import (
@@ -101,6 +103,86 @@ func buildLayerBlob(filename string, data []byte) ([]byte, digest.Digest, digest
 	blobDigest := digest.FromBytes(compBytes)
 
 	return compBytes, diffID, blobDigest
+}
+
+// layerFile describes one regular-file tar entry inside a multi-file layer.
+type layerFile struct {
+	name string
+	data []byte
+}
+
+// buildSharedLayerBlob creates a gzipped tar containing multiple named files.
+// Returns (compressed bytes, diffID of uncompressed tar, digest of compressed bytes).
+// Uses identical gzip settings to buildLayerBlob for determinism.
+func buildSharedLayerBlob(files []layerFile) ([]byte, digest.Digest, digest.Digest) {
+	rawBuf := &bytes.Buffer{}
+	tw := tar.NewWriter(rawBuf)
+	for _, f := range files {
+		hdr := &tar.Header{
+			Name:     f.name,
+			Size:     int64(len(f.data)),
+			Mode:     0o644,
+			ModTime:  pinnedTime,
+			Typeflag: tar.TypeReg,
+			Uid:      0,
+			Gid:      0,
+			Uname:    "",
+			Gname:    "",
+		}
+		if err := tw.WriteHeader(hdr); err != nil {
+			panic(fmt.Sprintf("write tar header: %v", err))
+		}
+		if _, err := tw.Write(f.data); err != nil {
+			panic(fmt.Sprintf("write tar data: %v", err))
+		}
+	}
+	if err := tw.Close(); err != nil {
+		panic(fmt.Sprintf("close tar writer: %v", err))
+	}
+	rawBytes := rawBuf.Bytes()
+	diffID := digest.FromBytes(rawBytes)
+
+	compBuf := &bytes.Buffer{}
+	gz, err := gzip.NewWriterLevel(compBuf, gzip.NoCompression)
+	if err != nil {
+		panic(fmt.Sprintf("new gzip writer: %v", err))
+	}
+	// Zero out all variable gzip header fields for determinism — same as buildLayerBlob.
+	gz.ModTime = time.Time{}
+	gz.OS = 0xFF // "unknown"
+	gz.Name = ""
+	gz.Comment = ""
+	gz.Extra = nil
+
+	if _, err := gz.Write(rawBytes); err != nil {
+		panic(fmt.Sprintf("write gzip data: %v", err))
+	}
+	if err := gz.Close(); err != nil {
+		panic(fmt.Sprintf("close gzip writer: %v", err))
+	}
+	compBytes := compBuf.Bytes()
+	return compBytes, diffID, digest.FromBytes(compBytes)
+}
+
+// overlapFiles returns sharedCount files under "shared/NNNN" names derived from
+// shareSeed (same on both sides → identical bytes → non-zero Fingerprint intersection),
+// plus uniqueCount files under "unique/NNNN" names derived from uniqueSeed (different
+// per side so unique files are genuinely distinct).
+func overlapFiles(sharedCount, uniqueCount, shareSeed, uniqueSeed, sharedSize, uniqueSize int) []layerFile {
+	out := make([]layerFile, 0, sharedCount+uniqueCount)
+	for i := 0; i < sharedCount; i++ {
+		out = append(out, layerFile{
+			name: fmt.Sprintf("shared/%04d", i),
+			data: seededRandom(int64(shareSeed+i), sharedSize),
+		})
+	}
+	for i := 0; i < uniqueCount; i++ {
+		out = append(out, layerFile{
+			name: fmt.Sprintf("unique/%04d", i),
+			data: seededRandom(int64(uniqueSeed+i), uniqueSize),
+		})
+	}
+	return out
 }
 
 // imageConfig is the JSON-serializable image configuration structure.
@@ -357,7 +439,10 @@ func buildFixtures(ctx context.Context) error {
 		"v1_oci.tar", "v1_s2.tar",
 		"v2_oci.tar", "v2_s2.tar",
 		"v3_oci.tar", "v3_s2.tar",
-		"unrelated_oci.tar", "CHECKSUMS",
+		"v4_baseline_oci.tar", "v4_baseline_s2.tar",
+		"v4_target_oci.tar", "v4_target_s2.tar",
+		"unrelated_oci.tar",
+		"CHECKSUMS",
 	}
 	for _, name := range existing {
 		if err := removeIfExists(filepath.Join(fixtureDir, name)); err != nil {
@@ -567,6 +652,188 @@ func buildFixtures(ctx context.Context) error {
 		filename: filepath.Base(unrelatedPath),
 		checksum: unrelatedCksum,
 	})
+
+	// Build v4 fixture pair: exercises content-similarity matching.
+	//
+	// Baseline has 5 layers; target has 3 layers.
+	//
+	// Divergence: for tApp (target layer ≈ 200 KB), bSizeTrap has the closest
+	// byte size (≈ 200 KB) but zero content overlap, while bAppV1 has 50%
+	// content overlap and a larger size (≈ 300 KB). A size-closest picker
+	// selects bSizeTrap; a content-similarity picker selects bAppV1.
+	//
+	// All sizes are scaled down 100× from the plan (KB instead of MB) so the
+	// archives stay under 3 MB each.
+	const v4Unit = 1024 // 1 KB
+
+	// --- baseline layers ---
+	// bSmall: 9 shared + 1 unique, each 1 KB, ≈ 9.5 KB total
+	bSmallFiles := overlapFiles(9, 1, 1000, 7000, v4Unit, 512)
+	// bAppV1: 10 shared + 10 unique, each 15 KB — 50%/50% mix, ≈ 300 KB
+	bAppV1Files := overlapFiles(10, 10, 2000, 8000, 15*v4Unit, 15*v4Unit)
+	// bDataV1: 19 shared + 1 unique, each 10 KB — 95%/5% mix, ≈ 200 KB
+	bDataV1Files := overlapFiles(19, 1, 3000, 9000, 10*v4Unit, 10*v4Unit)
+	// bSizeTrap: 10 all-unique files of 10 KB → ≈ 100 KB compressed raw, but
+	// same *uncompressed* tar size as tApp so a size-based picker prefers it.
+	// We use 10 unique files × 20 KB = 200 KB to match tApp's uncompressed size.
+	bSizeTrapFiles := overlapFiles(0, 10, 0, 1_000_000, 0, 20*v4Unit)
+	// bDecoy: 5 all-unique files of 4 KB, ≈ 20 KB
+	bDecoyFiles := overlapFiles(0, 5, 0, 2_000_000, 0, 4*v4Unit)
+
+	// --- target layers ---
+	// tSmall: matches bSmall on shared files (same shareSeed=1000), different unique
+	tSmallFiles := overlapFiles(9, 1, 1000, 11000, v4Unit, 512)
+	// tApp: 10 shared + 10 unique, each 10 KB → ≈ 200 KB; content-matches bAppV1
+	// (same shareSeed=2000) but smaller size (200 KB vs 300 KB). bSizeTrap also
+	// ≈ 200 KB but has zero shared files with tApp.
+	tAppFiles := overlapFiles(10, 10, 2000, 12000, 10*v4Unit, 10*v4Unit)
+	// tData: matches bDataV1 on shared files (same shareSeed=3000), different unique
+	tDataFiles := overlapFiles(19, 1, 3000, 13000, 10*v4Unit, 10*v4Unit)
+
+	bSmall, bSmallDiff, bSmallBlobD := buildSharedLayerBlob(bSmallFiles)
+	bAppV1, bAppV1Diff, bAppV1BlobD := buildSharedLayerBlob(bAppV1Files)
+	bDataV1, bDataV1Diff, bDataV1BlobD := buildSharedLayerBlob(bDataV1Files)
+	bSizeTrap, bSizeTrapDiff, bSizeTrapBlobD := buildSharedLayerBlob(bSizeTrapFiles)
+	bDecoy, bDecoyDiff, bDecoyBlobD := buildSharedLayerBlob(bDecoyFiles)
+
+	tSmall, tSmallDiff, tSmallBlobD := buildSharedLayerBlob(tSmallFiles)
+	tApp, tAppDiff, tAppBlobD := buildSharedLayerBlob(tAppFiles)
+	tData, tDataDiff, tDataBlobD := buildSharedLayerBlob(tDataFiles)
+
+	fmt.Printf("v4 baseline layers: bSmall=%d bAppV1=%d bDataV1=%d bSizeTrap=%d bDecoy=%d bytes (compressed)\n",
+		len(bSmall), len(bAppV1), len(bDataV1), len(bSizeTrap), len(bDecoy))
+	fmt.Printf("v4 target  layers: tSmall=%d tApp=%d tData=%d bytes (compressed)\n",
+		len(tSmall), len(tApp), len(tData))
+
+	baselineLayers := [][]byte{bSmall, bAppV1, bDataV1, bSizeTrap, bDecoy}
+	baselineDiffs := []digest.Digest{bSmallDiff, bAppV1Diff, bDataV1Diff, bSizeTrapDiff, bDecoyDiff}
+	baselineBlobInfos := []types.BlobInfo{
+		{Digest: bSmallBlobD, Size: int64(len(bSmall))},
+		{Digest: bAppV1BlobD, Size: int64(len(bAppV1))},
+		{Digest: bDataV1BlobD, Size: int64(len(bDataV1))},
+		{Digest: bSizeTrapBlobD, Size: int64(len(bSizeTrap))},
+		{Digest: bDecoyBlobD, Size: int64(len(bDecoy))},
+	}
+
+	targetLayers := [][]byte{tSmall, tApp, tData}
+	targetDiffs := []digest.Digest{tSmallDiff, tAppDiff, tDataDiff}
+	targetBlobInfos := []types.BlobInfo{
+		{Digest: tSmallBlobD, Size: int64(len(tSmall))},
+		{Digest: tAppBlobD, Size: int64(len(tApp))},
+		{Digest: tDataBlobD, Size: int64(len(tData))},
+	}
+
+	baselineConfigJSON := buildConfig(baselineDiffs)
+	bh := sha256.New()
+	bh.Write(baselineConfigJSON)
+	baselineConfigDigest := digest.NewDigestFromEncoded(digest.SHA256, fmt.Sprintf("%x", bh.Sum(nil)))
+	baselineConfigInfo := types.BlobInfo{Digest: baselineConfigDigest, Size: int64(len(baselineConfigJSON))}
+
+	targetConfigJSON := buildConfig(targetDiffs)
+	th := sha256.New()
+	th.Write(targetConfigJSON)
+	targetConfigDigest := digest.NewDigestFromEncoded(digest.SHA256, fmt.Sprintf("%x", th.Sum(nil)))
+	targetConfigInfo := types.BlobInfo{Digest: targetConfigDigest, Size: int64(len(targetConfigJSON))}
+
+	v4Archives := []struct {
+		name       string
+		isOCI      bool
+		isBaseline bool
+	}{
+		{"v4_baseline_oci", true, true},
+		{"v4_baseline_s2", false, true},
+		{"v4_target_oci", true, false},
+		{"v4_target_s2", false, false},
+	}
+
+	for _, va := range v4Archives {
+		tarPath := filepath.Join(fixtureDir, va.name+".tar")
+
+		var (
+			layers      [][]byte
+			blobInfos   []types.BlobInfo
+			configJSON  []byte
+			configInfo  types.BlobInfo
+			layerMT     string
+			manifestMT  string
+			configMT    string
+		)
+
+		if va.isBaseline {
+			layers = baselineLayers
+			configJSON = baselineConfigJSON
+			configInfo = baselineConfigInfo
+			blobInfos = make([]types.BlobInfo, len(baselineBlobInfos))
+			copy(blobInfos, baselineBlobInfos)
+		} else {
+			layers = targetLayers
+			configJSON = targetConfigJSON
+			configInfo = targetConfigInfo
+			blobInfos = make([]types.BlobInfo, len(targetBlobInfos))
+			copy(blobInfos, targetBlobInfos)
+		}
+
+		var imageRef types.ImageReference
+		if va.isOCI {
+			layerMT = ociLayerMediaType
+			manifestMT = ociManifestMT
+			configMT = ociConfigMediaType
+			for i := range blobInfos {
+				blobInfos[i].MediaType = layerMT
+			}
+			tag := "v4-baseline"
+			if !va.isBaseline {
+				tag = "v4-target"
+			}
+			ref, refErr := ociarchive.NewReference(tarPath, "diffah-fixture:"+tag)
+			if refErr != nil {
+				return fmt.Errorf("oci ref %s: %w", va.name, refErr)
+			}
+			imageRef = ref
+		} else {
+			layerMT = s2LayerMediaType
+			manifestMT = s2ManifestMT
+			configMT = s2ConfigMediaType
+			for i := range blobInfos {
+				blobInfos[i].MediaType = layerMT
+			}
+			tag := "v4-baseline"
+			if !va.isBaseline {
+				tag = "v4-target"
+			}
+			named, refErr := dockerref.ParseNormalizedNamed("diffah-fixture:" + tag)
+			if refErr != nil {
+				return fmt.Errorf("parse docker ref %s: %w", va.name, refErr)
+			}
+			nt, ok := named.(dockerref.NamedTagged)
+			if !ok {
+				return fmt.Errorf("docker ref not NamedTagged: %s", va.name)
+			}
+			ref, refErr := dockerarchive.NewReference(tarPath, nt)
+			if refErr != nil {
+				return fmt.Errorf("docker archive ref %s: %w", va.name, refErr)
+			}
+			imageRef = ref
+		}
+
+		manifestBytes := buildManifest(configInfo, blobInfos, manifestMT, layerMT, configMT)
+		if err := writeFixture(ctx, imageRef, layers, blobInfos, configJSON, manifestBytes); err != nil {
+			return fmt.Errorf("write fixture %s: %w", va.name, err)
+		}
+		if err := normalizeTar(tarPath); err != nil {
+			return fmt.Errorf("normalize tar %s: %w", va.name, err)
+		}
+		fmt.Printf("wrote %s\n", tarPath)
+
+		cksum, err := fileChecksum(tarPath)
+		if err != nil {
+			return fmt.Errorf("checksum %s: %w", va.name, err)
+		}
+		outputs = append(outputs, archiveOutput{
+			filename: filepath.Base(tarPath),
+			checksum: cksum,
+		})
+	}
 
 	// Write CHECKSUMS.
 	checksumPath := filepath.Join(fixtureDir, "CHECKSUMS")
