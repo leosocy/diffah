@@ -158,10 +158,12 @@ func removeOutput(path, format string) error {
 }
 
 // probeBaseline verifies that every digest listed in sidecar.RequiredFromBaseline
-// is present among the baseline's manifest layers. Returns
-// diff.ErrBaselineMissingBlob on the first missing digest.
+// is present among the baseline's manifest layers, and that every
+// patch_from_digest referenced by patch-encoded shipped entries is also
+// present. Returns diff.ErrBaselineMissingBlob or
+// diff.ErrBaselineMissingPatchRef on the first missing digest.
 func probeBaseline(ctx context.Context, src types.ImageSource, s *diff.Sidecar) error {
-	if len(s.RequiredFromBaseline) == 0 {
+	if len(s.RequiredFromBaseline) == 0 && !anyPatch(s) {
 		return nil
 	}
 	raw, mime, err := src.GetManifest(ctx, nil)
@@ -176,15 +178,39 @@ func probeBaseline(ctx context.Context, src types.ImageSource, s *diff.Sidecar) 
 	for _, l := range parsed.LayerInfos() {
 		have[l.Digest] = struct{}{}
 	}
+	source := src.Reference().StringWithinTransport()
 	for _, req := range s.RequiredFromBaseline {
 		if _, ok := have[req.Digest]; !ok {
 			return &diff.ErrBaselineMissingBlob{
-				Digest: string(req.Digest),
-				Source: src.Reference().StringWithinTransport(),
+				Digest: string(req.Digest), Source: source,
+			}
+		}
+	}
+	seen := make(map[digest.Digest]struct{})
+	for _, e := range s.ShippedInDelta {
+		if e.Encoding != diff.EncodingPatch {
+			continue
+		}
+		if _, dup := seen[e.PatchFromDigest]; dup {
+			continue
+		}
+		seen[e.PatchFromDigest] = struct{}{}
+		if _, ok := have[e.PatchFromDigest]; !ok {
+			return &diff.ErrBaselineMissingPatchRef{
+				Digest: string(e.PatchFromDigest), Source: source,
 			}
 		}
 	}
 	return nil
+}
+
+func anyPatch(s *diff.Sidecar) bool {
+	for _, e := range s.ShippedInDelta {
+		if e.Encoding == diff.EncodingPatch {
+			return true
+		}
+	}
+	return false
 }
 
 // buildOutputRef creates a types.ImageReference for the chosen format.
