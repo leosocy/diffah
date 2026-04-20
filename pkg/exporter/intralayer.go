@@ -70,6 +70,10 @@ func (p *Planner) Run(
 	ctx context.Context, shipped []diff.BlobRef,
 ) ([]diff.BlobRef, map[digest.Digest][]byte, error) {
 	p.ensureBaselineFP(ctx)
+	fp := p.fingerprint
+	if fp == nil {
+		fp = DefaultFingerprinter{}
+	}
 	entries := make([]diff.BlobRef, 0, len(shipped))
 	payloads := make(map[digest.Digest][]byte, len(shipped))
 
@@ -79,7 +83,11 @@ func (p *Planner) Run(
 			return nil, nil, fmt.Errorf("read target blob %s: %w", l.Digest, err)
 		}
 
-		bestRef, ok := p.pickClosest(l.Size)
+		// Target fingerprint failure is non-fatal; pickSimilar degrades to
+		// pickClosest when the first argument is nil.
+		targetFP, _ := fp.Fingerprint(ctx, l.MediaType, target)
+
+		bestRef, ok := p.pickSimilar(targetFP, l.Size)
 		if !ok {
 			// No baseline layers to diff against → always full.
 			entries = append(entries, fullEntry(l))

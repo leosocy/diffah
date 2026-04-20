@@ -444,3 +444,46 @@ func TestPickSimilar_EmptyBaseline_ReturnsFalse(t *testing.T) {
 	_, ok := p.pickSimilar(Fingerprint{digest.FromBytes([]byte("x")): 1}, 100)
 	require.False(t, ok)
 }
+
+// TestPlanner_Run_PrefersContentMatchOverSizeClosest verifies the full
+// Run path: target blob is non-tar (fingerprinter fails naturally with
+// DefaultFingerprinter, but we inject content-aware fake), and the
+// planner must choose the content winner rather than the size winner.
+func TestPlanner_Run_PrefersContentMatchOverSizeClosest(t *testing.T) {
+	skipWithoutZstdCLI(t)
+	near := pseudoRandom(40, 1<<15)
+	far := pseudoRandom(41, 1<<18)
+	target := pseudoRandom(42, 1<<15) // byte-size near "near" but content-matches "far"
+	shared := digest.FromBytes([]byte("shared-content-tag"))
+
+	baseline := []BaselineLayerMeta{
+		{Digest: digest.FromBytes(near), Size: int64(len(near)), MediaType: "m"},
+		{Digest: digest.FromBytes(far), Size: int64(len(far)), MediaType: "m"},
+	}
+	blobs := blobMap{
+		digest.FromBytes(target): target,
+		digest.FromBytes(near):   near,
+		digest.FromBytes(far):    far,
+	}
+	fake := &fakeFingerprinter{
+		fps: map[digest.Digest]Fingerprint{
+			digest.FromBytes(target): {shared: 1_000_000},
+			digest.FromBytes(far):    {shared: 1_000_000},
+			// "near" has an empty fingerprint → score 0.
+			digest.FromBytes(near): {},
+		},
+	}
+
+	p := NewPlanner(baseline, blobs.read, fake)
+	entries, _, err := p.Run(context.Background(), []diff.BlobRef{
+		{Digest: digest.FromBytes(target), Size: int64(len(target)), MediaType: "m"},
+	})
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	// Regardless of whether patch beats full on these random bytes, the
+	// picked baseline digest must be "far" (the content winner).
+	if entries[0].Encoding == diff.EncodingPatch {
+		require.Equal(t, digest.FromBytes(far), entries[0].PatchFromDigest,
+			"content-match baseline must be picked when scores disagree with size")
+	}
+}
