@@ -36,67 +36,21 @@ func Import(ctx context.Context, opts Options) error {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	sidecarBytes, err := archive.Extract(opts.DeltaPath, tmpDir)
+	sidecar, err := extractSidecar(opts.DeltaPath, tmpDir)
 	if err != nil {
-		return fmt.Errorf("extract delta: %w", err)
-	}
-	sidecar, err := diff.ParseSidecar(sidecarBytes)
-	if err != nil {
-		return fmt.Errorf("parse sidecar: %w", err)
-	}
-
-	deltaRef, err := directory.NewReference(tmpDir)
-	if err != nil {
-		return fmt.Errorf("open delta dir: %w", err)
-	}
-	deltaSrc, err := deltaRef.NewImageSource(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("open delta source: %w", err)
-	}
-	// Delta source is owned by the composite; do NOT defer close here.
-
-	baselineSrc, err := opts.BaselineRef.NewImageSource(ctx, nil)
-	if err != nil {
-		_ = deltaSrc.Close()
-		return fmt.Errorf("open baseline source: %w", err)
-	}
-	// Baseline source is owned by the composite; do NOT defer close here.
-
-	if err := probeBaseline(ctx, baselineSrc, sidecar); err != nil {
-		_ = deltaSrc.Close()
-		_ = baselineSrc.Close()
 		return err
 	}
 
-	composite := NewCompositeSource(deltaSrc, baselineSrc)
-	// composite.Close() will close both inner sources.
-	srcRef := &compositeRef{inner: deltaRef, composite: composite}
+	composite, srcRef, err := openCompositeSource(ctx, tmpDir, opts.BaselineRef, sidecar)
+	if err != nil {
+		return err
+	}
 
 	tmpOut := opts.OutputPath + ".tmp"
-	outRef, err := buildOutputRef(tmpOut, opts.OutputFormat)
-	if err != nil {
+	if err := runCopy(ctx, srcRef, tmpOut, opts.OutputFormat); err != nil {
 		_ = composite.Close()
+		_ = removeOutput(tmpOut, opts.OutputFormat)
 		return err
-	}
-
-	policyCtx, err := imageio.DefaultPolicyContext()
-	if err != nil {
-		_ = composite.Close()
-		return err
-	}
-	defer policyCtx.Destroy()
-
-	copyOpts := &copy.Options{}
-	// PreserveDigests is only safe when writing to dir format (bit-exact pass-through).
-	// For other formats (docker-archive, oci-archive), containers-image must rewrite
-	// the manifest media type; PreserveDigests=true would cause copy.Image to refuse.
-	if opts.OutputFormat == "dir" {
-		copyOpts.PreserveDigests = true
-	}
-
-	if _, err := copy.Image(ctx, policyCtx, outRef, srcRef, copyOpts); err != nil {
-		_ = composite.Close()
-		return fmt.Errorf("copy composite into output: %w", err)
 	}
 	if err := composite.Close(); err != nil {
 		return fmt.Errorf("close composite: %w", err)
@@ -105,8 +59,79 @@ func Import(ctx context.Context, opts Options) error {
 	if err := os.Rename(tmpOut, opts.OutputPath); err != nil {
 		return fmt.Errorf("rename output: %w", err)
 	}
-
 	return verifyImport(opts, sidecar)
+}
+
+// extractSidecar unpacks the delta archive into tmpDir and parses the sidecar.
+func extractSidecar(deltaPath, tmpDir string) (*diff.Sidecar, error) {
+	raw, err := archive.Extract(deltaPath, tmpDir)
+	if err != nil {
+		return nil, fmt.Errorf("extract delta: %w", err)
+	}
+	sidecar, err := diff.ParseSidecar(raw)
+	if err != nil {
+		return nil, fmt.Errorf("parse sidecar: %w", err)
+	}
+	return sidecar, nil
+}
+
+// openCompositeSource opens both the delta (directory:) and baseline sources,
+// runs the fail-fast probe, and returns the composite wrapped in a reference
+// adapter. The caller owns composite.Close() — do not close the inner sources.
+func openCompositeSource(ctx context.Context, tmpDir string, baselineRef types.ImageReference, sidecar *diff.Sidecar) (*CompositeSource, types.ImageReference, error) {
+	deltaRef, err := directory.NewReference(tmpDir)
+	if err != nil {
+		return nil, nil, fmt.Errorf("open delta dir: %w", err)
+	}
+	deltaSrc, err := deltaRef.NewImageSource(ctx, nil)
+	if err != nil {
+		return nil, nil, fmt.Errorf("open delta source: %w", err)
+	}
+	baselineSrc, err := baselineRef.NewImageSource(ctx, nil)
+	if err != nil {
+		_ = deltaSrc.Close()
+		return nil, nil, fmt.Errorf("open baseline source: %w", err)
+	}
+	if err := probeBaseline(ctx, baselineSrc, sidecar); err != nil {
+		_ = deltaSrc.Close()
+		_ = baselineSrc.Close()
+		return nil, nil, err
+	}
+	composite := NewCompositeSource(deltaSrc, baselineSrc)
+	return composite, &compositeRef{inner: deltaRef, composite: composite}, nil
+}
+
+// runCopy builds the output reference, configures copy.Options, and invokes
+// copy.Image. PreserveDigests is only set for dir output — other formats must
+// rewrite manifest media types, which copy.Image refuses if PreserveDigests is
+// true.
+func runCopy(ctx context.Context, srcRef types.ImageReference, tmpOut, format string) error {
+	outRef, err := buildOutputRef(tmpOut, format)
+	if err != nil {
+		return err
+	}
+	policyCtx, err := imageio.DefaultPolicyContext()
+	if err != nil {
+		return err
+	}
+	defer policyCtx.Destroy()
+
+	copyOpts := &copy.Options{}
+	if format == "dir" {
+		copyOpts.PreserveDigests = true
+	}
+	if _, err := copy.Image(ctx, policyCtx, outRef, srcRef, copyOpts); err != nil {
+		return fmt.Errorf("copy composite into output: %w", err)
+	}
+	return nil
+}
+
+// removeOutput cleans up a partial .tmp output left by a failed copy.Image.
+func removeOutput(path, format string) error {
+	if format == "dir" {
+		return os.RemoveAll(path)
+	}
+	return os.Remove(path)
 }
 
 // probeBaseline verifies that every digest listed in sidecar.RequiredFromBaseline
