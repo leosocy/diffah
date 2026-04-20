@@ -14,6 +14,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/klauspost/compress/zstd"
 	"github.com/opencontainers/go-digest"
 )
 
@@ -50,8 +51,7 @@ type Fingerprinter interface {
 // errors.Is(err, ErrFingerprintFailed) to fall back to size-closest.
 var ErrFingerprintFailed = errors.New("fingerprint failed")
 
-// DefaultFingerprinter handles plain tar (initially). gzip and zstd
-// compressors are added in later tasks.
+// DefaultFingerprinter handles plain tar, gzip, and zstd compressed layers.
 type DefaultFingerprinter struct{}
 
 // Fingerprint implements Fingerprinter. Dispatches to openDecompressor to
@@ -80,6 +80,12 @@ func openDecompressor(mediaType string, blob []byte) (io.Reader, func(), error) 
 			return nil, func() {}, fmt.Errorf("%w: gzip: %w", ErrFingerprintFailed, err)
 		}
 		return gz, func() { _ = gz.Close() }, nil
+	case strings.HasSuffix(mediaType, "+zstd"):
+		zr, err := zstd.NewReader(bytes.NewReader(blob))
+		if err != nil {
+			return nil, func() {}, fmt.Errorf("%w: zstd: %w", ErrFingerprintFailed, err)
+		}
+		return zr, func() { zr.Close() }, nil
 	default:
 		return bytes.NewReader(blob), func() {}, nil
 	}

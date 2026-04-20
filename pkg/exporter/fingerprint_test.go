@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/klauspost/compress/zstd"
 	"github.com/opencontainers/go-digest"
 	"github.com/stretchr/testify/require"
 )
@@ -208,6 +209,62 @@ func TestDefaultFingerprinter_CorruptGzipHeader_WrapsErr(t *testing.T) {
 	_, err := (DefaultFingerprinter{}).Fingerprint(
 		context.Background(),
 		"application/vnd.oci.image.layer.v1.tar+gzip",
+		corrupt,
+	)
+	require.Error(t, err)
+	require.True(t, errors.Is(err, ErrFingerprintFailed))
+}
+
+func TestDefaultFingerprinter_ZstdTar(t *testing.T) {
+	data := []byte("hello via zstd")
+	tarBlob := buildTarBlob(t, tarEntry{
+		name: "a", data: data, typeflag: tar.TypeReg,
+	})
+	enc, err := zstd.NewWriter(nil)
+	require.NoError(t, err)
+	zstdBlob := enc.EncodeAll(tarBlob, nil)
+	require.NoError(t, enc.Close())
+
+	fp, err := (DefaultFingerprinter{}).Fingerprint(
+		context.Background(),
+		"application/vnd.oci.image.layer.v1.tar+zstd",
+		zstdBlob,
+	)
+	require.NoError(t, err)
+	require.Equal(t,
+		Fingerprint{digest.FromBytes(data): int64(len(data))},
+		fp,
+	)
+}
+
+func TestDefaultFingerprinter_TruncatedZstd_WrapsErr(t *testing.T) {
+	tarBlob := buildTarBlob(t, tarEntry{
+		name: "a", data: []byte("x"), typeflag: tar.TypeReg,
+	})
+	enc, err := zstd.NewWriter(nil)
+	require.NoError(t, err)
+	zstdBlob := enc.EncodeAll(tarBlob, nil)
+	_ = enc.Close()
+	truncated := zstdBlob[:len(zstdBlob)/2]
+
+	_, err = (DefaultFingerprinter{}).Fingerprint(
+		context.Background(),
+		"application/vnd.oci.image.layer.v1.tar+zstd",
+		truncated,
+	)
+	require.Error(t, err)
+	require.True(t, errors.Is(err, ErrFingerprintFailed))
+}
+
+func TestDefaultFingerprinter_CorruptZstdHeader_WrapsErr(t *testing.T) {
+	// Valid zstd magic is 0x28 0xB5 0x2F 0xFD. Replacing it forces
+	// zstd.NewReader to fail at construction — exercising
+	// openDecompressor's zstd error-wrapping branch, distinct from
+	// the truncated-frame path which surfaces from fingerprintTar.
+	corrupt := []byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}
+	_, err := (DefaultFingerprinter{}).Fingerprint(
+		context.Background(),
+		"application/vnd.oci.image.layer.v1.tar+zstd",
 		corrupt,
 	)
 	require.Error(t, err)
