@@ -15,6 +15,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -83,11 +84,11 @@ func buildLayerBlob(filename string, data []byte) ([]byte, digest.Digest, digest
 		panic(fmt.Sprintf("new gzip writer: %v", err))
 	}
 	// Zero out all variable gzip header fields for determinism.
-	gz.Header.ModTime = time.Time{}
-	gz.Header.OS = 0xFF // "unknown"
-	gz.Header.Name = ""
-	gz.Header.Comment = ""
-	gz.Header.Extra = nil
+	gz.ModTime = time.Time{}
+	gz.OS = 0xFF // "unknown"
+	gz.Name = ""
+	gz.Comment = ""
+	gz.Extra = nil
 
 	if _, err := gz.Write(rawBytes); err != nil {
 		panic(fmt.Sprintf("write gzip data: %v", err))
@@ -262,7 +263,7 @@ func normalizeTar(path string) error {
 	tr := tar.NewReader(f)
 	for {
 		hdr, err := tr.Next()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {
@@ -489,13 +490,19 @@ func buildFixtures(ctx context.Context) error {
 		Digest: unrelatedConfigDigest,
 		Size:   int64(len(unrelatedConfigJSON)),
 	}
-	unrelatedManifestBytes := buildManifest(unrelatedConfigInfo, unrelatedLayerInfos, ociManifestMT, ociLayerMediaType, ociConfigMediaType)
+	unrelatedManifestBytes := buildManifest(
+		unrelatedConfigInfo, unrelatedLayerInfos,
+		ociManifestMT, ociLayerMediaType, ociConfigMediaType,
+	)
 	unrelatedPath := filepath.Join(fixtureDir, "unrelated_oci.tar")
 	unrelatedRef, err := ociarchive.NewReference(unrelatedPath, "diffah-fixture-unrelated:v1")
 	if err != nil {
 		return fmt.Errorf("unrelated oci ref: %w", err)
 	}
-	if err := writeFixture(ctx, unrelatedRef, [][]byte{unrelatedCompressed}, unrelatedLayerInfos, unrelatedConfigJSON, unrelatedManifestBytes); err != nil {
+	if err := writeFixture(
+		ctx, unrelatedRef, [][]byte{unrelatedCompressed},
+		unrelatedLayerInfos, unrelatedConfigJSON, unrelatedManifestBytes,
+	); err != nil {
 		return fmt.Errorf("write unrelated oci fixture: %w", err)
 	}
 	if err := normalizeTar(unrelatedPath); err != nil {

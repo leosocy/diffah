@@ -2,6 +2,10 @@ version: "2"
 run:
   tests: true
   go: "1.25"
+  build-tags:
+    - containers_image_openpgp
+    - exclude_graphdriver_btrfs
+    - exclude_graphdriver_devicemapper
 linters:
   default: none
   enable:
@@ -66,6 +70,12 @@ linters:
           - gosec
           - lll
         path: _test\.go
+      - linters:
+          # Fixture-builder scripts are linear orchestration; the
+          # length/complexity rules punish that without improving clarity.
+          - funlen
+          - gocyclo
+        path: scripts/
     paths:
       - third_party$
       - builtin$
