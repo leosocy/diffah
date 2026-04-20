@@ -2,9 +2,6 @@
 package cmd
 
 import (
-	"fmt"
-	"os"
-
 	"github.com/spf13/cobra"
 )
 
@@ -32,10 +29,4 @@ func Execute() error {
 func init() {
 	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", "info",
 		"log level: debug|info|warn|error")
-}
-
-// reportError writes an error to stderr with a stable prefix the CLI uses
-// across subcommands.
-func reportError(err error) {
-	fmt.Fprintf(os.Stderr, "Error: %+v\n", err)
 }

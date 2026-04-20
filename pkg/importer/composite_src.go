@@ -42,7 +42,9 @@ func NewCompositeSource(delta, baseline types.ImageSource) *CompositeSource {
 
 // GetBlob serves delta blobs first, then baseline. Any error from the delta
 // that is not "not found" propagates verbatim.
-func (c *CompositeSource) GetBlob(ctx context.Context, info types.BlobInfo, cache types.BlobInfoCache) (io.ReadCloser, int64, error) {
+func (c *CompositeSource) GetBlob(
+	ctx context.Context, info types.BlobInfo, cache types.BlobInfoCache,
+) (io.ReadCloser, int64, error) {
 	r, size, err := c.delta.GetBlob(ctx, info, cache)
 	if err == nil {
 		return r, size, nil
@@ -85,7 +87,9 @@ func (c *CompositeSource) GetSignatures(ctx context.Context, instanceDigest *dig
 	return c.delta.GetSignatures(ctx, instanceDigest)
 }
 
-func (c *CompositeSource) LayerInfosForCopy(ctx context.Context, instanceDigest *digest.Digest) ([]types.BlobInfo, error) {
+func (c *CompositeSource) LayerInfosForCopy(
+	ctx context.Context, instanceDigest *digest.Digest,
+) ([]types.BlobInfo, error) {
 	return c.delta.LayerInfosForCopy(ctx, instanceDigest)
 }
 

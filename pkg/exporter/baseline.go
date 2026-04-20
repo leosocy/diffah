@@ -36,7 +36,12 @@ type ImageBaseline struct {
 // LayerDigests is cheap. When platform is non-empty and the reference points
 // to a manifest list, the matching instance is selected; otherwise a manifest
 // list triggers diff.ErrManifestListUnselected.
-func NewImageBaseline(ctx context.Context, ref types.ImageReference, sys *types.SystemContext, sourceHint, platform string) (*ImageBaseline, error) {
+func NewImageBaseline(
+	ctx context.Context,
+	ref types.ImageReference,
+	sys *types.SystemContext,
+	sourceHint, platform string,
+) (*ImageBaseline, error) {
 	src, err := ref.NewImageSource(ctx, sys)
 	if err != nil {
 		return nil, fmt.Errorf("open baseline source: %w", err)
@@ -161,7 +166,12 @@ type chosenManifest struct {
 
 // selectPlatform picks the correct manifest instance from a manifest list
 // using the supplied platform string ("os/arch[/variant]").
-func selectPlatform(ctx context.Context, src types.ImageSource, raw []byte, mime, platform, refName string) (chosenManifest, error) {
+func selectPlatform(
+	ctx context.Context,
+	src types.ImageSource,
+	raw []byte,
+	mime, platform, refName string,
+) (chosenManifest, error) {
 	if platform == "" {
 		return chosenManifest{}, &diff.ErrManifestListUnselected{Ref: refName}
 	}

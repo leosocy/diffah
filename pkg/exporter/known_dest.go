@@ -11,7 +11,8 @@ ImageDestination interface (go.podman.io/image/v5/types):
     AcceptsForeignLayerURLs() bool
     MustMatchRuntimeOS() bool
     IgnoresEmbeddedDockerReference() bool
-    PutBlob(ctx context.Context, stream io.Reader, inputInfo BlobInfo, cache BlobInfoCache, isConfig bool) (BlobInfo, error)
+    PutBlob(ctx context.Context, stream io.Reader, inputInfo BlobInfo,
+        cache BlobInfoCache, isConfig bool) (BlobInfo, error)
     HasThreadSafePutBlob() bool
     TryReusingBlob(ctx context.Context, info BlobInfo, cache BlobInfoCache, canSubstitute bool) (bool, BlobInfo, error)
     PutManifest(ctx context.Context, manifest []byte, instanceDigest *digest.Digest) error

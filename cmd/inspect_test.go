@@ -16,7 +16,7 @@ import (
 func buildInspectTestDelta(t *testing.T) string {
 	t.Helper()
 	ctx := context.Background()
-	root := filepath.Join("..")
+	root := ".."
 	targetRef, err := imageio.ParseReference(
 		"oci-archive:" + filepath.Join(root, "testdata/fixtures/v2_oci.tar"))
 	require.NoError(t, err)

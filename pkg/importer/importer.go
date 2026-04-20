@@ -20,12 +20,19 @@ import (
 	"github.com/leosocy/diffah/pkg/diff"
 )
 
+// Output format identifiers accepted by Options.OutputFormat.
+const (
+	FormatDockerArchive = "docker-archive"
+	FormatOCIArchive    = "oci-archive"
+	FormatDir           = "dir"
+)
+
 // Options carries all inputs to Import.
 type Options struct {
 	DeltaPath    string
 	BaselineRef  types.ImageReference
 	OutputPath   string
-	OutputFormat string // "docker-archive" | "oci-archive" | "dir"
+	OutputFormat string // one of FormatDockerArchive, FormatOCIArchive, FormatDir
 }
 
 // Import performs the full import pipeline described in spec §8.
@@ -78,7 +85,12 @@ func extractSidecar(deltaPath, tmpDir string) (*diff.Sidecar, error) {
 // openCompositeSource opens both the delta (directory:) and baseline sources,
 // runs the fail-fast probe, and returns the composite wrapped in a reference
 // adapter. The caller owns composite.Close() — do not close the inner sources.
-func openCompositeSource(ctx context.Context, tmpDir string, baselineRef types.ImageReference, sidecar *diff.Sidecar) (*CompositeSource, types.ImageReference, error) {
+func openCompositeSource(
+	ctx context.Context,
+	tmpDir string,
+	baselineRef types.ImageReference,
+	sidecar *diff.Sidecar,
+) (*CompositeSource, types.ImageReference, error) {
 	deltaRef, err := directory.NewReference(tmpDir)
 	if err != nil {
 		return nil, nil, fmt.Errorf("open delta dir: %w", err)
@@ -114,10 +126,10 @@ func runCopy(ctx context.Context, srcRef types.ImageReference, tmpOut, format st
 	if err != nil {
 		return err
 	}
-	defer policyCtx.Destroy()
+	defer func() { _ = policyCtx.Destroy() }()
 
 	copyOpts := &copy.Options{}
-	if format == "dir" {
+	if format == FormatDir {
 		copyOpts.PreserveDigests = true
 	}
 	if _, err := copy.Image(ctx, policyCtx, outRef, srcRef, copyOpts); err != nil {
@@ -128,7 +140,7 @@ func runCopy(ctx context.Context, srcRef types.ImageReference, tmpOut, format st
 
 // removeOutput cleans up a partial .tmp output left by a failed copy.Image.
 func removeOutput(path, format string) error {
-	if format == "dir" {
+	if format == FormatDir {
 		return os.RemoveAll(path)
 	}
 	return os.Remove(path)
@@ -167,7 +179,7 @@ func probeBaseline(ctx context.Context, src types.ImageSource, s *diff.Sidecar) 
 // buildOutputRef creates a types.ImageReference for the chosen format.
 func buildOutputRef(path, format string) (types.ImageReference, error) {
 	switch format {
-	case "docker-archive", "":
+	case FormatDockerArchive, "":
 		named, err := dockerref.ParseNormalizedNamed("diffah-import:latest")
 		if err != nil {
 			return nil, fmt.Errorf("build docker ref: %w", err)
@@ -177,9 +189,9 @@ func buildOutputRef(path, format string) (types.ImageReference, error) {
 			return nil, fmt.Errorf("docker ref not NamedTagged")
 		}
 		return dockerarchive.NewReference(path, nt)
-	case "oci-archive":
+	case FormatOCIArchive:
 		return ociarchive.NewReference(path, "diffah-import:latest")
-	case "dir":
+	case FormatDir:
 		if err := os.MkdirAll(path, 0o755); err != nil {
 			return nil, fmt.Errorf("mkdir %s: %w", path, err)
 		}
@@ -193,7 +205,7 @@ func buildOutputRef(path, format string) (types.ImageReference, error) {
 // the written manifest digest against the sidecar's target manifest digest.
 // For other formats, copy.Image's internal validation is trusted.
 func verifyImport(opts Options, sidecar *diff.Sidecar) error {
-	if opts.OutputFormat != "dir" {
+	if opts.OutputFormat != FormatDir {
 		return nil
 	}
 	raw, err := os.ReadFile(filepath.Join(opts.OutputPath, "manifest.json"))
@@ -292,7 +304,9 @@ func (r *compositeRef) NewImage(ctx context.Context, sys *types.SystemContext) (
 func (r *compositeRef) NewImageSource(_ context.Context, _ *types.SystemContext) (types.ImageSource, error) {
 	return noCloseSource{CompositeSource: r.composite}, nil
 }
-func (r *compositeRef) NewImageDestination(ctx context.Context, sys *types.SystemContext) (types.ImageDestination, error) {
+func (r *compositeRef) NewImageDestination(
+	ctx context.Context, sys *types.SystemContext,
+) (types.ImageDestination, error) {
 	return r.inner.NewImageDestination(ctx, sys)
 }
 func (r *compositeRef) DeleteImage(ctx context.Context, sys *types.SystemContext) error {

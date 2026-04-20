@@ -110,7 +110,7 @@ func copyTargetIntoDir(ctx context.Context, opts Options, tmpDir string, baselin
 	if err != nil {
 		return err
 	}
-	defer policyCtx.Destroy()
+	defer func() { _ = policyCtx.Destroy() }()
 
 	copyOpts, err := buildCopyOptions(opts.Platform)
 	if err != nil {
@@ -145,7 +145,9 @@ func (r *knownBlobsRef) NewImage(ctx context.Context, sys *types.SystemContext) 
 func (r *knownBlobsRef) NewImageSource(ctx context.Context, sys *types.SystemContext) (types.ImageSource, error) {
 	return r.inner.NewImageSource(ctx, sys)
 }
-func (r *knownBlobsRef) NewImageDestination(ctx context.Context, sys *types.SystemContext) (types.ImageDestination, error) {
+func (r *knownBlobsRef) NewImageDestination(
+	ctx context.Context, sys *types.SystemContext,
+) (types.ImageDestination, error) {
 	raw, err := r.inner.NewImageDestination(ctx, sys)
 	if err != nil {
 		return nil, err
@@ -178,7 +180,9 @@ func buildCopyOptions(platform string) (*copy.Options, error) {
 
 // buildSidecar reads the manifest written by copy.Image and constructs the
 // Sidecar that describes the delta partition.
-func buildSidecar(dir string, baseline BaselineSet, baselineDigests []digest.Digest, opts Options) (diff.Sidecar, error) {
+func buildSidecar(
+	dir string, baseline BaselineSet, baselineDigests []digest.Digest, opts Options,
+) (diff.Sidecar, error) {
 	manifestBytes, mediaType, err := oci.ReadDirManifest(dir)
 	if err != nil {
 		return diff.Sidecar{}, fmt.Errorf("read exported manifest: %w", err)

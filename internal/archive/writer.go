@@ -96,7 +96,7 @@ func addDir(tw *tar.Writer, root string) error {
 	})
 }
 
-func addFile(tw *tar.Writer, root, path string, info os.FileInfo) error {
+func addFile(tw *tar.Writer, root, path string, _ os.FileInfo) error {
 	rel, err := filepath.Rel(root, path)
 	if err != nil {
 		return err

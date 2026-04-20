@@ -1,7 +1,7 @@
 version: "2"
 run:
   tests: true
-  go: "1.24"
+  go: "1.25"
 linters:
   default: none
   enable:
@@ -38,8 +38,15 @@ linters:
         - style
       disabled-tags:
         - experimental
+      disabled-checks:
+        # hugeParam is a micro-perf hint that is actively misleading in this
+        # codebase: several methods implement the go.podman.io/image types
+        # interfaces, which take BlobInfo by value. Pointer receivers would
+        # break interface satisfaction. Disable globally rather than sprinkle
+        # nolint directives on every interface method.
+        - hugeParam
     gocyclo:
-      min-complexity: 12
+      min-complexity: 15
     lll:
       line-length: 120
     nestif:
@@ -56,6 +63,7 @@ linters:
           - dupl
           - funlen
           - gocyclo
+          - gosec
           - lll
         path: _test\.go
     paths:

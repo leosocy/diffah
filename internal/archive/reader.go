@@ -4,10 +4,12 @@ import (
 	"archive/tar"
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/klauspost/compress/zstd"
 
@@ -36,13 +38,12 @@ func Extract(archivePath, dest string) ([]byte, error) {
 
 	for {
 		hdr, err := tr.Next()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {
 			return nil, fmt.Errorf("read tar: %w", err)
 		}
-
 		if hdr.Name == diff.SidecarFilename {
 			sidecar, err = io.ReadAll(tr)
 			if err != nil {
@@ -50,18 +51,7 @@ func Extract(archivePath, dest string) ([]byte, error) {
 			}
 			continue
 		}
-
-		target := filepath.Join(dest, hdr.Name)
-		if hdr.Typeflag == tar.TypeDir {
-			if err := os.MkdirAll(target, 0o755); err != nil {
-				return nil, fmt.Errorf("mkdir %s: %w", target, err)
-			}
-			continue
-		}
-		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-			return nil, fmt.Errorf("mkdir parent %s: %w", target, err)
-		}
-		if err := writeFile(target, tr, hdr.Size); err != nil {
+		if err := extractEntry(tr, hdr, dest); err != nil {
 			return nil, err
 		}
 	}
@@ -70,6 +60,35 @@ func Extract(archivePath, dest string) ([]byte, error) {
 		return nil, fmt.Errorf("archive %s missing %s", archivePath, diff.SidecarFilename)
 	}
 	return sidecar, nil
+}
+
+// extractEntry writes a single non-sidecar tar entry under dest after
+// validating that its name cannot escape the destination directory.
+func extractEntry(tr *tar.Reader, hdr *tar.Header, dest string) error {
+	target, err := safeJoin(dest, hdr.Name)
+	if err != nil {
+		return err
+	}
+	if hdr.Typeflag == tar.TypeDir {
+		if err := os.MkdirAll(target, 0o755); err != nil {
+			return fmt.Errorf("mkdir %s: %w", target, err)
+		}
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		return fmt.Errorf("mkdir parent %s: %w", target, err)
+	}
+	return writeFile(target, tr, hdr.Size)
+}
+
+// safeJoin rejects archive entry names that are absolute or that would
+// escape dest via "..", defending against zip slip.
+func safeJoin(dest, name string) (string, error) {
+	clean := filepath.Clean(name)
+	if filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("archive entry %q escapes destination", name)
+	}
+	return filepath.Join(dest, clean), nil
 }
 
 // ReadSidecar returns the sidecar bytes from a delta archive without
@@ -92,7 +111,7 @@ func ReadSidecar(archivePath string) ([]byte, error) {
 	tr := tar.NewReader(stream)
 	for {
 		hdr, err := tr.Next()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			return nil, fmt.Errorf("archive %s missing %s", archivePath, diff.SidecarFilename)
 		}
 		if err != nil {
@@ -111,7 +130,7 @@ func writeFile(path string, r io.Reader, size int64) error {
 		return fmt.Errorf("create %s: %w", path, err)
 	}
 	defer f.Close()
-	if _, err := io.CopyN(f, r, size); err != nil && err != io.EOF {
+	if _, err := io.CopyN(f, r, size); err != nil && !errors.Is(err, io.EOF) {
 		return fmt.Errorf("write %s: %w", path, err)
 	}
 	return nil
@@ -122,7 +141,7 @@ func writeFile(path string, r io.Reader, size int64) error {
 func openDecompressed(f *os.File) (io.Reader, func(), error) {
 	br := bufio.NewReader(f)
 	magic, err := br.Peek(4)
-	if err != nil && err != io.EOF {
+	if err != nil && !errors.Is(err, io.EOF) {
 		return nil, nil, fmt.Errorf("peek: %w", err)
 	}
 	if bytes.Equal(magic, []byte{0x28, 0xB5, 0x2F, 0xFD}) {
