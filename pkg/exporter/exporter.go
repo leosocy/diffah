@@ -206,8 +206,7 @@ func buildSidecar(
 	// Default all shipped entries to full encoding until the IntraLayerPlanner
 	// (Task 5) overrides selected entries to patch encoding.
 	for i := range plan.ShippedInDelta {
-		plan.ShippedInDelta[i].Encoding = diff.EncodingFull
-		plan.ShippedInDelta[i].ArchiveSize = plan.ShippedInDelta[i].Size
+		plan.ShippedInDelta[i] = fullEntry(plan.ShippedInDelta[i])
 	}
 
 	platform := opts.Platform
