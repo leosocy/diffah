@@ -100,3 +100,15 @@ fabric.properties
 
 # Dependency directories (remove the comment below to include it)
 # vendor/
+
+### Project template
+# Go build output
+bin/
+# goreleaser output
+dist/
+# ad-hoc helper binaries produced by scripts/
+build_fixtures
+
+# Local config backups and machine-local tooling files
+*.bck.yaml
+.tool-versions

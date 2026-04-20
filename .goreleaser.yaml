@@ -1,0 +1,39 @@
+version: 2
+project_name: diffah
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: diffah
+    main: ./
+    binary: diffah
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    flags:
+      - -trimpath
+    tags:
+      - containers_image_openpgp
+    ldflags:
+      - -s -w
+      - -X github.com/leosocy/diffah/cmd.version={{.Version}}
+
+archives:
+  - id: default
+    formats: [tar.gz]
+    format_overrides:
+      - goos: darwin
+        formats: [zip]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: "checksums.txt"
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  use: github
