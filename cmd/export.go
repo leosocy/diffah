@@ -17,6 +17,7 @@ var exportFlags = struct {
 	baselineManifest string
 	platform         string
 	compress         string
+	intraLayer       string
 	output           string
 	dryRun           bool
 }{}
@@ -34,6 +35,8 @@ func newExportCommand() *cobra.Command {
 		"path to a baseline manifest.json (alternative to --baseline)")
 	f.StringVar(&exportFlags.platform, "platform", "", "os/arch[/variant] (required for manifest lists)")
 	f.StringVar(&exportFlags.compress, "compress", "none", "outer compression: none|zstd")
+	f.StringVar(&exportFlags.intraLayer, "intra-layer", "auto",
+		"per-layer binary patching: auto|off (default auto)")
 	f.StringVar(&exportFlags.output, "output", "", "output delta archive path (required)")
 	f.BoolVar(&exportFlags.dryRun, "dry-run", false, "compute the plan without writing output")
 	_ = c.MarkFlagRequired("target")
@@ -61,6 +64,7 @@ func runExport(cmd *cobra.Command, _ []string) error {
 		TargetRef:            targetRef,
 		Platform:             exportFlags.platform,
 		Compress:             exportFlags.compress,
+		IntraLayer:           exportFlags.intraLayer,
 		OutputPath:           exportFlags.output,
 		BaselineManifestPath: exportFlags.baselineManifest,
 		ToolVersion:          version,
