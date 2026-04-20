@@ -19,11 +19,11 @@ func score(target, candidate Fingerprint) int64 {
 	if target == nil || candidate == nil {
 		return 0
 	}
-	var bytes int64
+	var total int64
 	for d, size := range target {
 		if _, ok := candidate[d]; ok {
-			bytes += size
+			total += size
 		}
 	}
-	return bytes
+	return total
 }
