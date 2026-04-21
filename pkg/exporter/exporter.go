@@ -39,11 +39,11 @@ type Options struct {
 	// CreatedAt is the timestamp written to the sidecar. If zero, defaults to time.Now().
 	// Used primarily for deterministic testing.
 	CreatedAt time.Time
-	// Fingerprinter overrides the default tar-entry digest fingerprinter
-	// used by the intra-layer planner. Nil uses DefaultFingerprinter{}.
-	// Chiefly for tests that need to force branch behaviour (e.g., a
-	// stub that returns empty fingerprints to drive size-only selection).
-	Fingerprinter Fingerprinter
+
+	// fingerprinter overrides the default tar-entry digest fingerprinter.
+	// Unexported on purpose: only tests need it, injected via the
+	// ExportWithFingerprinter helper in exporter_testing_test.go.
+	fingerprinter Fingerprinter
 }
 
 // Export performs the full export pipeline described in spec §7:
@@ -282,7 +282,7 @@ func resolveShipped(
 	}
 
 	readBlob := newDirBlobReader(dir, baseline)
-	entries, payloads, err := NewPlanner(blMeta, readBlob, opts.Fingerprinter).Run(ctx, plan.ShippedInDelta)
+	entries, payloads, err := NewPlanner(blMeta, readBlob, opts.fingerprinter).Run(ctx, plan.ShippedInDelta)
 	if err != nil {
 		// Planner failed (e.g. zstd not on PATH or blob read error).
 		// Degrade gracefully to full encoding for all shipped layers.
