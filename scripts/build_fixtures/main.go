@@ -519,7 +519,8 @@ func buildFixtures(ctx context.Context) error {
 		filename string
 		checksum string
 	}
-	var outputs []archiveOutput
+	// 2 per version (oci + s2) + unrelated + 4 v4 archives = len(versions)*2+5
+	outputs := make([]archiveOutput, 0, len(versions)*2+5)
 
 	for i := range versions {
 		vs := &versions[i]
@@ -758,13 +759,13 @@ func buildFixtures(ctx context.Context) error {
 		tarPath := filepath.Join(fixtureDir, va.name+".tar")
 
 		var (
-			layers      [][]byte
-			blobInfos   []types.BlobInfo
-			configJSON  []byte
-			configInfo  types.BlobInfo
-			layerMT     string
-			manifestMT  string
-			configMT    string
+			layers     [][]byte
+			blobInfos  []types.BlobInfo
+			configJSON []byte
+			configInfo types.BlobInfo
+			layerMT    string
+			manifestMT string
+			configMT   string
 		)
 
 		if va.isBaseline {
@@ -781,47 +782,22 @@ func buildFixtures(ctx context.Context) error {
 			copy(blobInfos, targetBlobInfos)
 		}
 
-		var imageRef types.ImageReference
+		tag := "v4-baseline"
+		if !va.isBaseline {
+			tag = "v4-target"
+		}
 		if va.isOCI {
-			layerMT = ociLayerMediaType
-			manifestMT = ociManifestMT
-			configMT = ociConfigMediaType
-			for i := range blobInfos {
-				blobInfos[i].MediaType = layerMT
-			}
-			tag := "v4-baseline"
-			if !va.isBaseline {
-				tag = "v4-target"
-			}
-			ref, refErr := ociarchive.NewReference(tarPath, "diffah-fixture:"+tag)
-			if refErr != nil {
-				return fmt.Errorf("oci ref %s: %w", va.name, refErr)
-			}
-			imageRef = ref
+			layerMT, manifestMT, configMT = ociLayerMediaType, ociManifestMT, ociConfigMediaType
 		} else {
-			layerMT = s2LayerMediaType
-			manifestMT = s2ManifestMT
-			configMT = s2ConfigMediaType
-			for i := range blobInfos {
-				blobInfos[i].MediaType = layerMT
-			}
-			tag := "v4-baseline"
-			if !va.isBaseline {
-				tag = "v4-target"
-			}
-			named, refErr := dockerref.ParseNormalizedNamed("diffah-fixture:" + tag)
-			if refErr != nil {
-				return fmt.Errorf("parse docker ref %s: %w", va.name, refErr)
-			}
-			nt, ok := named.(dockerref.NamedTagged)
-			if !ok {
-				return fmt.Errorf("docker ref not NamedTagged: %s", va.name)
-			}
-			ref, refErr := dockerarchive.NewReference(tarPath, nt)
-			if refErr != nil {
-				return fmt.Errorf("docker archive ref %s: %w", va.name, refErr)
-			}
-			imageRef = ref
+			layerMT, manifestMT, configMT = s2LayerMediaType, s2ManifestMT, s2ConfigMediaType
+		}
+		for i := range blobInfos {
+			blobInfos[i].MediaType = layerMT
+		}
+
+		imageRef, err := v4ImageRef(va.isOCI, tarPath, tag, va.name)
+		if err != nil {
+			return err
 		}
 
 		manifestBytes := buildManifest(configInfo, blobInfos, manifestMT, layerMT, configMT)
@@ -855,6 +831,31 @@ func buildFixtures(ctx context.Context) error {
 	}
 	fmt.Printf("wrote %s\n", checksumPath)
 	return nil
+}
+
+// v4ImageRef constructs the correct ImageReference for a v4 fixture archive.
+// Extracted from the v4 buildFixtures block to keep nesting complexity low.
+func v4ImageRef(isOCI bool, tarPath, tag, name string) (types.ImageReference, error) {
+	if isOCI {
+		ref, err := ociarchive.NewReference(tarPath, "diffah-fixture:"+tag)
+		if err != nil {
+			return nil, fmt.Errorf("oci ref %s: %w", name, err)
+		}
+		return ref, nil
+	}
+	named, err := dockerref.ParseNormalizedNamed("diffah-fixture:" + tag)
+	if err != nil {
+		return nil, fmt.Errorf("parse docker ref %s: %w", name, err)
+	}
+	nt, ok := named.(dockerref.NamedTagged)
+	if !ok {
+		return nil, fmt.Errorf("docker ref not NamedTagged: %s", name)
+	}
+	ref, err := dockerarchive.NewReference(tarPath, nt)
+	if err != nil {
+		return nil, fmt.Errorf("docker archive ref %s: %w", name, err)
+	}
+	return ref, nil
 }
 
 func main() {
