@@ -22,6 +22,19 @@ baseline image, verifies every required baseline blob is reachable
 (fail-fast), then reconstructs the full target image by overlaying the delta
 over the baseline and writing the result in the requested format.
 
+## How diffah picks baselines for intra-layer patches
+
+For each shipped layer, diffah picks the baseline layer that shares the
+most *bytes* of content, measured by tar-entry digest intersection on
+the decompressed layer bytes. Ties on byte-weight break by size-closest,
+then by baseline digest order for determinism.
+
+diffah falls back to picking the baseline closest in compressed byte
+size in three cases: (1) the shipped layer is not a parseable tar (rare
+— typically only foreign OCI configs routed as layer blobs), (2) none
+of the baseline layers fingerprint successfully, or (3) the shipped
+layer shares no tar entries with any baseline.
+
 ## Install
 
 Download the latest release from the [releases page][releases] or build from

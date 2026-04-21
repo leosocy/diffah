@@ -1,10 +1,12 @@
 package exporter_test
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -183,4 +185,42 @@ func TestExport_DryRun_ManifestOnlyBaseline(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Greater(t, stats.ShippedCount, 0)
+}
+
+// TestExport_DeterministicArchive asserts that running the exporter
+// twice on identical inputs produces byte-identical archives. Guards
+// against regressions in baseline ordering, blob emission order, or
+// JSON encoding non-determinism.
+func TestExport_DeterministicArchive(t *testing.T) {
+	ctx := context.Background()
+	targetPath := filepath.Join(repoRoot(t), "testdata/fixtures/v3_oci.tar")
+	baselinePath := filepath.Join(repoRoot(t), "testdata/fixtures/v2_oci.tar")
+
+	targetRef, err := imageio.ParseReference("oci-archive:" + targetPath)
+	require.NoError(t, err)
+	baselineRef, err := imageio.ParseReference("oci-archive:" + baselinePath)
+	require.NoError(t, err)
+
+	outDir := t.TempDir()
+
+	run := func(name string) []byte {
+		outPath := filepath.Join(outDir, name+".tar")
+		fixedTime := time.Date(2026, 4, 20, 13, 21, 0, 0, time.UTC)
+		require.NoError(t, exporter.Export(ctx, exporter.Options{
+			TargetRef:   targetRef,
+			BaselineRef: baselineRef,
+			Compress:    "none",
+			OutputPath:  outPath,
+			ToolVersion: "test",
+			CreatedAt:   fixedTime,
+		}))
+		data, err := os.ReadFile(outPath)
+		require.NoError(t, err)
+		return data
+	}
+
+	a := run("a")
+	b := run("b")
+	require.True(t, bytes.Equal(a, b),
+		"two runs on identical inputs must produce byte-identical archives")
 }
