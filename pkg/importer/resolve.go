@@ -22,8 +22,10 @@ func resolveBaselines(
 	result := make([]resolvedBaseline, 0, len(sc.Images))
 	resolved := make(map[string]struct{}, len(sc.Images))
 
+	expanded := expandDefaultBaseline(sc, baselines)
+
 	for _, img := range sc.Images {
-		path, ok := baselines[img.Name]
+		path, ok := expanded[img.Name]
 		if !ok {
 			if strict {
 				return nil, &diff.ErrBaselineMissing{Names: []string{img.Name}}
@@ -68,4 +70,23 @@ func resolveBaselines(
 	}
 
 	return result, nil
+}
+
+func expandDefaultBaseline(sc *diff.Sidecar, baselines map[string]string) map[string]string {
+	if len(sc.Images) != 1 {
+		return baselines
+	}
+	_, ok := baselines["default"]
+	if !ok {
+		return baselines
+	}
+	expanded := make(map[string]string, len(baselines))
+	for k, v := range baselines {
+		if k == "default" {
+			expanded[sc.Images[0].Name] = v
+		} else {
+			expanded[k] = v
+		}
+	}
+	return expanded
 }

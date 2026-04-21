@@ -35,18 +35,24 @@ func composeImage(
 		return nil, fmt.Errorf("create compose dir: %w", err)
 	}
 
-	if err := writeBlobToDir(tmpDir, img.Target.ManifestDigest, bundle); err != nil {
+	manifestData, err := readBlobFromBundle(bundle, img.Target.ManifestDigest)
+	if err != nil {
+		os.RemoveAll(tmpDir)
+		return nil, fmt.Errorf("read manifest: %w", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(tmpDir, "manifest.json"), manifestData, 0o644); err != nil {
 		os.RemoveAll(tmpDir)
 		return nil, fmt.Errorf("write manifest: %w", err)
 	}
 
-	configDigest, err := extractConfigDigest(tmpDir, img.Target.ManifestDigest)
+	configDigest, err := extractConfigDigestFromBytes(manifestData)
 	if err != nil {
 		os.RemoveAll(tmpDir)
 		return nil, fmt.Errorf("extract config digest: %w", err)
 	}
 
-	if err := writeBlobToDir(tmpDir, configDigest, bundle); err != nil {
+	if err := writeBlobAsDigestFile(tmpDir, configDigest, bundle); err != nil {
 		os.RemoveAll(tmpDir)
 		return nil, fmt.Errorf("write config: %w", err)
 	}
@@ -56,7 +62,7 @@ func composeImage(
 			continue
 		}
 		if entry.Encoding == diff.EncodingFull {
-			if err := writeBlobToDir(tmpDir, d, bundle); err != nil {
+			if err := writeBlobAsDigestFile(tmpDir, d, bundle); err != nil {
 				os.RemoveAll(tmpDir)
 				return nil, fmt.Errorf("write full blob %s: %w", d, err)
 			}
@@ -65,6 +71,24 @@ func composeImage(
 				os.RemoveAll(tmpDir)
 				return nil, fmt.Errorf("apply patch %s: %w", d, err)
 			}
+		}
+	}
+
+	layerDigests, err := extractLayerDigests(manifestData)
+	if err != nil {
+		os.RemoveAll(tmpDir)
+		return nil, fmt.Errorf("extract layer digests: %w", err)
+	}
+	for _, ld := range layerDigests {
+		if _, ok := sc.Blobs[ld]; ok {
+			continue
+		}
+		if ld == configDigest {
+			continue
+		}
+		if err := fetchBaselineBlob(tmpDir, ctx, ld, baselineRef); err != nil {
+			os.RemoveAll(tmpDir)
+			return nil, fmt.Errorf("fetch baseline blob %s: %w", ld, err)
 		}
 	}
 
@@ -81,9 +105,13 @@ func (ci *composedImage) cleanup() {
 	os.RemoveAll(ci.tmpDir)
 }
 
-func writeBlobToDir(dir string, d digest.Digest, bundle *extractedBundle) error {
+func readBlobFromBundle(bundle *extractedBundle, d digest.Digest) ([]byte, error) {
 	srcPath := blobFilePath(bundle.tmpDir, d)
-	data, err := os.ReadFile(srcPath)
+	return os.ReadFile(srcPath)
+}
+
+func writeBlobAsDigestFile(dir string, d digest.Digest, bundle *extractedBundle) error {
+	data, err := readBlobFromBundle(bundle, d)
 	if err != nil {
 		return fmt.Errorf("read blob %s: %w", d, err)
 	}
@@ -91,11 +119,7 @@ func writeBlobToDir(dir string, d digest.Digest, bundle *extractedBundle) error 
 	if len(parts) != 2 {
 		return fmt.Errorf("invalid digest %s", d)
 	}
-	blobDir := filepath.Join(dir, "blobs", parts[0])
-	if err := os.MkdirAll(blobDir, 0o755); err != nil {
-		return fmt.Errorf("mkdir %s: %w", blobDir, err)
-	}
-	return os.WriteFile(filepath.Join(blobDir, parts[1]), data, 0o644)
+	return os.WriteFile(filepath.Join(dir, parts[1]), data, 0o644)
 }
 
 func blobFilePath(tmpDir string, d digest.Digest) string {
@@ -106,25 +130,54 @@ func blobFilePath(tmpDir string, d digest.Digest) string {
 	return filepath.Join(tmpDir, "blobs", parts[0], parts[1])
 }
 
-func extractConfigDigest(dir string, manifestDigest digest.Digest) (digest.Digest, error) {
-	parts := strings.SplitN(string(manifestDigest), ":", 2)
-	if len(parts) != 2 {
-		return "", fmt.Errorf("invalid digest %s", manifestDigest)
-	}
-	manifestPath := filepath.Join(dir, "blobs", parts[0], parts[1])
-	raw, err := os.ReadFile(manifestPath)
-	if err != nil {
-		return "", fmt.Errorf("read manifest: %w", err)
-	}
+func extractConfigDigestFromBytes(manifestData []byte) (digest.Digest, error) {
 	var m struct {
 		Config struct {
 			Digest digest.Digest `json:"digest"`
 		} `json:"config"`
 	}
-	if err := json.Unmarshal(raw, &m); err != nil {
+	if err := json.Unmarshal(manifestData, &m); err != nil {
 		return "", fmt.Errorf("parse manifest: %w", err)
 	}
 	return m.Config.Digest, nil
+}
+
+func extractLayerDigests(manifestData []byte) ([]digest.Digest, error) {
+	var m struct {
+		Layers []struct {
+			Digest digest.Digest `json:"digest"`
+		} `json:"layers"`
+	}
+	if err := json.Unmarshal(manifestData, &m); err != nil {
+		return nil, fmt.Errorf("parse manifest layers: %w", err)
+	}
+	out := make([]digest.Digest, 0, len(m.Layers))
+	for _, l := range m.Layers {
+		out = append(out, l.Digest)
+	}
+	return out, nil
+}
+
+func fetchBaselineBlob(dir string, ctx context.Context, d digest.Digest, baselineRef types.ImageReference) error {
+	src, err := baselineRef.NewImageSource(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("open baseline: %w", err)
+	}
+	defer src.Close()
+	r, _, err := src.GetBlob(ctx, types.BlobInfo{Digest: d}, nil)
+	if err != nil {
+		return fmt.Errorf("get baseline blob %s: %w", d, err)
+	}
+	defer r.Close()
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return fmt.Errorf("read baseline blob %s: %w", d, err)
+	}
+	parts := strings.SplitN(string(d), ":", 2)
+	if len(parts) != 2 {
+		return fmt.Errorf("invalid digest %s", d)
+	}
+	return os.WriteFile(filepath.Join(dir, parts[1]), data, 0o644)
 }
 
 func applyPatchAndWrite(
@@ -157,11 +210,7 @@ func applyPatchAndWrite(
 	if len(parts) != 2 {
 		return fmt.Errorf("invalid digest %s", d)
 	}
-	blobDir := filepath.Join(dir, "blobs", parts[0])
-	if err := os.MkdirAll(blobDir, 0o755); err != nil {
-		return err
-	}
-	return os.WriteFile(filepath.Join(blobDir, parts[1]), recovered, 0o644)
+	return os.WriteFile(filepath.Join(dir, parts[1]), recovered, 0o644)
 }
 
 func applyPatch(codec string, base, patch []byte) ([]byte, error) {
