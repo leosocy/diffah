@@ -147,9 +147,12 @@ func (p *Planner) pickClosest(want int64) (BaselineLayerMeta, bool) {
 }
 
 // ensureBaselineFP fingerprints every baseline layer exactly once per
-// Planner instance. Failures are recorded as nil entries in
-// baselineFP so callers can tell "no fingerprint available" from
-// "empty fingerprint" without a separate presence check.
+// Planner instance. Failures are recorded as nil entries in baselineFP
+// so callers can tell "no fingerprint available" from "empty
+// fingerprint" without a separate presence check. This is why
+// pickSimilar skips entries by nil-check rather than by
+// errors.Is(err, ErrFingerprintFailed) — the error never crosses the
+// boundary; the nil-entry sentinel carries the same information.
 func (p *Planner) ensureBaselineFP(ctx context.Context) {
 	p.fpOnce.Do(func() {
 		fp := p.fingerprint
@@ -221,7 +224,9 @@ func (p *Planner) pickSimilar(
 		return p.pickClosest(targetSize)
 	}
 
-	// Narrow to winners.
+	// Narrow to winners. cands[:0] reuses the same backing array — safe
+	// because range copies each element into c before we write back,
+	// so no iteration-vs-append aliasing.
 	winners := cands[:0]
 	for _, c := range cands {
 		if c.score == maxScore {

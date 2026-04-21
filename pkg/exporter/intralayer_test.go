@@ -152,6 +152,11 @@ func TestPlanner_EmptyBaselineProducesFullEntries(t *testing.T) {
 
 func TestPlanner_SizeTieBrokenByFirstSeen(t *testing.T) {
 	skipWithoutZstdCLI(t)
+	// Exercises pickClosest's first-seen tie-break (the fallback path used
+	// when pickSimilar delegates, typical for non-tar pseudo-random blobs).
+	// For pickSimilar's digest-order tie-break see
+	// TestPickSimilar_TiedScoreAndSize_BrokenByDigestOrder.
+	//
 	// Two baseline layers of identical size, both unrelated to target bytes.
 	// The target is byte-close to "a" so patch wins; both baselines have the
 	// same size so size-closest is a tie — must resolve to first-seen.
