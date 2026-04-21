@@ -11,6 +11,10 @@ import (
 
 var nameRegex = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]*$`)
 
+const SidecarFilename = "diffah.json"
+
+const SchemaVersionV1 = "v1"
+
 const FeatureBundle = "bundle"
 
 type TargetRef struct {

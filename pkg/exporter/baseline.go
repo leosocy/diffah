@@ -20,7 +20,7 @@ import (
 type BaselineSet interface {
 	LayerDigests(ctx context.Context) ([]digest.Digest, error)
 	LayerMeta(ctx context.Context) ([]BaselineLayerMeta, error)
-	ManifestRef() diff.LegacyBaselineRef
+	ManifestRef() diff.BaselineRef
 }
 
 // ImageBaseline reads the baseline from any containers-image transport.
@@ -100,9 +100,9 @@ func (b *ImageBaseline) LayerMeta(_ context.Context) ([]BaselineLayerMeta, error
 	return out, nil
 }
 
-// ManifestRef returns the diff.LegacyBaselineRef recorded in the sidecar.
-func (b *ImageBaseline) ManifestRef() diff.LegacyBaselineRef {
-	return diff.LegacyBaselineRef{
+// ManifestRef returns the diff.BaselineRef recorded in the sidecar.
+func (b *ImageBaseline) ManifestRef() diff.BaselineRef {
+	return diff.BaselineRef{
 		ManifestDigest: digest.FromBytes(b.manifestRaw),
 		MediaType:      b.manifestMime,
 		SourceHint:     b.sourceHint,
@@ -166,9 +166,9 @@ func (b *ManifestBaseline) LayerMeta(_ context.Context) ([]BaselineLayerMeta, er
 	return out, nil
 }
 
-// ManifestRef returns the diff.LegacyBaselineRef for the manifest on disk.
-func (b *ManifestBaseline) ManifestRef() diff.LegacyBaselineRef {
-	return diff.LegacyBaselineRef{
+// ManifestRef returns the diff.BaselineRef for the manifest on disk.
+func (b *ManifestBaseline) ManifestRef() diff.BaselineRef {
+	return diff.BaselineRef{
 		ManifestDigest: digest.FromBytes(b.raw),
 		MediaType:      b.mime,
 		SourceHint:     b.path,
