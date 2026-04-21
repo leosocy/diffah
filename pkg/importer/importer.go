@@ -14,6 +14,7 @@ import (
 	"go.podman.io/image/v5/types"
 
 	"github.com/leosocy/diffah/internal/imageio"
+	"github.com/leosocy/diffah/pkg/diff"
 )
 
 const (
@@ -33,11 +34,94 @@ type Options struct {
 }
 
 func Import(ctx context.Context, opts Options) error {
-	return fmt.Errorf("bundle import not yet wired in this commit")
+	bundle, err := extractBundle(opts.DeltaPath)
+	if err != nil {
+		return err
+	}
+	defer bundle.cleanup()
+
+	if err := validatePositionalBaseline(bundle.sidecar, opts.Baselines); err != nil {
+		return err
+	}
+
+	resolved, err := resolveBaselines(ctx, bundle.sidecar, opts.Baselines, opts.Strict)
+	if err != nil {
+		return err
+	}
+
+	if len(resolved) == 0 {
+		return fmt.Errorf("no baselines resolved; at least one is required for import")
+	}
+
+	rb := resolved[0]
+	var img diff.ImageEntry
+	for _, i := range bundle.sidecar.Images {
+		if i.Name == rb.Name {
+			img = i
+			break
+		}
+	}
+
+	ci, err := composeImage(ctx, img, bundle.sidecar, bundle, rb.Ref)
+	if err != nil {
+		return fmt.Errorf("compose image %q: %w", rb.Name, err)
+	}
+	defer ci.cleanup()
+
+	resolvedFmt, err := resolveOutputFormat(opts.OutputFormat, img.Target.MediaType, opts.AllowConvert)
+	if err != nil {
+		return err
+	}
+
+	tmpOut := opts.OutputPath + ".tmp"
+	if err := runCopy(ctx, ci.Ref, tmpOut, resolvedFmt); err != nil {
+		_ = removeOutput(tmpOut, resolvedFmt)
+		return fmt.Errorf("copy image %q: %w", rb.Name, err)
+	}
+	if err := os.Rename(tmpOut, opts.OutputPath); err != nil {
+		return fmt.Errorf("rename output: %w", err)
+	}
+
+	return nil
 }
 
 func DryRun(ctx context.Context, opts Options) (DryRunReport, error) {
-	return DryRunReport{}, fmt.Errorf("bundle dry-run not yet wired in this commit")
+	bundle, err := extractBundle(opts.DeltaPath)
+	if err != nil {
+		return DryRunReport{}, err
+	}
+	defer bundle.cleanup()
+
+	if err := validatePositionalBaseline(bundle.sidecar, opts.Baselines); err != nil {
+		return DryRunReport{}, err
+	}
+
+	report := DryRunReport{
+		TotalImages: len(bundle.sidecar.Images),
+		TotalBlobs:  len(bundle.sidecar.Blobs),
+	}
+	for _, e := range bundle.sidecar.Blobs {
+		report.ArchiveSize += e.ArchiveSize
+	}
+
+	resolved, err := resolveBaselines(ctx, bundle.sidecar, opts.Baselines, opts.Strict)
+	if err != nil {
+		return report, err
+	}
+	resolvedNames := make(map[string]struct{}, len(resolved))
+	for _, r := range resolved {
+		resolvedNames[r.Name] = struct{}{}
+		report.PerImage = append(report.PerImage, ImageDryRunStats{
+			Name: r.Name,
+		})
+	}
+	for _, img := range bundle.sidecar.Images {
+		if _, ok := resolvedNames[img.Name]; !ok {
+			report.MissingNames = append(report.MissingNames, img.Name)
+		}
+	}
+
+	return report, nil
 }
 
 type DryRunReport struct {
