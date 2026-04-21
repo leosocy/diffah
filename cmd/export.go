@@ -69,8 +69,8 @@ func runExport(cmd *cobra.Command, _ []string) error {
 			return err
 		}
 		fmt.Fprintf(cmd.OutOrStdout(),
-			"delta would ship %d blobs (%d bytes); require %d blobs (%d bytes) from baseline\n",
-			stats.ShippedCount, stats.ShippedBytes, stats.RequiredCount, stats.RequiredBytes)
+			"delta would ship %d blobs across %d images (%d bytes archive)\n",
+			stats.TotalBlobs, stats.TotalImages, stats.ArchiveSize)
 		return nil
 	}
 	if err := exporter.Export(ctx, opts); err != nil {
