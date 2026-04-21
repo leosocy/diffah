@@ -95,3 +95,71 @@ type ErrIntraLayerUnsupported struct{ Reason string }
 func (e *ErrIntraLayerUnsupported) Error() string {
 	return fmt.Sprintf("intra-layer mode unsupported: %s", e.Reason)
 }
+
+type ErrPhase1Archive struct{ GotFeature string }
+
+func (e *ErrPhase1Archive) Error() string {
+	if e.GotFeature == "" {
+		return "archive uses Phase 1 schema (feature marker missing); re-export with the current diffah"
+	}
+	return fmt.Sprintf("archive uses Phase 1 schema (feature=%q); re-export with the current diffah", e.GotFeature)
+}
+
+type ErrUnknownBundleVersion struct{ Got string }
+
+func (e *ErrUnknownBundleVersion) Error() string {
+	return fmt.Sprintf("unknown bundle version %q (this build supports %q)", e.Got, SchemaVersionV1)
+}
+
+type ErrInvalidBundleFormat struct{ Cause error }
+
+func (e *ErrInvalidBundleFormat) Error() string {
+	return fmt.Sprintf("invalid bundle format: %v", e.Cause)
+}
+
+func (e *ErrInvalidBundleFormat) Unwrap() error { return e.Cause }
+
+type ErrMultiImageNeedsNamedBaselines struct{ N int }
+
+func (e *ErrMultiImageNeedsNamedBaselines) Error() string {
+	return fmt.Sprintf("archive contains %d images; multi-image import requires --baseline NAME=PATH or --baseline-spec", e.N)
+}
+
+type ErrBaselineNameUnknown struct {
+	Name      string
+	Available []string
+}
+
+func (e *ErrBaselineNameUnknown) Error() string {
+	return fmt.Sprintf("baseline name %q not in bundle (available: %v)", e.Name, e.Available)
+}
+
+type ErrBaselineMismatch struct{ Name, Expected, Got string }
+
+func (e *ErrBaselineMismatch) Error() string {
+	return fmt.Sprintf("wrong baseline for %q: manifest digest mismatch (expected %s, got %s)", e.Name, e.Expected, e.Got)
+}
+
+type ErrBaselineMissing struct{ Names []string }
+
+func (e *ErrBaselineMissing) Error() string {
+	return fmt.Sprintf("strict mode: missing baselines for %v", e.Names)
+}
+
+type ErrInvalidBundleSpec struct {
+	Path   string
+	Reason string
+}
+
+func (e *ErrInvalidBundleSpec) Error() string {
+	if e.Path != "" {
+		return fmt.Sprintf("invalid bundle spec %q: %s", e.Path, e.Reason)
+	}
+	return fmt.Sprintf("invalid bundle spec: %s", e.Reason)
+}
+
+type ErrDuplicateBundleName struct{ Name string }
+
+func (e *ErrDuplicateBundleName) Error() string {
+	return fmt.Sprintf("duplicate bundle image name %q", e.Name)
+}
