@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"io"
 
@@ -28,11 +29,23 @@ func runInspect(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	s, err := diff.ParseLegacySidecar(raw)
+
+	s, err := diff.ParseSidecar(raw)
 	if err != nil {
+		var p1 *diff.ErrPhase1Archive
+		if errors.As(err, &p1) {
+			ls, lerr := diff.ParseLegacySidecar(raw)
+			if lerr != nil {
+				return lerr
+			}
+			fmt.Fprintln(cmd.OutOrStdout(), "This archive uses the Phase 1 (single-image) schema.")
+			fmt.Fprintln(cmd.OutOrStdout(), "Re-export with the current diffah to use the bundle format.")
+			fmt.Fprintln(cmd.OutOrStdout())
+			return printLegacySidecar(cmd.OutOrStdout(), args[0], ls)
+		}
 		return err
 	}
-	return printSidecar(cmd.OutOrStdout(), args[0], s)
+	return printBundleSidecar(cmd.OutOrStdout(), args[0], s)
 }
 
 type sidecarStats struct {
@@ -61,7 +74,7 @@ func collectSidecarStats(s *diff.LegacySidecar) sidecarStats {
 	return st
 }
 
-func printSidecar(w io.Writer, path string, s *diff.LegacySidecar) error {
+func printLegacySidecar(w io.Writer, path string, s *diff.LegacySidecar) error {
 	st := collectSidecarStats(s)
 	total := st.shipped + st.required
 	var savedPct float64
@@ -91,5 +104,60 @@ func printSidecar(w io.Writer, path string, s *diff.LegacySidecar) error {
 	}
 	fmt.Fprintf(w, "required: %d blobs (%d bytes)\n", len(s.RequiredFromBaseline), st.required)
 	fmt.Fprintf(w, "saved %.1f%% vs full image\n", savedPct)
+	return nil
+}
+
+type bundleStats struct {
+	fullCount, patchCount                             int
+	totalArchiveSize, patchArchiveSize, patchOrigSize int64
+}
+
+func collectBundleStats(s *diff.Sidecar) bundleStats {
+	var bs bundleStats
+	for _, b := range s.Blobs {
+		bs.totalArchiveSize += b.ArchiveSize
+		switch b.Encoding {
+		case diff.EncodingFull:
+			bs.fullCount++
+		case diff.EncodingPatch:
+			bs.patchCount++
+			bs.patchArchiveSize += b.ArchiveSize
+			bs.patchOrigSize += b.Size
+		}
+	}
+	return bs
+}
+
+func printBundleSidecar(w io.Writer, path string, s *diff.Sidecar) error {
+	bs := collectBundleStats(s)
+
+	fmt.Fprintf(w, "archive: %s\n", path)
+	fmt.Fprintf(w, "version: %s\n", s.Version)
+	fmt.Fprintf(w, "feature: %s\n", s.Feature)
+	fmt.Fprintf(w, "tool: %s\n", s.Tool)
+	fmt.Fprintf(w, "tool_version: %s\n", s.ToolVersion)
+	fmt.Fprintf(w, "platform: %s\n", s.Platform)
+	fmt.Fprintf(w, "created_at: %s\n", s.CreatedAt.Format("2006-01-02T15:04:05Z07:00"))
+	fmt.Fprintf(w, "images: %d\n", len(s.Images))
+	fmt.Fprintf(w, "blobs: %d (full: %d, patch: %d)\n", len(s.Blobs), bs.fullCount, bs.patchCount)
+	if bs.patchCount > 0 && bs.patchOrigSize > 0 {
+		avgRatio := float64(bs.patchArchiveSize) / float64(bs.patchOrigSize) * 100
+		fmt.Fprintf(w, "avg patch ratio: %.1f%%\n", avgRatio)
+	}
+	fmt.Fprintf(w, "total archive: %d bytes\n", bs.totalArchiveSize)
+	if bs.patchCount > 0 {
+		savings := bs.patchOrigSize - bs.patchArchiveSize
+		savingsPct := float64(savings) / float64(bs.patchOrigSize) * 100
+		fmt.Fprintf(w, "patch savings: %d bytes (%.1f%% vs full)\n", savings, savingsPct)
+	}
+
+	for _, img := range s.Images {
+		fmt.Fprintf(w, "\n--- image: %s ---\n", img.Name)
+		fmt.Fprintf(w, "  target manifest digest: %s (%s)\n", img.Target.ManifestDigest, img.Target.MediaType)
+		fmt.Fprintf(w, "  baseline manifest digest: %s (%s)\n", img.Baseline.ManifestDigest, img.Baseline.MediaType)
+		if img.Baseline.SourceHint != "" {
+			fmt.Fprintf(w, "  baseline source: %s\n", img.Baseline.SourceHint)
+		}
+	}
 	return nil
 }
