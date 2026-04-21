@@ -195,3 +195,141 @@ func TestIntegration_BundleOfOnePositional(t *testing.T) {
 	err := Import(h.ctx, opts)
 	require.NoError(t, err)
 }
+
+func TestIntegration_MultiImageBundle_RejectsImport(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	h := newMultiImageBundleHarness(t)
+	opts := h.importOpts(map[string]string{
+		"svc-a": "../../testdata/fixtures/v1_oci.tar",
+		"svc-b": "../../testdata/fixtures/v1_oci.tar",
+	}, false)
+	err := Import(h.ctx, opts)
+	require.Error(t, err, "multi-image bundle import must be rejected")
+	require.Contains(t, err.Error(), "multi-image bundle import is not yet supported")
+}
+
+func TestIntegration_MultiImageBundle_UnknownBaselineName(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	h := newMultiImageBundleHarness(t)
+	opts := h.importOpts(map[string]string{
+		"svc-a":      "../../testdata/fixtures/v1_oci.tar",
+		"wrong-name": "../../testdata/fixtures/v1_oci.tar",
+	}, false)
+	err := Import(h.ctx, opts)
+	require.Error(t, err)
+	var unknown *diff.ErrBaselineNameUnknown
+	require.ErrorAs(t, err, &unknown, "unknown baseline name must produce ErrBaselineNameUnknown")
+	require.Equal(t, "wrong-name", unknown.Name)
+	require.Contains(t, unknown.Available, "svc-a")
+	require.Contains(t, unknown.Available, "svc-b")
+}
+
+func TestIntegration_MultiImageBundle_StrictMissingAll(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	h := newMultiImageBundleHarness(t)
+	opts := h.importOpts(map[string]string{}, true)
+	err := Import(h.ctx, opts)
+	require.Error(t, err)
+	var missing *diff.ErrBaselineMissing
+	require.ErrorAs(t, err, &missing, "strict mode with no baselines must produce ErrBaselineMissing")
+	require.ElementsMatch(t, []string{"svc-a", "svc-b"}, missing.Names,
+		"must list ALL missing image names")
+}
+
+func TestIntegration_MultiImageBundle_StrictMissingOne(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	h := newMultiImageBundleHarness(t)
+	opts := h.importOpts(map[string]string{
+		"svc-a": "../../testdata/fixtures/v1_oci.tar",
+	}, true)
+	err := Import(h.ctx, opts)
+	require.Error(t, err)
+	var missing *diff.ErrBaselineMissing
+	require.ErrorAs(t, err, &missing, "strict mode with partial baselines must produce ErrBaselineMissing")
+	require.Equal(t, []string{"svc-b"}, missing.Names,
+		"must list only the missing image name")
+}
+
+func TestIntegration_MultiImageBundle_BaselineMismatch(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	h := newMultiImageBundleHarness(t)
+	opts := h.importOpts(map[string]string{
+		"svc-a": "../../testdata/fixtures/v2_oci.tar",
+		"svc-b": "../../testdata/fixtures/v1_oci.tar",
+	}, false)
+	err := Import(h.ctx, opts)
+	require.Error(t, err)
+	var mismatch *diff.ErrBaselineMismatch
+	require.ErrorAs(t, err, &mismatch, "wrong baseline must produce ErrBaselineMismatch")
+	require.Equal(t, "svc-a", mismatch.Name)
+}
+
+func TestIntegration_MultiImageBundle_PositionalBaselineRejected(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	h := newMultiImageBundleHarness(t)
+	opts := h.importOpts(map[string]string{
+		"default": "../../testdata/fixtures/v1_oci.tar",
+	}, false)
+	err := Import(h.ctx, opts)
+	require.Error(t, err)
+	var multi *diff.ErrMultiImageNeedsNamedBaselines
+	require.ErrorAs(t, err, &multi,
+		"positional baseline on multi-image bundle must produce ErrMultiImageNeedsNamedBaselines")
+}
+
+func TestIntegration_MultiImageBundle_DryRunReport(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	h := newMultiImageBundleHarness(t)
+	opts := h.importOpts(map[string]string{
+		"svc-a": "../../testdata/fixtures/v1_oci.tar",
+	}, false)
+	report, err := DryRun(h.ctx, opts)
+	require.NoError(t, err)
+	require.Equal(t, 2, report.TotalImages)
+	require.NotEmpty(t, report.TotalBlobs)
+	require.NotZero(t, report.ArchiveSize)
+	require.Len(t, report.PerImage, 1, "only svc-a baseline was provided")
+	require.Equal(t, "svc-a", report.PerImage[0].Name)
+	require.Equal(t, []string{"svc-b"}, report.MissingNames,
+		"svc-b baseline was not provided")
+}
+
+func TestIntegration_MultiImageBundle_ForceFullDedup(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	h := newMultiImageBundleHarness(t)
+	for d, e := range h.sidecar.Blobs {
+		if e.Encoding == diff.EncodingPatch {
+			t.Fatalf("shared target blobs must be forced to full encoding, got patch for %s", d)
+		}
+	}
+	require.GreaterOrEqual(t, len(h.sidecar.Blobs), 2, "must have at least 2 blobs (manifest + config)")
+	require.Len(t, h.sidecar.Images, 2)
+	require.Equal(t, "svc-a", h.sidecar.Images[0].Name)
+	require.Equal(t, "svc-b", h.sidecar.Images[1].Name)
+}
+
+func newMultiImageBundleHarness(t *testing.T) *bundleHarness {
+	t.Helper()
+	return newBundleHarness(t, []exporter.Pair{
+		{Name: "svc-a", BaselinePath: "../../testdata/fixtures/v1_oci.tar",
+			TargetPath: "../../testdata/fixtures/v2_oci.tar"},
+		{Name: "svc-b", BaselinePath: "../../testdata/fixtures/v1_oci.tar",
+			TargetPath: "../../testdata/fixtures/v2_oci.tar"},
+	})
+}
