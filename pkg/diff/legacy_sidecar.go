@@ -32,7 +32,7 @@ type LegacyBaselineRef struct {
 	SourceHint     string        `json:"source_hint,omitempty"`
 }
 
-// LegacySidecar is the diffah.json file written inside every delta archive.
+// LegacySidecar is the Phase 1 pre-bundle sidecar shape, retained until all callers migrate.
 //
 // It serves three purposes: schema versioning (Version), fail-fast
 // verification (RequiredFromBaseline is probed at import time), and human
