@@ -27,9 +27,6 @@ func resolveBaselines(
 	for _, img := range sc.Images {
 		path, ok := expanded[img.Name]
 		if !ok {
-			if strict {
-				return nil, &diff.ErrBaselineMissing{Names: []string{img.Name}}
-			}
 			continue
 		}
 		ref, err := imageio.OpenArchiveRef(path)
@@ -66,6 +63,24 @@ func resolveBaselines(
 		}
 		if len(missing) > 0 {
 			return nil, &diff.ErrBaselineMissing{Names: missing}
+		}
+	}
+
+	knownNames := make(map[string]struct{}, len(sc.Images))
+	for _, img := range sc.Images {
+		knownNames[img.Name] = struct{}{}
+	}
+	for name := range expanded {
+		if _, ok := knownNames[name]; !ok {
+			return nil, &diff.ErrBaselineNameUnknown{
+				Name: name, Available: func() []string {
+					names := make([]string, 0, len(sc.Images))
+					for _, img := range sc.Images {
+						names = append(names, img.Name)
+					}
+					return names
+				}(),
+			}
 		}
 	}
 

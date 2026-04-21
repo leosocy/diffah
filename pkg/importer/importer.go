@@ -53,6 +53,10 @@ func Import(ctx context.Context, opts Options) error {
 		return fmt.Errorf("no baselines resolved; at least one is required for import")
 	}
 
+	if len(bundle.sidecar.Images) > 1 {
+		return fmt.Errorf("multi-image bundle import is not yet supported; specify a single image to import")
+	}
+
 	rb := resolved[0]
 	var img diff.ImageEntry
 	for _, i := range bundle.sidecar.Images {

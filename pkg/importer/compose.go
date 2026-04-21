@@ -57,8 +57,28 @@ func composeImage(
 		return nil, fmt.Errorf("write config: %w", err)
 	}
 
-	for d, entry := range sc.Blobs {
+	needed := make(map[digest.Digest]struct{})
+	needed[img.Target.ManifestDigest] = struct{}{}
+	needed[configDigest] = struct{}{}
+	layerDigests, err := extractLayerDigests(manifestData)
+	if err != nil {
+		os.RemoveAll(tmpDir)
+		return nil, fmt.Errorf("extract layer digests: %w", err)
+	}
+	for _, ld := range layerDigests {
+		needed[ld] = struct{}{}
+	}
+
+	for d := range needed {
 		if d == img.Target.ManifestDigest || d == configDigest {
+			continue
+		}
+		entry, ok := sc.Blobs[d]
+		if !ok {
+			if err := fetchBaselineBlob(tmpDir, ctx, d, baselineRef); err != nil {
+				os.RemoveAll(tmpDir)
+				return nil, fmt.Errorf("fetch baseline blob %s: %w", d, err)
+			}
 			continue
 		}
 		if entry.Encoding == diff.EncodingFull {
@@ -71,24 +91,6 @@ func composeImage(
 				os.RemoveAll(tmpDir)
 				return nil, fmt.Errorf("apply patch %s: %w", d, err)
 			}
-		}
-	}
-
-	layerDigests, err := extractLayerDigests(manifestData)
-	if err != nil {
-		os.RemoveAll(tmpDir)
-		return nil, fmt.Errorf("extract layer digests: %w", err)
-	}
-	for _, ld := range layerDigests {
-		if _, ok := sc.Blobs[ld]; ok {
-			continue
-		}
-		if ld == configDigest {
-			continue
-		}
-		if err := fetchBaselineBlob(tmpDir, ctx, ld, baselineRef); err != nil {
-			os.RemoveAll(tmpDir)
-			return nil, fmt.Errorf("fetch baseline blob %s: %w", ld, err)
 		}
 	}
 

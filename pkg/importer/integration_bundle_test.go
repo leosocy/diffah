@@ -115,6 +115,9 @@ func TestIntegration_UnknownBaselineName(t *testing.T) {
 	opts := h.importOpts(map[string]string{"unknown-svc": "../../testdata/fixtures/v1_oci.tar"}, false)
 	err := Import(h.ctx, opts)
 	require.Error(t, err)
+	var unknown *diff.ErrBaselineNameUnknown
+	require.ErrorAs(t, err, &unknown, "unknown baseline name must produce ErrBaselineNameUnknown")
+	require.Equal(t, "unknown-svc", unknown.Name)
 }
 
 func TestIntegration_BaselineMismatch(t *testing.T) {

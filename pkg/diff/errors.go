@@ -13,14 +13,6 @@ func (e *ErrManifestListUnselected) Error() string {
 	return fmt.Sprintf("image %q is a manifest list: re-run with --platform os/arch[/variant]", e.Ref)
 }
 
-// ErrUnsupportedSchemaVersion is returned when a sidecar's version is not
-// recognized by the current reader.
-type ErrUnsupportedSchemaVersion struct{ Got string }
-
-func (e *ErrUnsupportedSchemaVersion) Error() string {
-	return fmt.Sprintf("unsupported sidecar version %q (this build supports v1)", e.Got)
-}
-
 // ErrSidecarSchema wraps a sidecar JSON decoding or validation failure.
 type ErrSidecarSchema struct{ Reason string }
 
