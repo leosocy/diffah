@@ -24,6 +24,13 @@ type DryRunStats struct {
 	TotalBlobs  int
 	TotalImages int
 	ArchiveSize int64
+	PerImage    []ImageStats
+}
+
+type ImageStats struct {
+	Name         string
+	ShippedBlobs int
+	ArchiveSize  int64
 }
 
 func Export(ctx context.Context, opts Options) error {
@@ -32,6 +39,10 @@ func Export(ctx context.Context, opts Options) error {
 	}
 	if opts.CreatedAt.IsZero() {
 		opts.CreatedAt = time.Now().UTC()
+	}
+
+	if opts.Progress != nil {
+		fmt.Fprintf(opts.Progress, "planning %d pairs...\n", len(opts.Pairs))
 	}
 
 	plans := make([]*pairPlan, 0, len(opts.Pairs))
@@ -52,14 +63,30 @@ func Export(ctx context.Context, opts Options) error {
 		}
 	}
 
+	if opts.Progress != nil {
+		fmt.Fprintf(opts.Progress, "planned %d pairs\n", len(plans))
+	}
+
 	if err := encodeShipped(ctx, pool, plans, opts.IntraLayer, opts.fingerprinter); err != nil {
 		return fmt.Errorf("encode shipped layers: %w", err)
+	}
+
+	if opts.Progress != nil {
+		fmt.Fprintf(opts.Progress, "encoded %d blobs\n", len(pool.entries))
 	}
 
 	sidecar := assembleSidecar(pool, plans, opts.Platform, opts.ToolVersion, opts.CreatedAt)
 
 	if err := writeBundleArchive(opts.OutputPath, sidecar, pool); err != nil {
 		return fmt.Errorf("write archive: %w", err)
+	}
+
+	if opts.Progress != nil {
+		var archiveSize int64
+		for _, e := range sidecar.Blobs {
+			archiveSize += e.ArchiveSize
+		}
+		fmt.Fprintf(opts.Progress, "wrote %s (%d bytes)\n", opts.OutputPath, archiveSize)
 	}
 
 	return nil
@@ -103,6 +130,19 @@ func DryRun(ctx context.Context, opts Options) (DryRunStats, error) {
 	}
 	for _, e := range sidecar.Blobs {
 		stats.ArchiveSize += e.ArchiveSize
+	}
+	for _, plan := range plans {
+		var imgSize int64
+		var shippedCount int
+		for _, s := range plan.Shipped {
+			if e, ok := pool.entries[s.Digest]; ok {
+				imgSize += e.ArchiveSize
+				shippedCount++
+			}
+		}
+		stats.PerImage = append(stats.PerImage, ImageStats{
+			Name: plan.Name, ShippedBlobs: shippedCount, ArchiveSize: imgSize,
+		})
 	}
 	return stats, nil
 }
