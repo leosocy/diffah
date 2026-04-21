@@ -2,12 +2,10 @@ package cmd
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/spf13/cobra"
 
-	"github.com/leosocy/diffah/internal/imageio"
 	"github.com/leosocy/diffah/pkg/exporter"
 )
 
@@ -49,31 +47,19 @@ func init() {
 }
 
 func runExport(cmd *cobra.Command, _ []string) error {
-	if exportFlags.baseline == "" && exportFlags.baselineManifest == "" {
-		return errors.New("one of --baseline or --baseline-manifest is required")
-	}
-	if exportFlags.baseline != "" && exportFlags.baselineManifest != "" {
-		return errors.New("--baseline and --baseline-manifest are mutually exclusive")
-	}
-
-	targetRef, err := imageio.ParseReference(exportFlags.target)
-	if err != nil {
-		return err
-	}
 	opts := exporter.Options{
-		TargetRef:            targetRef,
-		Platform:             exportFlags.platform,
-		Compress:             exportFlags.compress,
-		IntraLayer:           exportFlags.intraLayer,
-		OutputPath:           exportFlags.output,
-		BaselineManifestPath: exportFlags.baselineManifest,
-		ToolVersion:          version,
-	}
-	if exportFlags.baseline != "" {
-		opts.LegacyBaselineRef, err = imageio.ParseReference(exportFlags.baseline)
-		if err != nil {
-			return err
-		}
+		Pairs: []exporter.Pair{
+			{
+				Name:         "default",
+				BaselinePath: exportFlags.baseline,
+				TargetPath:   exportFlags.target,
+			},
+		},
+		Platform:    exportFlags.platform,
+		Compress:    exportFlags.compress,
+		IntraLayer:  exportFlags.intraLayer,
+		OutputPath:  exportFlags.output,
+		ToolVersion: version,
 	}
 
 	ctx := context.Background()
