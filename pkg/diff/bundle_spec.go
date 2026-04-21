@@ -51,6 +51,35 @@ func ParseBundleSpec(path string) (*BundleSpec, error) {
 	return &spec, nil
 }
 
+type BaselineSpec struct {
+	Baselines map[string]string `json:"baselines"`
+}
+
+func ParseBaselineSpec(path string) (*BaselineSpec, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, &ErrInvalidBundleSpec{Path: path, Reason: err.Error()}
+	}
+	var spec BaselineSpec
+	if err := json.Unmarshal(raw, &spec); err != nil {
+		return nil, &ErrInvalidBundleSpec{Path: path, Reason: err.Error()}
+	}
+	if len(spec.Baselines) == 0 {
+		return nil, &ErrInvalidBundleSpec{Path: path, Reason: "baselines must be non-empty"}
+	}
+	base := filepath.Dir(path)
+	resolved := make(map[string]string, len(spec.Baselines))
+	for name, p := range spec.Baselines {
+		if !nameRegex.MatchString(name) {
+			return nil, &ErrInvalidBundleSpec{Path: path, Reason: fmt.Sprintf(
+				"name %q does not match %s", name, nameRegex)}
+		}
+		resolved[name] = resolveSpecPath(base, p)
+	}
+	spec.Baselines = resolved
+	return &spec, nil
+}
+
 func resolveSpecPath(base, p string) string {
 	if filepath.IsAbs(p) {
 		return p

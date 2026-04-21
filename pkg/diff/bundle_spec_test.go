@@ -28,6 +28,40 @@ func TestParseBundleSpec_HappyPath(t *testing.T) {
 	require.Equal(t, filepath.Join(dir, "b.tar"), spec.Pairs[0].Target)
 }
 
+func TestParseBaselineSpec_HappyPath(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "a.tar"), []byte{}, 0o600))
+	raw := []byte(`{"baselines":{"service-a":"a.tar"}}`)
+	specPath := filepath.Join(dir, "baselines.json")
+	require.NoError(t, os.WriteFile(specPath, raw, 0o600))
+
+	spec, err := ParseBaselineSpec(specPath)
+	require.NoError(t, err)
+	require.Equal(t, map[string]string{
+		"service-a": filepath.Join(dir, "a.tar"),
+	}, spec.Baselines)
+}
+
+func TestParseBaselineSpec_RejectsMalformed(t *testing.T) {
+	cases := []struct {
+		name, body, want string
+	}{
+		{"bad JSON", "{", "bundle spec"},
+		{"empty map", `{"baselines":{}}`, "non-empty"},
+		{"bad name", `{"baselines":{"-leading":"a"}}`, "name"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			specPath := filepath.Join(dir, "spec.json")
+			require.NoError(t, os.WriteFile(specPath, []byte(tc.body), 0o600))
+			_, err := ParseBaselineSpec(specPath)
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tc.want)
+		})
+	}
+}
+
 func TestParseBundleSpec_RejectsMalformed(t *testing.T) {
 	cases := []struct {
 		name string
