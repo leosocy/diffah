@@ -326,7 +326,7 @@ func readBaselineBlob(ib *ImageBaseline, d digest.Digest) ([]byte, error) {
 // patch bytes (or recompressed full bytes) under the original digest name.
 func writePayloads(dir string, payloads map[digest.Digest][]byte) error {
 	for d, data := range payloads {
-		if err := os.WriteFile(filepath.Join(dir, d.Encoded()), data, 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, d.Encoded()), data, 0o600); err != nil {
 			return fmt.Errorf("write payload %s: %w", d, err)
 		}
 	}

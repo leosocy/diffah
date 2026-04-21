@@ -11,15 +11,41 @@
 package zstdpatch
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
+
+	"github.com/klauspost/compress/zstd"
 )
 
+// emptyZstdFrame returns a canonical zstd frame that decodes to zero bytes.
+// Generated once via klauspost/compress so it is guaranteed standards-compliant.
+//
+// Short-circuiting empty payloads avoids a known assertion failure
+// (FIO_highbit64: v != 0) in the zstd CLI < 1.5.x when asked to encode
+// an empty file.
+var emptyZstdFrame = sync.OnceValue(func() []byte {
+	enc, err := zstd.NewWriter(nil)
+	if err != nil {
+		// zstd.NewWriter(nil) has no failure path in current klauspost;
+		// panic here makes the invariant explicit if that ever changes.
+		panic(fmt.Sprintf("zstdpatch: klauspost NewWriter: %v", err))
+	}
+	out := enc.EncodeAll(nil, nil)
+	_ = enc.Close()
+	return out
+})
+
 // Encode produces a zstd frame using --patch-from=ref that decodes to target.
-// An empty target encodes to a valid zstd frame that decodes to zero bytes.
+// An empty target returns a precomputed empty frame to avoid invoking the CLI
+// on a degenerate case that crashes older zstd builds.
 func Encode(ref, target []byte) ([]byte, error) {
+	if len(target) == 0 {
+		return append([]byte(nil), emptyZstdFrame()...), nil
+	}
 	dir, err := os.MkdirTemp("", "zstdpatch-*")
 	if err != nil {
 		return nil, fmt.Errorf("zstdpatch: create temp dir: %w", err)
@@ -37,6 +63,7 @@ func Encode(ref, target []byte) ([]byte, error) {
 		return nil, fmt.Errorf("zstdpatch: write target: %w", err)
 	}
 
+	//nolint:gosec // G204: every argv path is created by this function via MkdirTemp; no user input reaches exec.Command.
 	cmd := exec.Command("zstd",
 		"-3", "--long=27",
 		"--patch-from="+refPath,
@@ -57,6 +84,9 @@ func Encode(ref, target []byte) ([]byte, error) {
 
 // EncodeFull compresses target as a standalone zstd frame (no reference).
 func EncodeFull(target []byte) ([]byte, error) {
+	if len(target) == 0 {
+		return append([]byte(nil), emptyZstdFrame()...), nil
+	}
 	dir, err := os.MkdirTemp("", "zstdpatch-*")
 	if err != nil {
 		return nil, fmt.Errorf("zstdpatch: create temp dir: %w", err)
@@ -93,6 +123,9 @@ func EncodeFull(target []byte) ([]byte, error) {
 // Callers are expected to verify the decoded bytes against the content
 // digest recorded in the sidecar.
 func Decode(ref, patch []byte) ([]byte, error) {
+	if bytes.Equal(patch, emptyZstdFrame()) {
+		return nil, nil
+	}
 	dir, err := os.MkdirTemp("", "zstdpatch-*")
 	if err != nil {
 		return nil, fmt.Errorf("zstdpatch: create temp dir: %w", err)
@@ -110,6 +143,7 @@ func Decode(ref, patch []byte) ([]byte, error) {
 		return nil, fmt.Errorf("zstdpatch: write patch: %w", err)
 	}
 
+	//nolint:gosec // G204: every argv path is mktempd above; no user input.
 	cmd := exec.Command("zstd",
 		"-d", "--long=27",
 		"--patch-from="+refPath,
@@ -130,6 +164,9 @@ func Decode(ref, patch []byte) ([]byte, error) {
 
 // DecodeFull reads a standalone zstd frame (no reference).
 func DecodeFull(data []byte) ([]byte, error) {
+	if bytes.Equal(data, emptyZstdFrame()) {
+		return nil, nil
+	}
 	dir, err := os.MkdirTemp("", "zstdpatch-*")
 	if err != nil {
 		return nil, fmt.Errorf("zstdpatch: create temp dir: %w", err)

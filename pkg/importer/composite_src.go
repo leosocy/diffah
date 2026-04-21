@@ -83,12 +83,12 @@ func (c *CompositeSource) GetBlob(
 func (c *CompositeSource) fetchPatched(
 	ctx context.Context, entry diff.BlobRef, cache types.BlobInfoCache,
 ) (io.ReadCloser, int64, error) {
-	ref, err := readAllBlob(c.baseline, ctx, types.BlobInfo{Digest: entry.PatchFromDigest}, cache)
+	ref, err := readAllBlob(ctx, c.baseline, types.BlobInfo{Digest: entry.PatchFromDigest}, cache)
 	if err != nil {
 		return nil, 0, fmt.Errorf("composite: fetch patch reference %s: %w",
 			entry.PatchFromDigest, err)
 	}
-	patch, err := readAllBlob(c.delta, ctx, types.BlobInfo{Digest: entry.Digest}, cache)
+	patch, err := readAllBlob(ctx, c.delta, types.BlobInfo{Digest: entry.Digest}, cache)
 	if err != nil {
 		return nil, 0, fmt.Errorf("composite: fetch patch bytes %s: %w",
 			entry.Digest, err)
@@ -106,8 +106,10 @@ func (c *CompositeSource) fetchPatched(
 }
 
 func readAllBlob(
-	src types.ImageSource, ctx context.Context,
-	info types.BlobInfo, cache types.BlobInfoCache,
+	ctx context.Context,
+	src types.ImageSource,
+	info types.BlobInfo,
+	cache types.BlobInfoCache,
 ) ([]byte, error) {
 	r, _, err := src.GetBlob(ctx, info, cache)
 	if err != nil {

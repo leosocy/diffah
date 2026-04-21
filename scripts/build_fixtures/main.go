@@ -352,7 +352,13 @@ func buildFixtures(ctx context.Context) error {
 	}
 
 	// Remove any pre-existing fixture files so transports can create fresh archives.
-	for _, name := range []string{"v1_oci.tar", "v1_s2.tar", "v2_oci.tar", "v2_s2.tar", "v3_oci.tar", "v3_s2.tar", "unrelated_oci.tar", "CHECKSUMS"} {
+	existing := []string{
+		"v1_oci.tar", "v1_s2.tar",
+		"v2_oci.tar", "v2_s2.tar",
+		"v3_oci.tar", "v3_s2.tar",
+		"unrelated_oci.tar", "CHECKSUMS",
+	}
+	for _, name := range existing {
 		if err := removeIfExists(filepath.Join(fixtureDir, name)); err != nil {
 			return err
 		}
@@ -380,14 +386,14 @@ func buildFixtures(ctx context.Context) error {
 	v3Compressed, v3DiffID, v3Blob := buildLayerBlob("version.txt", []byte("v3\n"))
 
 	type fixtureSpec struct {
-		name          string
-		baseLayer     []byte
-		baseDiff      digest.Digest
-		baseBlob      digest.Digest
-		versionLayer  []byte
-		versionDiff   digest.Digest
-		versionBlob   digest.Digest
-		version       string
+		name         string
+		baseLayer    []byte
+		baseDiff     digest.Digest
+		baseBlob     digest.Digest
+		versionLayer []byte
+		versionDiff  digest.Digest
+		versionBlob  digest.Digest
+		version      string
 	}
 
 	versions := []fixtureSpec{
@@ -429,7 +435,8 @@ func buildFixtures(ctx context.Context) error {
 	}
 	var outputs []archiveOutput
 
-	for _, vs := range versions {
+	for i := range versions {
+		vs := &versions[i]
 		layers := [][]byte{vs.baseLayer, vs.versionLayer}
 		layerDiffs := []digest.Digest{vs.baseDiff, vs.versionDiff}
 		layerBlobs := []types.BlobInfo{
