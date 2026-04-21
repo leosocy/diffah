@@ -68,14 +68,14 @@ func (f *fakeSource) LayerInfosForCopy(_ context.Context, _ *digest.Digest) ([]t
 	return nil, nil
 }
 
-func makeSidecar(shipped, required []diff.BlobRef) *diff.Sidecar {
-	return &diff.Sidecar{
+func makeSidecar(shipped, required []diff.BlobRef) *diff.LegacySidecar {
+	return &diff.LegacySidecar{
 		Version:              "v1",
 		Tool:                 "diffah",
 		ToolVersion:          "test",
 		Platform:             "linux/amd64",
-		Target:               diff.ImageRef{ManifestDigest: "sha256:target", MediaType: "m"},
-		Baseline:             diff.BaselineRef{ManifestDigest: "sha256:base", MediaType: "m"},
+		Target:               diff.LegacyTargetRef{ManifestDigest: "sha256:target", MediaType: "m"},
+		Baseline:             diff.LegacyBaselineRef{ManifestDigest: "sha256:base", MediaType: "m"},
 		ShippedInDelta:       shipped,
 		RequiredFromBaseline: required,
 	}
@@ -202,10 +202,10 @@ func TestProbeBaseline_MissingPatchRef_RaisesErr(t *testing.T) {
 		manifestMT:  "application/vnd.oci.image.manifest.v1+json",
 	}
 
-	sc := &diff.Sidecar{
+	sc := &diff.LegacySidecar{
 		Version: "v1", Tool: "diffah", ToolVersion: "t", Platform: "linux/amd64",
-		Target:               diff.ImageRef{ManifestDigest: "sha256:tgt", MediaType: "m"},
-		Baseline:             diff.BaselineRef{ManifestDigest: "sha256:b", MediaType: "m"},
+		Target:               diff.LegacyTargetRef{ManifestDigest: "sha256:tgt", MediaType: "m"},
+		Baseline:             diff.LegacyBaselineRef{ManifestDigest: "sha256:b", MediaType: "m"},
 		RequiredFromBaseline: []diff.BlobRef{},
 		ShippedInDelta: []diff.BlobRef{{
 			Digest: "sha256:tgt", Size: 100, MediaType: "m",

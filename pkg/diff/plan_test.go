@@ -61,7 +61,7 @@ func TestComputePlan_AllLayersInBaseline(t *testing.T) {
 // regression where a zero-overlap partition left one of the Plan slices as
 // a nil slice, which the sidecar validator then rejected as "field missing".
 // Observed against a production image where every layer was replaced by a
-// base-image rebase; ComputePlan must still produce a marshal-able Sidecar.
+// base-image rebase; ComputePlan must still produce a marshal-able LegacySidecar.
 func TestComputePlan_ReturnsNonNilSlicesEvenWhenPartitionEmpty(t *testing.T) {
 	// Case 1: zero baseline overlap → RequiredFromBaseline must be non-nil.
 	targetOnly := []BlobRef{{Digest: "sha256:a", Size: 1}}

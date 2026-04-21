@@ -10,19 +10,19 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func validSidecar() Sidecar {
-	return Sidecar{
+func validLegacySidecar() LegacySidecar {
+	return LegacySidecar{
 		Version:     "v1",
 		Tool:        "diffah",
 		ToolVersion: "v0.1.0",
 		CreatedAt:   time.Date(2026, 4, 20, 13, 21, 0, 0, time.UTC),
 		Platform:    "linux/amd64",
-		Target: ImageRef{
+		Target: LegacyTargetRef{
 			ManifestDigest: digest.Digest("sha256:aaa"),
 			ManifestSize:   1234,
 			MediaType:      "application/vnd.docker.distribution.manifest.v2+json",
 		},
-		Baseline: BaselineRef{
+		Baseline: LegacyBaselineRef{
 			ManifestDigest: digest.Digest("sha256:bbb"),
 			MediaType:      "application/vnd.docker.distribution.manifest.v2+json",
 			SourceHint:     "docker://x/y:v1",
@@ -38,32 +38,32 @@ func validSidecar() Sidecar {
 	}
 }
 
-func TestSidecar_MarshalUnmarshalRoundTrip(t *testing.T) {
-	orig := validSidecar()
+func TestLegacySidecar_MarshalUnmarshalRoundTrip(t *testing.T) {
+	orig := validLegacySidecar()
 
 	raw, err := orig.Marshal()
 	require.NoError(t, err)
 	require.Contains(t, string(raw), `"version": "v1"`)
 
-	back, err := ParseSidecar(raw)
+	back, err := ParseLegacySidecar(raw)
 	require.NoError(t, err)
 	require.Equal(t, orig, *back)
 }
 
-func TestParseSidecar_RejectsUnknownVersion(t *testing.T) {
-	s := validSidecar()
+func TestParseLegacySidecar_RejectsUnknownVersion(t *testing.T) {
+	s := validLegacySidecar()
 	s.Version = "v99"
 	raw, err := s.Marshal()
 	require.NoError(t, err)
 
-	_, err = ParseSidecar(raw)
+	_, err = ParseLegacySidecar(raw)
 	var ve *ErrUnsupportedSchemaVersion
 	require.ErrorAs(t, err, &ve)
 	require.Equal(t, "v99", ve.Got)
 }
 
-func TestSidecar_MarshalRejectsMissingPlatform(t *testing.T) {
-	s := validSidecar()
+func TestLegacySidecar_MarshalRejectsMissingPlatform(t *testing.T) {
+	s := validLegacySidecar()
 	s.Platform = ""
 
 	_, err := s.Marshal()
@@ -71,35 +71,35 @@ func TestSidecar_MarshalRejectsMissingPlatform(t *testing.T) {
 	require.ErrorAs(t, err, &se)
 }
 
-func TestParseSidecar_RejectsMissingRequiredFields(t *testing.T) {
-	cases := map[string]func(s *Sidecar){
-		"no platform":       func(s *Sidecar) { s.Platform = "" },
-		"no target digest":  func(s *Sidecar) { s.Target.ManifestDigest = "" },
-		"no required slice": func(s *Sidecar) { s.RequiredFromBaseline = nil },
+func TestParseLegacySidecar_RejectsMissingRequiredFields(t *testing.T) {
+	cases := map[string]func(s *LegacySidecar){
+		"no platform":       func(s *LegacySidecar) { s.Platform = "" },
+		"no target digest":  func(s *LegacySidecar) { s.Target.ManifestDigest = "" },
+		"no required slice": func(s *LegacySidecar) { s.RequiredFromBaseline = nil },
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
-			s := validSidecar()
+			s := validLegacySidecar()
 			// Skip Marshal validation by encoding directly.
 			mutate(&s)
 			raw, err := json.Marshal(s)
 			require.NoError(t, err)
 
-			_, err = ParseSidecar(raw)
+			_, err = ParseLegacySidecar(raw)
 			var se *ErrSidecarSchema
 			require.ErrorAs(t, err, &se)
 		})
 	}
 }
 
-func TestParseSidecar_RejectsMalformedJSON(t *testing.T) {
-	_, err := ParseSidecar([]byte("not json"))
+func TestParseLegacySidecar_RejectsMalformedJSON(t *testing.T) {
+	_, err := ParseLegacySidecar([]byte("not json"))
 	require.Error(t, err)
 	require.True(t, strings.Contains(err.Error(), "decode"))
 }
 
-func TestSidecar_MarshalIsPrettyPrinted(t *testing.T) {
-	s := validSidecar()
+func TestLegacySidecar_MarshalIsPrettyPrinted(t *testing.T) {
+	s := validLegacySidecar()
 	raw, err := s.Marshal()
 	require.NoError(t, err)
 	require.True(t, json.Valid(raw))
@@ -108,8 +108,8 @@ func TestSidecar_MarshalIsPrettyPrinted(t *testing.T) {
 
 // --- Intra-layer validation tests (Task 2) ---
 
-func validSidecarWithEncoding() Sidecar {
-	s := validSidecar()
+func validLegacySidecarWithEncoding() LegacySidecar {
+	s := validLegacySidecar()
 	s.ShippedInDelta = []BlobRef{
 		{
 			Digest:      "sha256:eee",
@@ -122,8 +122,8 @@ func validSidecarWithEncoding() Sidecar {
 	return s
 }
 
-func TestSidecar_Rejects_ShippedEntry_MissingEncoding(t *testing.T) {
-	s := validSidecarWithEncoding()
+func TestLegacySidecar_Rejects_ShippedEntry_MissingEncoding(t *testing.T) {
+	s := validLegacySidecarWithEncoding()
 	s.ShippedInDelta[0].Encoding = ""
 	_, err := s.Marshal()
 	var ve *ErrSidecarSchema
@@ -131,8 +131,8 @@ func TestSidecar_Rejects_ShippedEntry_MissingEncoding(t *testing.T) {
 	require.Contains(t, err.Error(), "encoding")
 }
 
-func TestSidecar_Rejects_PatchEntry_MissingFromDigest(t *testing.T) {
-	s := validSidecarWithEncoding()
+func TestLegacySidecar_Rejects_PatchEntry_MissingFromDigest(t *testing.T) {
+	s := validLegacySidecarWithEncoding()
 	s.ShippedInDelta[0] = BlobRef{
 		Digest: "sha256:eee", Size: 20, MediaType: "m",
 		Encoding:    EncodingPatch,
@@ -146,8 +146,8 @@ func TestSidecar_Rejects_PatchEntry_MissingFromDigest(t *testing.T) {
 	require.Contains(t, err.Error(), "patch_from_digest")
 }
 
-func TestSidecar_Rejects_PatchEntry_MissingCodec(t *testing.T) {
-	s := validSidecarWithEncoding()
+func TestLegacySidecar_Rejects_PatchEntry_MissingCodec(t *testing.T) {
+	s := validLegacySidecarWithEncoding()
 	s.ShippedInDelta[0] = BlobRef{
 		Digest: "sha256:eee", Size: 20, MediaType: "m",
 		Encoding:        EncodingPatch,
@@ -160,8 +160,8 @@ func TestSidecar_Rejects_PatchEntry_MissingCodec(t *testing.T) {
 	require.Contains(t, err.Error(), "codec")
 }
 
-func TestSidecar_Rejects_PatchEntry_ArchiveSize_NotLessThanSize(t *testing.T) {
-	s := validSidecarWithEncoding()
+func TestLegacySidecar_Rejects_PatchEntry_ArchiveSize_NotLessThanSize(t *testing.T) {
+	s := validLegacySidecarWithEncoding()
 	s.ShippedInDelta[0] = BlobRef{
 		Digest: "sha256:eee", Size: 20, MediaType: "m",
 		Encoding:        EncodingPatch,
@@ -175,24 +175,24 @@ func TestSidecar_Rejects_PatchEntry_ArchiveSize_NotLessThanSize(t *testing.T) {
 	require.Contains(t, err.Error(), "archive_size")
 }
 
-func TestSidecar_Rejects_FullEntry_Has_PatchFromDigest(t *testing.T) {
-	s := validSidecarWithEncoding()
+func TestLegacySidecar_Rejects_FullEntry_Has_PatchFromDigest(t *testing.T) {
+	s := validLegacySidecarWithEncoding()
 	s.ShippedInDelta[0].PatchFromDigest = "sha256:ref"
 	_, err := s.Marshal()
 	var ve *ErrSidecarSchema
 	require.ErrorAs(t, err, &ve)
 }
 
-func TestSidecar_Rejects_FullEntry_Archive_NotEqualSize(t *testing.T) {
-	s := validSidecarWithEncoding()
+func TestLegacySidecar_Rejects_FullEntry_Archive_NotEqualSize(t *testing.T) {
+	s := validLegacySidecarWithEncoding()
 	s.ShippedInDelta[0].ArchiveSize = 19
 	_, err := s.Marshal()
 	var ve *ErrSidecarSchema
 	require.ErrorAs(t, err, &ve)
 }
 
-func TestSidecar_Rejects_RequiredEntry_HasIntraLayerFields(t *testing.T) {
-	s := validSidecarWithEncoding()
+func TestLegacySidecar_Rejects_RequiredEntry_HasIntraLayerFields(t *testing.T) {
+	s := validLegacySidecarWithEncoding()
 	s.RequiredFromBaseline[0].Encoding = EncodingFull
 	_, err := s.Marshal()
 	var ve *ErrSidecarSchema
@@ -200,8 +200,8 @@ func TestSidecar_Rejects_RequiredEntry_HasIntraLayerFields(t *testing.T) {
 	require.Contains(t, err.Error(), "required_from_baseline")
 }
 
-func TestSidecar_PatchEntry_MarshalsCorrectly(t *testing.T) {
-	s := validSidecarWithEncoding()
+func TestLegacySidecar_PatchEntry_MarshalsCorrectly(t *testing.T) {
+	s := validLegacySidecarWithEncoding()
 	s.ShippedInDelta[0] = BlobRef{
 		Digest: "sha256:eee", Size: 1000, MediaType: "m",
 		Encoding:        EncodingPatch,

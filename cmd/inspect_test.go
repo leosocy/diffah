@@ -29,7 +29,7 @@ func buildInspectTestDelta(t *testing.T) string {
 
 	out := filepath.Join(t.TempDir(), "delta.tar")
 	require.NoError(t, exporter.Export(ctx, exporter.Options{
-		TargetRef: targetRef, BaselineRef: baselineRef, OutputPath: out, ToolVersion: "test",
+		TargetRef: targetRef, LegacyBaselineRef: baselineRef, OutputPath: out, ToolVersion: "test",
 	}))
 	return out
 }
@@ -57,18 +57,18 @@ func TestInspectCommand_PrintsSidecarFields(t *testing.T) {
 }
 
 func TestPrintSidecar_IntraLayerStats(t *testing.T) {
-	s := &diff.Sidecar{
+	s := &diff.LegacySidecar{
 		Version:     "v1",
 		Tool:        "diffah",
 		ToolVersion: "v0.1.0",
 		CreatedAt:   time.Date(2026, 4, 20, 10, 0, 0, 0, time.UTC),
 		Platform:    "linux/amd64",
-		Target: diff.ImageRef{
+		Target: diff.LegacyTargetRef{
 			ManifestDigest: digest.Digest("sha256:aaa"),
 			ManifestSize:   100,
 			MediaType:      "application/vnd.docker.distribution.manifest.v2+json",
 		},
-		Baseline: diff.BaselineRef{
+		Baseline: diff.LegacyBaselineRef{
 			ManifestDigest: digest.Digest("sha256:bbb"),
 			MediaType:      "application/vnd.docker.distribution.manifest.v2+json",
 		},

@@ -27,11 +27,11 @@ func buildDeltaIntraLayerAuto(t *testing.T, transport, targetTar, baselineTar st
 
 	out := filepath.Join(t.TempDir(), "delta.tar")
 	require.NoError(t, exporter.Export(ctx, exporter.Options{
-		TargetRef:   target,
-		BaselineRef: baseline,
-		OutputPath:  out,
-		ToolVersion: "test",
-		IntraLayer:  "auto",
+		TargetRef:         target,
+		LegacyBaselineRef: baseline,
+		OutputPath:        out,
+		ToolVersion:       "test",
+		IntraLayer:        "auto",
 	}))
 	return out
 }
@@ -53,7 +53,7 @@ func TestIntraLayer_E2E_OCI_ExportImportRoundTrip(t *testing.T) {
 	// Step 2: Inspect sidecar — expect at least one patch-encoded entry.
 	raw, err := archive.ReadSidecar(delta)
 	require.NoError(t, err)
-	sidecar, err := diff.ParseSidecar(raw)
+	sidecar, err := diff.ParseLegacySidecar(raw)
 	require.NoError(t, err)
 
 	hasPatch := false
@@ -75,9 +75,9 @@ func TestIntraLayer_E2E_OCI_ExportImportRoundTrip(t *testing.T) {
 
 	out := filepath.Join(t.TempDir(), "v3_reconstructed.tar")
 	require.NoError(t, importer.Import(ctx, importer.Options{
-		DeltaPath:   delta,
-		BaselineRef: baselineRef,
-		OutputPath:  out,
+		DeltaPath:         delta,
+		LegacyBaselineRef: baselineRef,
+		OutputPath:        out,
 	}))
 
 	// Step 4: Verify manifest digest matches the sidecar's target.
@@ -100,7 +100,7 @@ func TestIntraLayer_E2E_S2_ExportImportRoundTrip(t *testing.T) {
 	// Inspect sidecar.
 	raw, err := archive.ReadSidecar(delta)
 	require.NoError(t, err)
-	sidecar, err := diff.ParseSidecar(raw)
+	sidecar, err := diff.ParseLegacySidecar(raw)
 	require.NoError(t, err)
 
 	hasPatch := false
@@ -122,9 +122,9 @@ func TestIntraLayer_E2E_S2_ExportImportRoundTrip(t *testing.T) {
 
 	out := filepath.Join(t.TempDir(), "v3_reconstructed.tar")
 	require.NoError(t, importer.Import(ctx, importer.Options{
-		DeltaPath:   delta,
-		BaselineRef: baselineRef,
-		OutputPath:  out,
+		DeltaPath:         delta,
+		LegacyBaselineRef: baselineRef,
+		OutputPath:        out,
 	}))
 
 	// Verify manifest digest.
@@ -147,7 +147,7 @@ func TestIntraLayer_E2E_PatchSmallerThanFull(t *testing.T) {
 
 	raw, err := archive.ReadSidecar(delta)
 	require.NoError(t, err)
-	sidecar, err := diff.ParseSidecar(raw)
+	sidecar, err := diff.ParseLegacySidecar(raw)
 	require.NoError(t, err)
 
 	// With v3 differing from v2 by only 1 byte, the patch must be

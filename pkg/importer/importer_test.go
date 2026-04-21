@@ -46,7 +46,7 @@ func buildDeltaWithTransport(t *testing.T, transport, targetTar, baselineTar str
 
 	out := filepath.Join(t.TempDir(), "delta.tar")
 	require.NoError(t, exporter.Export(ctx, exporter.Options{
-		TargetRef: target, BaselineRef: baseline, OutputPath: out, ToolVersion: "test",
+		TargetRef: target, LegacyBaselineRef: baseline, OutputPath: out, ToolVersion: "test",
 		IntraLayer: "off",
 	}))
 	return out
@@ -75,10 +75,10 @@ func TestImport_RoundTrip_OCIFixture(t *testing.T) {
 
 	out := filepath.Join(t.TempDir(), "v2.tar")
 	err = importer.Import(ctx, importer.Options{
-		DeltaPath:    delta,
-		BaselineRef:  baseline,
-		OutputPath:   out,
-		OutputFormat: "oci-archive",
+		DeltaPath:         delta,
+		LegacyBaselineRef: baseline,
+		OutputPath:        out,
+		OutputFormat:      "oci-archive",
 	})
 	require.NoError(t, err)
 
@@ -96,10 +96,10 @@ func TestImport_RoundTrip_DirOutput(t *testing.T) {
 
 	out := filepath.Join(t.TempDir(), "v2_dir")
 	err = importer.Import(ctx, importer.Options{
-		DeltaPath:    delta,
-		BaselineRef:  baseline,
-		OutputPath:   out,
-		OutputFormat: "dir",
+		DeltaPath:         delta,
+		LegacyBaselineRef: baseline,
+		OutputPath:        out,
+		OutputFormat:      "dir",
 	})
 	require.NoError(t, err)
 
@@ -116,10 +116,10 @@ func TestImport_UnknownFormat(t *testing.T) {
 	require.NoError(t, err)
 
 	err = importer.Import(ctx, importer.Options{
-		DeltaPath:    delta,
-		BaselineRef:  baseline,
-		OutputPath:   filepath.Join(t.TempDir(), "out"),
-		OutputFormat: "bogus",
+		DeltaPath:         delta,
+		LegacyBaselineRef: baseline,
+		OutputPath:        filepath.Join(t.TempDir(), "out"),
+		OutputFormat:      "bogus",
 	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "bogus")
@@ -136,10 +136,10 @@ func TestImport_FailFast_MissingBaselineBlob(t *testing.T) {
 
 	out := filepath.Join(t.TempDir(), "x.tar")
 	err = importer.Import(ctx, importer.Options{
-		DeltaPath:    delta,
-		BaselineRef:  unrelated,
-		OutputPath:   out,
-		OutputFormat: "oci-archive",
+		DeltaPath:         delta,
+		LegacyBaselineRef: unrelated,
+		OutputPath:        out,
+		OutputFormat:      "oci-archive",
 	})
 	var mbe *diff.ErrBaselineMissingBlob
 	require.ErrorAs(t, err, &mbe)
@@ -160,10 +160,10 @@ func TestImport_DryRun_OnlyProbes_Reachable(t *testing.T) {
 
 	out := filepath.Join(t.TempDir(), "x.tar")
 	report, err := importer.DryRun(ctx, importer.Options{
-		DeltaPath:    delta,
-		BaselineRef:  baselineRef,
-		OutputPath:   out,
-		OutputFormat: "oci-archive",
+		DeltaPath:         delta,
+		LegacyBaselineRef: baselineRef,
+		OutputPath:        out,
+		OutputFormat:      "oci-archive",
 	})
 	require.NoError(t, err)
 	require.True(t, report.AllReachable)
@@ -185,7 +185,7 @@ func TestImport_AutoFormat_OCI_PreservesManifestDigest(t *testing.T) {
 
 	raw, err := archive.ReadSidecar(delta)
 	require.NoError(t, err)
-	sidecar, err := diff.ParseSidecar(raw)
+	sidecar, err := diff.ParseLegacySidecar(raw)
 	require.NoError(t, err)
 
 	baseline, err := imageio.ParseReference("oci-archive:" + filepath.Join(repoRoot(t), "testdata/fixtures/v1_oci.tar"))
@@ -193,9 +193,9 @@ func TestImport_AutoFormat_OCI_PreservesManifestDigest(t *testing.T) {
 
 	out := filepath.Join(t.TempDir(), "v2.tar")
 	require.NoError(t, importer.Import(ctx, importer.Options{
-		DeltaPath:   delta,
-		BaselineRef: baseline,
-		OutputPath:  out,
+		DeltaPath:         delta,
+		LegacyBaselineRef: baseline,
+		OutputPath:        out,
 		// OutputFormat empty → auto-pick to preserve OCI bytes.
 	}))
 
@@ -214,7 +214,7 @@ func TestImport_AutoFormat_DockerSchema2_PreservesManifestDigest(t *testing.T) {
 
 	raw, err := archive.ReadSidecar(delta)
 	require.NoError(t, err)
-	sidecar, err := diff.ParseSidecar(raw)
+	sidecar, err := diff.ParseLegacySidecar(raw)
 	require.NoError(t, err)
 
 	baseline, err := imageio.ParseReference("docker-archive:" + filepath.Join(repoRoot(t), "testdata/fixtures/v1_s2.tar"))
@@ -222,9 +222,9 @@ func TestImport_AutoFormat_DockerSchema2_PreservesManifestDigest(t *testing.T) {
 
 	out := filepath.Join(t.TempDir(), "v2.tar")
 	require.NoError(t, importer.Import(ctx, importer.Options{
-		DeltaPath:   delta,
-		BaselineRef: baseline,
-		OutputPath:  out,
+		DeltaPath:         delta,
+		LegacyBaselineRef: baseline,
+		OutputPath:        out,
 	}))
 
 	ref, err := imageio.ParseReference("docker-archive:" + out)
@@ -247,10 +247,10 @@ func TestImport_RejectsCrossFormatConversion(t *testing.T) {
 
 	out := filepath.Join(t.TempDir(), "v2.tar")
 	err = importer.Import(ctx, importer.Options{
-		DeltaPath:    delta,
-		BaselineRef:  baseline,
-		OutputPath:   out,
-		OutputFormat: "docker-archive",
+		DeltaPath:         delta,
+		LegacyBaselineRef: baseline,
+		OutputPath:        out,
+		OutputFormat:      "docker-archive",
 	})
 	var conflict *diff.ErrIncompatibleOutputFormat
 	require.ErrorAs(t, err, &conflict)
@@ -273,11 +273,11 @@ func TestImport_AllowConvert_BypassesCompatCheck(t *testing.T) {
 
 	out := filepath.Join(t.TempDir(), "v2.tar")
 	require.NoError(t, importer.Import(ctx, importer.Options{
-		DeltaPath:    delta,
-		BaselineRef:  baseline,
-		OutputPath:   out,
-		OutputFormat: "docker-archive",
-		AllowConvert: true,
+		DeltaPath:         delta,
+		LegacyBaselineRef: baseline,
+		OutputPath:        out,
+		OutputFormat:      "docker-archive",
+		AllowConvert:      true,
 	}))
 	fi, err := os.Stat(out)
 	require.NoError(t, err)
@@ -293,10 +293,10 @@ func TestImport_DryRun_OnlyProbes_Missing(t *testing.T) {
 	require.NoError(t, err)
 
 	report, err := importer.DryRun(ctx, importer.Options{
-		DeltaPath:    delta,
-		BaselineRef:  unrelated,
-		OutputPath:   filepath.Join(t.TempDir(), "x.tar"),
-		OutputFormat: "oci-archive",
+		DeltaPath:         delta,
+		LegacyBaselineRef: unrelated,
+		OutputPath:        filepath.Join(t.TempDir(), "x.tar"),
+		OutputFormat:      "oci-archive",
 	})
 	require.NoError(t, err)
 	require.False(t, report.AllReachable)
@@ -308,15 +308,15 @@ func TestDryRun_PatchRefs_DetectedAndReported(t *testing.T) {
 	deltaDir := filepath.Join(tmp, "delta")
 	require.NoError(t, os.MkdirAll(deltaDir, 0o755))
 
-	sc := diff.Sidecar{
+	sc := diff.LegacySidecar{
 		Version: "v1", Tool: "diffah", ToolVersion: "t", Platform: "linux/amd64",
 		CreatedAt: time.Now().UTC(),
-		Target: diff.ImageRef{
+		Target: diff.LegacyTargetRef{
 			ManifestDigest: "sha256:tgt",
 			ManifestSize:   1,
 			MediaType:      "application/vnd.oci.image.manifest.v1+json",
 		},
-		Baseline: diff.BaselineRef{
+		Baseline: diff.LegacyBaselineRef{
 			ManifestDigest: "sha256:b",
 			MediaType:      "application/vnd.oci.image.manifest.v1+json",
 		},
@@ -341,9 +341,9 @@ func TestDryRun_PatchRefs_DetectedAndReported(t *testing.T) {
 	require.NoError(t, err)
 
 	report, err := importer.DryRun(context.Background(), importer.Options{
-		DeltaPath:   deltaPath,
-		BaselineRef: baselineRef,
-		OutputPath:  filepath.Join(tmp, "out.tar"),
+		DeltaPath:         deltaPath,
+		LegacyBaselineRef: baselineRef,
+		OutputPath:        filepath.Join(tmp, "out.tar"),
 	})
 	require.NoError(t, err)
 	require.False(t, report.AllReachable)

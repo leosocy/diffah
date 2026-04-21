@@ -42,7 +42,7 @@ type CompositeSource struct {
 }
 
 func NewCompositeSource(
-	delta, baseline types.ImageSource, sidecar *diff.Sidecar,
+	delta, baseline types.ImageSource, sidecar *diff.LegacySidecar,
 ) *CompositeSource {
 	shipped := make(map[digest.Digest]diff.BlobRef, len(sidecar.ShippedInDelta))
 	for _, e := range sidecar.ShippedInDelta {

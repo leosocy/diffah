@@ -24,11 +24,11 @@ func repoRoot(t *testing.T) string {
 	return filepath.Join("..", "..")
 }
 
-func readSidecar(t *testing.T, archivePath string) *diff.Sidecar {
+func readSidecar(t *testing.T, archivePath string) *diff.LegacySidecar {
 	t.Helper()
 	raw, err := archive.ReadSidecar(archivePath)
 	require.NoError(t, err)
-	sc, err := diff.ParseSidecar(raw)
+	sc, err := diff.ParseLegacySidecar(raw)
 	require.NoError(t, err)
 	return sc
 }
@@ -46,11 +46,11 @@ func TestExport_OCIFixture_HappyPath(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "delta.tar")
 
 	err = exporter.Export(ctx, exporter.Options{
-		TargetRef:   targetRef,
-		BaselineRef: baselineRef,
-		Compress:    "none",
-		OutputPath:  out,
-		ToolVersion: "test",
+		TargetRef:         targetRef,
+		LegacyBaselineRef: baselineRef,
+		Compress:          "none",
+		OutputPath:        out,
+		ToolVersion:       "test",
 	})
 	require.NoError(t, err)
 
@@ -73,11 +73,11 @@ func TestExport_S2Fixture_HappyPath(t *testing.T) {
 
 	out := filepath.Join(t.TempDir(), "delta.tar")
 	err = exporter.Export(ctx, exporter.Options{
-		TargetRef:   targetRef,
-		BaselineRef: baselineRef,
-		OutputPath:  out,
-		Compress:    "none",
-		ToolVersion: "test",
+		TargetRef:         targetRef,
+		LegacyBaselineRef: baselineRef,
+		OutputPath:        out,
+		Compress:          "none",
+		ToolVersion:       "test",
 	})
 	require.NoError(t, err)
 
@@ -155,10 +155,10 @@ func TestExport_DryRun_DoesNotWriteOutput(t *testing.T) {
 	require.NoError(t, err)
 
 	stats, err := exporter.DryRun(ctx, exporter.Options{
-		TargetRef:   targetRef,
-		BaselineRef: baselineRef,
-		OutputPath:  out,
-		ToolVersion: "test",
+		TargetRef:         targetRef,
+		LegacyBaselineRef: baselineRef,
+		OutputPath:        out,
+		ToolVersion:       "test",
 	})
 	require.NoError(t, err)
 	require.Greater(t, stats.ShippedCount, 0)
@@ -207,12 +207,12 @@ func TestExport_DeterministicArchive(t *testing.T) {
 		outPath := filepath.Join(outDir, name+".tar")
 		fixedTime := time.Date(2026, 4, 20, 13, 21, 0, 0, time.UTC)
 		require.NoError(t, exporter.Export(ctx, exporter.Options{
-			TargetRef:   targetRef,
-			BaselineRef: baselineRef,
-			Compress:    "none",
-			OutputPath:  outPath,
-			ToolVersion: "test",
-			CreatedAt:   fixedTime,
+			TargetRef:         targetRef,
+			LegacyBaselineRef: baselineRef,
+			Compress:          "none",
+			OutputPath:        outPath,
+			ToolVersion:       "test",
+			CreatedAt:         fixedTime,
 		}))
 		data, err := os.ReadFile(outPath)
 		require.NoError(t, err)

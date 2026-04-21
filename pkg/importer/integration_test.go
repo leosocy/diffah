@@ -41,11 +41,11 @@ func buildDeltaWithFingerprinter(
 
 	out := filepath.Join(t.TempDir(), "delta.tar")
 	require.NoError(t, exporter.ExportWithFingerprinter(ctx, exporter.Options{
-		TargetRef:   target,
-		BaselineRef: baseline,
-		OutputPath:  out,
-		ToolVersion: "test",
-		IntraLayer:  "auto",
+		TargetRef:         target,
+		LegacyBaselineRef: baseline,
+		OutputPath:        out,
+		ToolVersion:       "test",
+		IntraLayer:        "auto",
 	}, fp))
 	return out
 }
@@ -90,11 +90,11 @@ func TestImport_Matrix(t *testing.T) {
 
 			out := filepath.Join(t.TempDir(), fmt.Sprintf("out-%s", tc.outputFormat))
 			err = importer.Import(ctx, importer.Options{
-				DeltaPath:    delta,
-				BaselineRef:  baselineRef,
-				OutputFormat: tc.outputFormat,
-				OutputPath:   out,
-				AllowConvert: tc.allowConvert,
+				DeltaPath:         delta,
+				LegacyBaselineRef: baselineRef,
+				OutputFormat:      tc.outputFormat,
+				OutputPath:        out,
+				AllowConvert:      tc.allowConvert,
 			})
 			if tc.wantConflict {
 				var conflict *diff.ErrIncompatibleOutputFormat
@@ -161,10 +161,10 @@ func TestImport_V4ContentMatchBeatsSizeTrap(t *testing.T) {
 	// rewritten by the content-match path.
 	out := filepath.Join(t.TempDir(), "v4_out.tar")
 	err = importer.Import(ctx, importer.Options{
-		DeltaPath:    delta,
-		BaselineRef:  baselineRef,
-		OutputPath:   out,
-		OutputFormat: "oci-archive",
+		DeltaPath:         delta,
+		LegacyBaselineRef: baselineRef,
+		OutputPath:        out,
+		OutputFormat:      "oci-archive",
 	})
 	require.NoError(t, err)
 
@@ -210,12 +210,12 @@ func (emptyFingerprinter) Fingerprint(
 }
 
 // readSidecarFromDelta opens the given delta archive, reads its
-// sidecar bytes, parses them, and returns the typed Sidecar.
-func readSidecarFromDelta(t *testing.T, deltaPath string) *diff.Sidecar {
+// sidecar bytes, parses them, and returns the typed LegacySidecar.
+func readSidecarFromDelta(t *testing.T, deltaPath string) *diff.LegacySidecar {
 	t.Helper()
 	raw, err := archive.ReadSidecar(deltaPath)
 	require.NoError(t, err)
-	sc, err := diff.ParseSidecar(raw)
+	sc, err := diff.ParseLegacySidecar(raw)
 	require.NoError(t, err)
 	return sc
 }

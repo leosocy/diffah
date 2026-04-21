@@ -52,11 +52,11 @@ func runImport(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	opts := importer.Options{
-		DeltaPath:    importFlags.delta,
-		BaselineRef:  baselineRef,
-		OutputFormat: importFlags.outputFormat,
-		OutputPath:   importFlags.output,
-		AllowConvert: importFlags.allowConvert,
+		DeltaPath:         importFlags.delta,
+		LegacyBaselineRef: baselineRef,
+		OutputFormat:      importFlags.outputFormat,
+		OutputPath:        importFlags.output,
+		AllowConvert:      importFlags.allowConvert,
 	}
 	ctx := context.Background()
 

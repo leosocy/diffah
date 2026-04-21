@@ -70,7 +70,7 @@ func runExport(cmd *cobra.Command, _ []string) error {
 		ToolVersion:          version,
 	}
 	if exportFlags.baseline != "" {
-		opts.BaselineRef, err = imageio.ParseReference(exportFlags.baseline)
+		opts.LegacyBaselineRef, err = imageio.ParseReference(exportFlags.baseline)
 		if err != nil {
 			return err
 		}

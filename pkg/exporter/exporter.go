@@ -22,11 +22,11 @@ import (
 	"github.com/leosocy/diffah/pkg/diff"
 )
 
-// Options carries all inputs to Export. One of BaselineRef or
+// Options carries all inputs to Export. One of LegacyBaselineRef or
 // BaselineManifestPath must be set.
 type Options struct {
 	TargetRef            types.ImageReference
-	BaselineRef          types.ImageReference
+	LegacyBaselineRef    types.ImageReference
 	BaselineManifestPath string
 	Platform             string
 	Compress             string
@@ -110,12 +110,18 @@ func Export(ctx context.Context, opts Options) error {
 // manifest file on disk. Returns an error when neither is provided.
 func openBaseline(ctx context.Context, opts Options) (BaselineSet, error) {
 	switch {
-	case opts.BaselineRef != nil:
-		return NewImageBaseline(ctx, opts.BaselineRef, nil, opts.BaselineRef.StringWithinTransport(), opts.Platform)
+	case opts.LegacyBaselineRef != nil:
+		return NewImageBaseline(
+			ctx,
+			opts.LegacyBaselineRef,
+			nil,
+			opts.LegacyBaselineRef.StringWithinTransport(),
+			opts.Platform,
+		)
 	case opts.BaselineManifestPath != "":
 		return NewManifestBaseline(opts.BaselineManifestPath, opts.Platform)
 	default:
-		return nil, fmt.Errorf("no baseline provided: set BaselineRef or BaselineManifestPath")
+		return nil, fmt.Errorf("no baseline provided: set LegacyBaselineRef or BaselineManifestPath")
 	}
 }
 
@@ -205,18 +211,18 @@ func buildCopyOptions(platform string) (*copy.Options, error) {
 }
 
 // buildSidecar reads the manifest written by copy.Image and constructs the
-// Sidecar that describes the delta partition.
+// LegacySidecar that describes the delta partition.
 func buildSidecar(
 	ctx context.Context, dir string, baseline BaselineSet, baselineDigests []digest.Digest,
 	opts Options, createdAt time.Time,
-) (diff.Sidecar, error) {
+) (diff.LegacySidecar, error) {
 	manifestBytes, mediaType, err := oci.ReadDirManifest(dir)
 	if err != nil {
-		return diff.Sidecar{}, fmt.Errorf("read exported manifest: %w", err)
+		return diff.LegacySidecar{}, fmt.Errorf("read exported manifest: %w", err)
 	}
 	parsed, err := manifest.FromBlob(manifestBytes, mediaType)
 	if err != nil {
-		return diff.Sidecar{}, fmt.Errorf("parse target manifest: %w", err)
+		return diff.LegacySidecar{}, fmt.Errorf("parse target manifest: %w", err)
 	}
 
 	targetLayers := make([]diff.BlobRef, 0, len(parsed.LayerInfos()))
@@ -232,12 +238,12 @@ func buildSidecar(
 
 	shipped, payloads, err := resolveShipped(ctx, dir, baseline, plan, opts)
 	if err != nil {
-		return diff.Sidecar{}, err
+		return diff.LegacySidecar{}, err
 	}
 	plan.ShippedInDelta = shipped
 
 	if err := writePayloads(dir, payloads); err != nil {
-		return diff.Sidecar{}, err
+		return diff.LegacySidecar{}, err
 	}
 
 	platform := opts.Platform
@@ -245,13 +251,13 @@ func buildSidecar(
 		platform = derivePlatformFromConfig(dir, parsed)
 	}
 
-	return diff.Sidecar{
+	return diff.LegacySidecar{
 		Version:     diff.SchemaVersionV1,
 		Tool:        "diffah",
 		ToolVersion: opts.ToolVersion,
 		CreatedAt:   createdAt,
 		Platform:    platform,
-		Target: diff.ImageRef{
+		Target: diff.LegacyTargetRef{
 			ManifestDigest: digest.FromBytes(manifestBytes),
 			ManifestSize:   int64(len(manifestBytes)),
 			MediaType:      mediaType,
@@ -458,12 +464,12 @@ func loadTargetManifest(ctx context.Context, opts Options) (manifest.Manifest, e
 
 // verifyExport re-reads the sidecar from the packed archive and confirms that
 // the manifest digest is preserved faithfully.
-func verifyExport(archivePath string, want diff.Sidecar) error {
+func verifyExport(archivePath string, want diff.LegacySidecar) error {
 	got, err := archive.ReadSidecar(archivePath)
 	if err != nil {
 		return fmt.Errorf("verify read sidecar: %w", err)
 	}
-	back, err := diff.ParseSidecar(got)
+	back, err := diff.ParseLegacySidecar(got)
 	if err != nil {
 		return fmt.Errorf("verify parse sidecar: %w", err)
 	}

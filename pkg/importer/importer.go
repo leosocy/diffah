@@ -29,9 +29,9 @@ const (
 
 // Options carries all inputs to Import.
 type Options struct {
-	DeltaPath   string
-	BaselineRef types.ImageReference
-	OutputPath  string
+	DeltaPath         string
+	LegacyBaselineRef types.ImageReference
+	OutputPath        string
 	// OutputFormat is one of FormatDockerArchive, FormatOCIArchive, FormatDir,
 	// or "" to auto-pick the format that preserves the sidecar's source bytes.
 	OutputFormat string
@@ -59,7 +59,7 @@ func Import(ctx context.Context, opts Options) error {
 		return err
 	}
 
-	composite, srcRef, err := openCompositeSource(ctx, tmpDir, opts.BaselineRef, sidecar)
+	composite, srcRef, err := openCompositeSource(ctx, tmpDir, opts.LegacyBaselineRef, sidecar)
 	if err != nil {
 		return err
 	}
@@ -81,12 +81,12 @@ func Import(ctx context.Context, opts Options) error {
 }
 
 // extractSidecar unpacks the delta archive into tmpDir and parses the sidecar.
-func extractSidecar(deltaPath, tmpDir string) (*diff.Sidecar, error) {
+func extractSidecar(deltaPath, tmpDir string) (*diff.LegacySidecar, error) {
 	raw, err := archive.Extract(deltaPath, tmpDir)
 	if err != nil {
 		return nil, fmt.Errorf("extract delta: %w", err)
 	}
-	sidecar, err := diff.ParseSidecar(raw)
+	sidecar, err := diff.ParseLegacySidecar(raw)
 	if err != nil {
 		return nil, fmt.Errorf("parse sidecar: %w", err)
 	}
@@ -100,7 +100,7 @@ func openCompositeSource(
 	ctx context.Context,
 	tmpDir string,
 	baselineRef types.ImageReference,
-	sidecar *diff.Sidecar,
+	sidecar *diff.LegacySidecar,
 ) (*CompositeSource, types.ImageReference, error) {
 	deltaRef, err := directory.NewReference(tmpDir)
 	if err != nil {
@@ -162,7 +162,7 @@ func removeOutput(path, format string) error {
 // patch_from_digest referenced by patch-encoded shipped entries is also
 // present. Returns diff.ErrBaselineMissingBlob or
 // diff.ErrBaselineMissingPatchRef on the first missing digest.
-func probeBaseline(ctx context.Context, src types.ImageSource, s *diff.Sidecar) error {
+func probeBaseline(ctx context.Context, src types.ImageSource, s *diff.LegacySidecar) error {
 	if len(s.RequiredFromBaseline) == 0 && !anyPatch(s) {
 		return nil
 	}
@@ -204,7 +204,7 @@ func probeBaseline(ctx context.Context, src types.ImageSource, s *diff.Sidecar) 
 	return nil
 }
 
-func anyPatch(s *diff.Sidecar) bool {
+func anyPatch(s *diff.LegacySidecar) bool {
 	for _, e := range s.ShippedInDelta {
 		if e.Encoding == diff.EncodingPatch {
 			return true
@@ -241,7 +241,7 @@ func buildOutputRef(path, format string) (types.ImageReference, error) {
 // verifyImport sanity-checks the produced output for dir format by comparing
 // the written manifest digest against the sidecar's target manifest digest.
 // For other formats, copy.Image's internal validation is trusted.
-func verifyImport(opts Options, sidecar *diff.Sidecar, resolvedFmt string) error {
+func verifyImport(opts Options, sidecar *diff.LegacySidecar, resolvedFmt string) error {
 	if resolvedFmt != FormatDir {
 		return nil
 	}
@@ -290,7 +290,7 @@ func DryRun(ctx context.Context, opts Options) (DryRunReport, error) {
 		return DryRunReport{}, err
 	}
 
-	baselineSrc, err := opts.BaselineRef.NewImageSource(ctx, nil)
+	baselineSrc, err := opts.LegacyBaselineRef.NewImageSource(ctx, nil)
 	if err != nil {
 		return DryRunReport{}, fmt.Errorf("open baseline source: %w", err)
 	}

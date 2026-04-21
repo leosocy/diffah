@@ -63,7 +63,7 @@ func NewPlanner(
 	}
 }
 
-// Run returns the BlobRef entries to drop into Sidecar.ShippedInDelta and
+// Run returns the BlobRef entries to drop into LegacySidecar.ShippedInDelta and
 // the on-disk payload map. The payload under each digest is the bytes the
 // exporter should persist at `<deltaDir>/<digest.Encoded()>` before packing.
 func (p *Planner) Run(

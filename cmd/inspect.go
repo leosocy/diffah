@@ -28,7 +28,7 @@ func runInspect(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	s, err := diff.ParseSidecar(raw)
+	s, err := diff.ParseLegacySidecar(raw)
 	if err != nil {
 		return err
 	}
@@ -41,7 +41,7 @@ type sidecarStats struct {
 	totalArchiveSize, patchArchiveSize, patchOrigSize int64
 }
 
-func collectSidecarStats(s *diff.Sidecar) sidecarStats {
+func collectSidecarStats(s *diff.LegacySidecar) sidecarStats {
 	var st sidecarStats
 	for _, b := range s.ShippedInDelta {
 		st.shipped += b.Size
@@ -61,7 +61,7 @@ func collectSidecarStats(s *diff.Sidecar) sidecarStats {
 	return st
 }
 
-func printSidecar(w io.Writer, path string, s *diff.Sidecar) error {
+func printSidecar(w io.Writer, path string, s *diff.LegacySidecar) error {
 	st := collectSidecarStats(s)
 	total := st.shipped + st.required
 	var savedPct float64
