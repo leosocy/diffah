@@ -36,6 +36,14 @@ type Options struct {
 	//   "auto" (default, also when empty) — run the planner, choose min(patch, full_zst) per shipped layer
 	//   "off" — every shipped layer stays encoding=full (v1-equivalent)
 	IntraLayer string
+	// CreatedAt is the timestamp written to the sidecar. If zero, defaults to time.Now().
+	// Used primarily for deterministic testing.
+	CreatedAt time.Time
+
+	// fingerprinter overrides the default tar-entry digest fingerprinter.
+	// Unexported on purpose: only tests need it, injected via the
+	// ExportWithFingerprinter helper in exporter_testing_test.go.
+	fingerprinter Fingerprinter
 }
 
 // Export performs the full export pipeline described in spec §7:
@@ -74,7 +82,11 @@ func Export(ctx context.Context, opts Options) error {
 		return err
 	}
 
-	sidecar, err := buildSidecar(ctx, tmpDir, baseline, baselineDigests, opts)
+	createdAt := opts.CreatedAt
+	if createdAt.IsZero() {
+		createdAt = time.Now().UTC()
+	}
+	sidecar, err := buildSidecar(ctx, tmpDir, baseline, baselineDigests, opts, createdAt)
 	if err != nil {
 		return err
 	}
@@ -195,7 +207,8 @@ func buildCopyOptions(platform string) (*copy.Options, error) {
 // buildSidecar reads the manifest written by copy.Image and constructs the
 // Sidecar that describes the delta partition.
 func buildSidecar(
-	ctx context.Context, dir string, baseline BaselineSet, baselineDigests []digest.Digest, opts Options,
+	ctx context.Context, dir string, baseline BaselineSet, baselineDigests []digest.Digest,
+	opts Options, createdAt time.Time,
 ) (diff.Sidecar, error) {
 	manifestBytes, mediaType, err := oci.ReadDirManifest(dir)
 	if err != nil {
@@ -236,7 +249,7 @@ func buildSidecar(
 		Version:     diff.SchemaVersionV1,
 		Tool:        "diffah",
 		ToolVersion: opts.ToolVersion,
-		CreatedAt:   time.Now().UTC(),
+		CreatedAt:   createdAt,
 		Platform:    platform,
 		Target: diff.ImageRef{
 			ManifestDigest: digest.FromBytes(manifestBytes),
@@ -269,7 +282,7 @@ func resolveShipped(
 	}
 
 	readBlob := newDirBlobReader(dir, baseline)
-	entries, payloads, err := NewPlanner(blMeta, readBlob).Run(ctx, plan.ShippedInDelta)
+	entries, payloads, err := NewPlanner(blMeta, readBlob, opts.fingerprinter).Run(ctx, plan.ShippedInDelta)
 	if err != nil {
 		// Planner failed (e.g. zstd not on PATH or blob read error).
 		// Degrade gracefully to full encoding for all shipped layers.
@@ -326,7 +339,7 @@ func readBaselineBlob(ib *ImageBaseline, d digest.Digest) ([]byte, error) {
 // patch bytes (or recompressed full bytes) under the original digest name.
 func writePayloads(dir string, payloads map[digest.Digest][]byte) error {
 	for d, data := range payloads {
-		if err := os.WriteFile(filepath.Join(dir, d.Encoded()), data, 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, d.Encoded()), data, 0o600); err != nil {
 			return fmt.Errorf("write payload %s: %w", d, err)
 		}
 	}

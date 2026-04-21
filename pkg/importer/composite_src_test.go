@@ -22,11 +22,11 @@ import (
 // stubRef implements types.ImageReference for testing purposes.
 type stubRef struct{}
 
-func (stubRef) Transport() types.ImageTransport                    { return nil }
-func (stubRef) StringWithinTransport() string                      { return "test://baseline" }
-func (stubRef) DockerReference() reference.Named                   { return nil }
-func (stubRef) PolicyConfigurationIdentity() string                { return "" }
-func (stubRef) PolicyConfigurationNamespaces() []string            { return nil }
+func (stubRef) Transport() types.ImageTransport         { return nil }
+func (stubRef) StringWithinTransport() string           { return "test://baseline" }
+func (stubRef) DockerReference() reference.Named        { return nil }
+func (stubRef) PolicyConfigurationIdentity() string     { return "" }
+func (stubRef) PolicyConfigurationNamespaces() []string { return nil }
 func (stubRef) NewImage(context.Context, *types.SystemContext) (types.ImageCloser, error) {
 	return nil, nil
 }
@@ -68,7 +68,7 @@ func (f *fakeSource) LayerInfosForCopy(_ context.Context, _ *digest.Digest) ([]t
 	return nil, nil
 }
 
-func makeSidecar(shipped []diff.BlobRef, required []diff.BlobRef) *diff.Sidecar {
+func makeSidecar(shipped, required []diff.BlobRef) *diff.Sidecar {
 	return &diff.Sidecar{
 		Version:              "v1",
 		Tool:                 "diffah",
@@ -204,8 +204,8 @@ func TestProbeBaseline_MissingPatchRef_RaisesErr(t *testing.T) {
 
 	sc := &diff.Sidecar{
 		Version: "v1", Tool: "diffah", ToolVersion: "t", Platform: "linux/amd64",
-		Target:   diff.ImageRef{ManifestDigest: "sha256:tgt", MediaType: "m"},
-		Baseline: diff.BaselineRef{ManifestDigest: "sha256:b", MediaType: "m"},
+		Target:               diff.ImageRef{ManifestDigest: "sha256:tgt", MediaType: "m"},
+		Baseline:             diff.BaselineRef{ManifestDigest: "sha256:b", MediaType: "m"},
 		RequiredFromBaseline: []diff.BlobRef{},
 		ShippedInDelta: []diff.BlobRef{{
 			Digest: "sha256:tgt", Size: 100, MediaType: "m",

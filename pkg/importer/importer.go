@@ -263,12 +263,12 @@ func verifyImport(opts Options, sidecar *diff.Sidecar, resolvedFmt string) error
 // DryRunReport summarizes a dry-run import: which required baseline blobs
 // are reachable and which (if any) are missing.
 type DryRunReport struct {
-	AllReachable     bool
-	MissingDigests   []string
-	RequiredBlobs    int
-	MissingPatchRefs []string
+	AllReachable      bool
+	MissingDigests    []string
+	RequiredBlobs     int
+	MissingPatchRefs  []string
 	RequiredPatchRefs int
-	BaselineSource   string
+	BaselineSource    string
 }
 
 // DryRun performs steps 1-4 of the import pipeline (extract, parse, open
