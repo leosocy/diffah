@@ -1,6 +1,9 @@
 package diff
 
 import (
+	"bytes"
+	"encoding/json"
+	"io"
 	"testing"
 	"time"
 
@@ -139,4 +142,68 @@ func TestParseSidecar_RejectsInvalidJSON(t *testing.T) {
 	_, err := ParseSidecar([]byte(`{bad`))
 	var ibf *ErrInvalidBundleFormat
 	require.ErrorAs(t, err, &ibf)
+}
+
+func TestSidecar_Marshal_DeterministicOrder(t *testing.T) {
+	s := minimalValidBundle(t)
+	s.Blobs["sha256:cc"] = BlobEntry{Size: 3, MediaType: "text/plain",
+		Encoding: EncodingFull, ArchiveSize: 3}
+	s.Blobs["sha256:bb"] = BlobEntry{Size: 4, MediaType: "text/plain",
+		Encoding: EncodingFull, ArchiveSize: 4}
+
+	first, err := s.Marshal()
+	require.NoError(t, err)
+	second, err := s.Marshal()
+	require.NoError(t, err)
+	require.Equal(t, first, second, "marshal must be deterministic")
+
+	order := orderOfTopLevelBlobsKeys(t, first)
+	require.Equal(t, []string{"sha256:aa", "sha256:bb", "sha256:cc"}, order)
+}
+
+func TestSidecar_RoundTrip_PreservesAllFields(t *testing.T) {
+	original := minimalValidBundle(t)
+	raw, err := original.Marshal()
+	require.NoError(t, err)
+	parsed, err := ParseSidecar(raw)
+	require.NoError(t, err)
+	require.Equal(t, original, *parsed)
+}
+
+func orderOfTopLevelBlobsKeys(t *testing.T, raw []byte) []string {
+	t.Helper()
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	var keys []string
+	depth := 0
+	inBlobs := false
+	for {
+		tok, err := dec.Token()
+		if err == io.EOF {
+			break
+		}
+		require.NoError(t, err)
+		switch v := tok.(type) {
+		case json.Delim:
+			switch v {
+			case '{':
+				depth++
+			case '}':
+				if inBlobs && depth == 2 {
+					return keys
+				}
+				depth--
+			}
+		case string:
+			if depth == 1 && v == "blobs" {
+				inBlobs = true
+				continue
+			}
+			if inBlobs && depth == 2 {
+				keys = append(keys, v)
+				var discard BlobEntry
+				_ = dec.Decode(&discard)
+			}
+		}
+	}
+	return keys
 }
