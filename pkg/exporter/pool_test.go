@@ -1,6 +1,7 @@
 package exporter
 
 import (
+	"context"
 	"testing"
 
 	"github.com/opencontainers/go-digest"
@@ -21,4 +22,23 @@ func TestBlobPool_AddIfAbsentAndRefCount(t *testing.T) {
 	p.countShipped(d)
 	p.countShipped(d)
 	require.Equal(t, 2, p.refCount(d))
+}
+
+func TestBlobPool_SeedManifestAndConfig(t *testing.T) {
+	ctx := context.Background()
+	p1, err := planPair(ctx, Pair{Name: "a", BaselinePath: "../../testdata/fixtures/v1_oci.tar",
+		TargetPath: "../../testdata/fixtures/v2_oci.tar"}, "linux/amd64")
+	require.NoError(t, err)
+	p2, err := planPair(ctx, Pair{Name: "b", BaselinePath: "../../testdata/fixtures/v1_oci.tar",
+		TargetPath: "../../testdata/fixtures/v2_oci.tar"}, "linux/amd64")
+	require.NoError(t, err)
+
+	pool := newBlobPool()
+	seedManifestAndConfig(pool, p1)
+	seedManifestAndConfig(pool, p2)
+
+	mfDigest := digest.FromBytes(p1.TargetManifest)
+	require.True(t, pool.has(mfDigest))
+	require.True(t, pool.has(p1.TargetConfigDesc.Digest))
+	require.Len(t, pool.sortedDigests(), 2, "same target → dedup to 2 unique blobs")
 }

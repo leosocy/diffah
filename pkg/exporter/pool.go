@@ -52,6 +52,18 @@ func (p *blobPool) refCount(d digest.Digest) int {
 	return p.shipRefs[d]
 }
 
+func seedManifestAndConfig(p *blobPool, plan *pairPlan) {
+	mfDigest := digest.FromBytes(plan.TargetManifest)
+	p.addIfAbsent(mfDigest, plan.TargetManifest, diff.BlobEntry{
+		Size: int64(len(plan.TargetManifest)), MediaType: plan.TargetMediaType,
+		Encoding: diff.EncodingFull, ArchiveSize: int64(len(plan.TargetManifest)),
+	})
+	p.addIfAbsent(plan.TargetConfigDesc.Digest, plan.TargetConfigRaw, diff.BlobEntry{
+		Size: plan.TargetConfigDesc.Size, MediaType: plan.TargetConfigDesc.MediaType,
+		Encoding: diff.EncodingFull, ArchiveSize: plan.TargetConfigDesc.Size,
+	})
+}
+
 func (p *blobPool) sortedDigests() []digest.Digest {
 	out := make([]digest.Digest, 0, len(p.bytes))
 	for d := range p.bytes {
