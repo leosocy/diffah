@@ -3,40 +3,48 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 
+	"github.com/leosocy/diffah/pkg/diff"
 	"github.com/leosocy/diffah/pkg/importer"
 )
 
 var importFlags = struct {
-	delta        string
-	baseline     string
+	baselines    []string
+	baselineSpec string
+	strict       bool
 	outputFormat string
-	output       string
-	dryRun       bool
 	allowConvert bool
+	dryRun       bool
 }{}
 
 func newImportCommand() *cobra.Command {
 	c := &cobra.Command{
-		Use:   "import",
-		Short: "Reconstruct a full image from a delta archive and a baseline source.",
+		Use:   "import --baseline NAME=PATH [--baseline ...] DELTA OUTPUT",
+		Short: "Import a multi-image bundle archive.",
+		Args:  cobra.ExactArgs(2),
 		RunE:  runImport,
+		Example: `  # Single-image import (positional baseline)
+  diffah import --baseline default=v1.tar bundle.tar output.tar
+
+  # Multi-image import with named baselines
+  diffah import --baseline svc-a=v1a.tar --baseline svc-b=v1b.tar bundle.tar output.tar
+
+  # Using a baseline spec file
+  diffah import --baseline-spec baselines.json bundle.tar output.tar
+
+  # Strict mode
+  diffah import --baseline svc-a=v1a.tar --strict bundle.tar output.tar`,
 	}
 	f := c.Flags()
-	f.StringVar(&importFlags.delta, "delta", "", "delta archive path (required)")
-	f.StringVar(&importFlags.baseline, "baseline", "", "baseline image reference (required)")
-	f.StringVar(&importFlags.outputFormat, "output-format", "",
-		"auto (default, preserves source format)|docker-archive|oci-archive|dir")
-	f.StringVar(&importFlags.output, "output", "", "output path (required)")
-	f.BoolVar(&importFlags.dryRun, "dry-run", false, "verify baseline reachability only (no copy)")
-	f.BoolVar(&importFlags.allowConvert, "allow-convert", false,
-		"allow an --output-format that forces manifest media-type conversion "+
-			"(breaks byte-exact reconstruction)")
-	_ = c.MarkFlagRequired("delta")
-	_ = c.MarkFlagRequired("baseline")
-	_ = c.MarkFlagRequired("output")
+	f.StringArrayVar(&importFlags.baselines, "baseline", nil, "named baseline NAME=PATH (repeatable)")
+	f.StringVar(&importFlags.baselineSpec, "baseline-spec", "", "path to baseline spec JSON")
+	f.BoolVar(&importFlags.strict, "strict", false, "require all baselines")
+	f.StringVar(&importFlags.outputFormat, "output-format", "", "output format (oci-archive|docker-archive|dir)")
+	f.BoolVar(&importFlags.allowConvert, "allow-convert", false, "allow format conversion")
+	f.BoolVar(&importFlags.dryRun, "dry-run", false, "show stats without writing")
 	return c
 }
 
@@ -44,12 +52,18 @@ func init() {
 	rootCmd.AddCommand(newImportCommand())
 }
 
-func runImport(cmd *cobra.Command, _ []string) error {
+func runImport(cmd *cobra.Command, args []string) error {
+	baselines, err := resolveImportBaselines()
+	if err != nil {
+		return err
+	}
+
 	opts := importer.Options{
-		DeltaPath:    importFlags.delta,
-		Baselines:    map[string]string{"default": importFlags.baseline},
+		DeltaPath:    args[0],
+		Baselines:    baselines,
+		Strict:       importFlags.strict,
+		OutputPath:   args[1],
 		OutputFormat: importFlags.outputFormat,
-		OutputPath:   importFlags.output,
 		AllowConvert: importFlags.allowConvert,
 	}
 	ctx := context.Background()
@@ -73,6 +87,46 @@ func runImport(cmd *cobra.Command, _ []string) error {
 	if err := importer.Import(ctx, opts); err != nil {
 		return err
 	}
-	fmt.Fprintf(cmd.OutOrStdout(), "wrote %s\n", importFlags.output)
+	fmt.Fprintf(cmd.OutOrStdout(), "wrote %s\n", args[1])
 	return nil
+}
+
+func resolveImportBaselines() (map[string]string, error) {
+	baselines := make(map[string]string)
+
+	for _, raw := range importFlags.baselines {
+		name, path, err := parseBaselineFlag(raw)
+		if err != nil {
+			return nil, err
+		}
+		baselines[name] = path
+	}
+
+	if importFlags.baselineSpec != "" {
+		spec, err := diff.ParseBaselineSpec(importFlags.baselineSpec)
+		if err != nil {
+			return nil, fmt.Errorf("parse baseline spec: %w", err)
+		}
+		for name, path := range spec.Baselines {
+			baselines[name] = path
+		}
+	}
+
+	if len(baselines) == 0 {
+		return nil, fmt.Errorf("at least one --baseline or --baseline-spec is required")
+	}
+	return baselines, nil
+}
+
+func parseBaselineFlag(raw string) (string, string, error) {
+	eqIdx := strings.Index(raw, "=")
+	if eqIdx < 1 {
+		return "", "", fmt.Errorf("invalid --baseline %q: expected NAME=PATH", raw)
+	}
+	name := raw[:eqIdx]
+	path := raw[eqIdx+1:]
+	if path == "" {
+		return "", "", fmt.Errorf("invalid --baseline %q: expected NAME=PATH", raw)
+	}
+	return name, path, nil
 }
