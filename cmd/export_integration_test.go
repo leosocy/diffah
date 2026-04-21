@@ -32,7 +32,7 @@ func TestExportCommand_WithFixtures(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "delta.tar")
 
 	cmd := exec.Command(
-		"go", "run", "-tags", "containers_image_openpgp", ".",
+		"go", "run", "-tags", "containers_image_openpgp exclude_graphdriver_btrfs exclude_graphdriver_devicemapper", ".",
 		"export",
 		"--target", "oci-archive:"+filepath.Join(root, "testdata/fixtures/v2_oci.tar"),
 		"--baseline", "oci-archive:"+filepath.Join(root, "testdata/fixtures/v1_oci.tar"),
@@ -52,7 +52,7 @@ func TestExportCommand_DryRun(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "delta.tar")
 
 	cmd := exec.Command(
-		"go", "run", "-tags", "containers_image_openpgp", ".",
+		"go", "run", "-tags", "containers_image_openpgp exclude_graphdriver_btrfs exclude_graphdriver_devicemapper", ".",
 		"export",
 		"--target", "oci-archive:"+filepath.Join(root, "testdata/fixtures/v2_oci.tar"),
 		"--baseline", "oci-archive:"+filepath.Join(root, "testdata/fixtures/v1_oci.tar"),

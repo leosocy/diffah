@@ -5,10 +5,13 @@ import (
 	"context"
 	"path/filepath"
 	"testing"
+	"time"
 
+	"github.com/opencontainers/go-digest"
 	"github.com/stretchr/testify/require"
 
 	"github.com/leosocy/diffah/internal/imageio"
+	"github.com/leosocy/diffah/pkg/diff"
 	"github.com/leosocy/diffah/pkg/exporter"
 )
 
@@ -46,6 +49,82 @@ func TestInspectCommand_PrintsSidecarFields(t *testing.T) {
 	require.Contains(t, out, "target manifest digest:")
 	require.Contains(t, out, "baseline manifest digest:")
 	require.Contains(t, out, "shipped:")
+	require.Contains(t, out, "shipped blobs:")
+	require.Contains(t, out, "full:")
+	require.Contains(t, out, "total archive:")
 	require.Contains(t, out, "required:")
 	require.Regexp(t, `saved\s+[0-9.]+%\s+vs full image`, out)
+}
+
+func TestPrintSidecar_IntraLayerStats(t *testing.T) {
+	s := &diff.Sidecar{
+		Version:     "v1",
+		Tool:        "diffah",
+		ToolVersion: "v0.1.0",
+		CreatedAt:   time.Date(2026, 4, 20, 10, 0, 0, 0, time.UTC),
+		Platform:    "linux/amd64",
+		Target: diff.ImageRef{
+			ManifestDigest: digest.Digest("sha256:aaa"),
+			ManifestSize:   100,
+			MediaType:      "application/vnd.docker.distribution.manifest.v2+json",
+		},
+		Baseline: diff.BaselineRef{
+			ManifestDigest: digest.Digest("sha256:bbb"),
+			MediaType:      "application/vnd.docker.distribution.manifest.v2+json",
+		},
+		ShippedInDelta: []diff.BlobRef{
+			{
+				Digest:      "sha256:full1",
+				Size:        1000,
+				MediaType:   "m",
+				Encoding:    diff.EncodingFull,
+				ArchiveSize: 1000,
+			},
+			{
+				Digest:          "sha256:patch1",
+				Size:            2000,
+				MediaType:       "m",
+				Encoding:        diff.EncodingPatch,
+				Codec:           "zstd-patch",
+				PatchFromDigest: "sha256:ref1",
+				ArchiveSize:     400,
+			},
+			{
+				Digest:          "sha256:patch2",
+				Size:            3000,
+				MediaType:       "m",
+				Encoding:        diff.EncodingPatch,
+				Codec:           "zstd-patch",
+				PatchFromDigest: "sha256:ref2",
+				ArchiveSize:     600,
+			},
+		},
+		RequiredFromBaseline: []diff.BlobRef{
+			{Digest: "sha256:base1", Size: 500, MediaType: "m"},
+		},
+	}
+
+	var buf bytes.Buffer
+	err := printSidecar(&buf, "/tmp/test.tar", s)
+	require.NoError(t, err)
+
+	out := buf.String()
+
+	// Verify new intra-layer fields.
+	require.Contains(t, out, "full: 1")
+	require.Contains(t, out, "patch: 2")
+	require.Contains(t, out, "total archive: 2000 bytes")
+
+	// patch savings = (2000+3000) - (400+600) = 4000 bytes
+	require.Contains(t, out, "patch savings: 4000 bytes")
+
+	// avg patch ratio = (400+600) / (2000+3000) * 100 = 20.0%
+	require.Contains(t, out, "avg patch ratio: 20.0%")
+
+	// Also check existing fields still present.
+	require.Contains(t, out, "version: v1")
+	require.Contains(t, out, "tool: diffah")
+	require.Contains(t, out, "tool_version: v0.1.0")
+	require.Contains(t, out, "platform: linux/amd64")
+	require.Contains(t, out, "created_at:")
 }

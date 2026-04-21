@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"time"
@@ -31,6 +32,10 @@ type Options struct {
 	Compress             string
 	OutputPath           string
 	ToolVersion          string
+	// IntraLayer controls per-layer encoding decisions:
+	//   "auto" (default, also when empty) — run the planner, choose min(patch, full_zst) per shipped layer
+	//   "off" — every shipped layer stays encoding=full (v1-equivalent)
+	IntraLayer string
 }
 
 // Export performs the full export pipeline described in spec §7:
@@ -41,6 +46,15 @@ type Options struct {
 //  4. Pack the temp dir + sidecar into the output archive.
 //  5. Verify the packed sidecar round-trips correctly.
 func Export(ctx context.Context, opts Options) error {
+	if opts.IntraLayer == "" {
+		opts.IntraLayer = "auto"
+	}
+	if opts.IntraLayer == "auto" && opts.BaselineManifestPath != "" {
+		return &diff.ErrIntraLayerUnsupported{
+			Reason: "baseline-manifest has no blob bytes; re-run with --intra-layer=off",
+		}
+	}
+
 	baseline, err := openBaseline(ctx, opts)
 	if err != nil {
 		return err
@@ -60,7 +74,7 @@ func Export(ctx context.Context, opts Options) error {
 		return err
 	}
 
-	sidecar, err := buildSidecar(tmpDir, baseline, baselineDigests, opts)
+	sidecar, err := buildSidecar(ctx, tmpDir, baseline, baselineDigests, opts)
 	if err != nil {
 		return err
 	}
@@ -181,7 +195,7 @@ func buildCopyOptions(platform string) (*copy.Options, error) {
 // buildSidecar reads the manifest written by copy.Image and constructs the
 // Sidecar that describes the delta partition.
 func buildSidecar(
-	dir string, baseline BaselineSet, baselineDigests []digest.Digest, opts Options,
+	ctx context.Context, dir string, baseline BaselineSet, baselineDigests []digest.Digest, opts Options,
 ) (diff.Sidecar, error) {
 	manifestBytes, mediaType, err := oci.ReadDirManifest(dir)
 	if err != nil {
@@ -203,6 +217,16 @@ func buildSidecar(
 
 	plan := diff.ComputePlan(targetLayers, baselineDigests)
 
+	shipped, payloads, err := resolveShipped(ctx, dir, baseline, plan, opts)
+	if err != nil {
+		return diff.Sidecar{}, err
+	}
+	plan.ShippedInDelta = shipped
+
+	if err := writePayloads(dir, payloads); err != nil {
+		return diff.Sidecar{}, err
+	}
+
 	platform := opts.Platform
 	if platform == "" {
 		platform = derivePlatformFromConfig(dir, parsed)
@@ -223,6 +247,90 @@ func buildSidecar(
 		RequiredFromBaseline: plan.RequiredFromBaseline,
 		ShippedInDelta:       plan.ShippedInDelta,
 	}, nil
+}
+
+// resolveShipped dispatches on opts.IntraLayer to produce the final
+// ShippedInDelta entries and optional replacement payloads.
+func resolveShipped(
+	ctx context.Context, dir string, baseline BaselineSet, plan diff.Plan, opts Options,
+) ([]diff.BlobRef, map[digest.Digest][]byte, error) {
+	if opts.IntraLayer == "off" {
+		entries := make([]diff.BlobRef, len(plan.ShippedInDelta))
+		for i, e := range plan.ShippedInDelta {
+			entries[i] = fullEntry(e)
+		}
+		return entries, nil, nil
+	}
+
+	// IntraLayer == "auto": run the planner.
+	blMeta, err := baseline.LayerMeta(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("load baseline layer meta: %w", err)
+	}
+
+	readBlob := newDirBlobReader(dir, baseline)
+	entries, payloads, err := NewPlanner(blMeta, readBlob).Run(ctx, plan.ShippedInDelta)
+	if err != nil {
+		// Planner failed (e.g. zstd not on PATH or blob read error).
+		// Degrade gracefully to full encoding for all shipped layers.
+		fallback := make([]diff.BlobRef, len(plan.ShippedInDelta))
+		for i, e := range plan.ShippedInDelta {
+			fallback[i] = fullEntry(e)
+		}
+		return fallback, nil, nil
+	}
+	return entries, payloads, nil
+}
+
+// newDirBlobReader returns a function that reads blob bytes by digest.
+// Target blobs are looked up under dir/<digest.Encoded()>; baseline blobs
+// are fetched from the image source when baseline is *ImageBaseline.
+func newDirBlobReader(dir string, baseline BaselineSet) func(digest.Digest) ([]byte, error) {
+	ib, _ := baseline.(*ImageBaseline)
+	return func(d digest.Digest) ([]byte, error) {
+		path := filepath.Join(dir, d.Encoded())
+		if data, err := os.ReadFile(path); err == nil {
+			return data, nil
+		}
+		if ib == nil {
+			return nil, fmt.Errorf("blob %s not in dir and baseline is not image-backed", d)
+		}
+		return readBaselineBlob(ib, d)
+	}
+}
+
+// readBaselineBlob fetches blob d from the image source backing the
+// ImageBaseline. Returns an error if the source cannot be opened or the
+// blob is not found.
+func readBaselineBlob(ib *ImageBaseline, d digest.Digest) ([]byte, error) {
+	src, err := ib.ref.NewImageSource(context.Background(), ib.sys)
+	if err != nil {
+		return nil, fmt.Errorf("open baseline source for blob %s: %w", d, err)
+	}
+	defer src.Close()
+
+	stream, _, err := src.GetBlob(context.Background(), types.BlobInfo{Digest: d}, nil)
+	if err != nil {
+		return nil, fmt.Errorf("get baseline blob %s: %w", d, err)
+	}
+	defer stream.Close()
+
+	data, err := io.ReadAll(stream)
+	if err != nil {
+		return nil, fmt.Errorf("read baseline blob %s: %w", d, err)
+	}
+	return data, nil
+}
+
+// writePayloads overwrites on-disk blob files so the packer picks up
+// patch bytes (or recompressed full bytes) under the original digest name.
+func writePayloads(dir string, payloads map[digest.Digest][]byte) error {
+	for d, data := range payloads {
+		if err := os.WriteFile(filepath.Join(dir, d.Encoded()), data, 0o600); err != nil {
+			return fmt.Errorf("write payload %s: %w", d, err)
+		}
+	}
+	return nil
 }
 
 // derivePlatformFromConfig reads the image config blob from the directory

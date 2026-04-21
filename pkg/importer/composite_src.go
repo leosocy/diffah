@@ -15,48 +15,108 @@ digest.Digest is from github.com/opencontainers/go-digest.
 */
 
 import (
+	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"io"
-	"os"
 
 	"github.com/opencontainers/go-digest"
 	"go.podman.io/image/v5/types"
+
+	"github.com/leosocy/diffah/internal/zstdpatch"
+	"github.com/leosocy/diffah/pkg/diff"
 )
 
-// CompositeSource implements types.ImageSource by overlaying a delta source
-// on top of a baseline source. GetManifest comes from the delta (the
-// authoritative holder of the target manifest). GetBlob prefers the delta
-// and falls back to baseline when the delta returns a not-found error.
+// CompositeSource implements types.ImageSource by classifying each blob
+// digest against a sidecar and dispatching:
+//
+//   - RequiredFromBaseline entries are fetched from the baseline source.
+//   - ShippedInDelta entries with encoding=full are fetched from the delta.
+//   - ShippedInDelta entries with encoding=patch are fetched from the delta,
+//     decoded against a baseline reference blob, and verified digest-wise.
 type CompositeSource struct {
 	delta    types.ImageSource
 	baseline types.ImageSource
+	shipped  map[digest.Digest]diff.BlobRef
+	required map[digest.Digest]diff.BlobRef
 }
 
-// NewCompositeSource wraps the two inner sources. Close() on the composite
-// calls Close on both; the caller must not close the inner sources directly.
-func NewCompositeSource(delta, baseline types.ImageSource) *CompositeSource {
-	return &CompositeSource{delta: delta, baseline: baseline}
+func NewCompositeSource(
+	delta, baseline types.ImageSource, sidecar *diff.Sidecar,
+) *CompositeSource {
+	shipped := make(map[digest.Digest]diff.BlobRef, len(sidecar.ShippedInDelta))
+	for _, e := range sidecar.ShippedInDelta {
+		shipped[e.Digest] = e
+	}
+	required := make(map[digest.Digest]diff.BlobRef, len(sidecar.RequiredFromBaseline))
+	for _, e := range sidecar.RequiredFromBaseline {
+		required[e.Digest] = e
+	}
+	return &CompositeSource{
+		delta: delta, baseline: baseline,
+		shipped: shipped, required: required,
+	}
 }
 
-// GetBlob serves delta blobs first, then baseline. Any error from the delta
-// that is not "not found" propagates verbatim.
 func (c *CompositeSource) GetBlob(
 	ctx context.Context, info types.BlobInfo, cache types.BlobInfoCache,
 ) (io.ReadCloser, int64, error) {
-	r, size, err := c.delta.GetBlob(ctx, info, cache)
-	if err == nil {
-		return r, size, nil
+	if _, ok := c.required[info.Digest]; ok {
+		return c.baseline.GetBlob(ctx, info, cache)
 	}
-	if !isNotFound(err) {
-		return nil, 0, fmt.Errorf("delta get blob %s: %w", info.Digest, err)
+	entry, ok := c.shipped[info.Digest]
+	if !ok {
+		// Unknown digest (config blob, etc.) — delegate to delta.
+		return c.delta.GetBlob(ctx, info, cache)
 	}
-	r, size, err = c.baseline.GetBlob(ctx, info, cache)
+	switch entry.Encoding {
+	case diff.EncodingFull:
+		return c.delta.GetBlob(ctx, info, cache)
+	case diff.EncodingPatch:
+		return c.fetchPatched(ctx, entry, cache)
+	default:
+		return nil, 0, fmt.Errorf("composite: unknown encoding %q for %s",
+			entry.Encoding, info.Digest)
+	}
+}
+
+func (c *CompositeSource) fetchPatched(
+	ctx context.Context, entry diff.BlobRef, cache types.BlobInfoCache,
+) (io.ReadCloser, int64, error) {
+	ref, err := readAllBlob(ctx, c.baseline, types.BlobInfo{Digest: entry.PatchFromDigest}, cache)
 	if err != nil {
-		return nil, 0, fmt.Errorf("blob %s not found in delta or baseline: %w", info.Digest, err)
+		return nil, 0, fmt.Errorf("composite: fetch patch reference %s: %w",
+			entry.PatchFromDigest, err)
 	}
-	return r, size, nil
+	patch, err := readAllBlob(ctx, c.delta, types.BlobInfo{Digest: entry.Digest}, cache)
+	if err != nil {
+		return nil, 0, fmt.Errorf("composite: fetch patch bytes %s: %w",
+			entry.Digest, err)
+	}
+	assembled, err := zstdpatch.Decode(ref, patch)
+	if err != nil {
+		return nil, 0, fmt.Errorf("composite: decode patch %s: %w", entry.Digest, err)
+	}
+	if got := digest.FromBytes(assembled); got != entry.Digest {
+		return nil, 0, &diff.ErrIntraLayerAssemblyMismatch{
+			Digest: entry.Digest.String(), Got: got.String(),
+		}
+	}
+	return io.NopCloser(bytes.NewReader(assembled)), int64(len(assembled)), nil
+}
+
+func readAllBlob(
+	ctx context.Context,
+	src types.ImageSource,
+	info types.BlobInfo,
+	cache types.BlobInfoCache,
+) ([]byte, error) {
+	r, _, err := src.GetBlob(ctx, info, cache)
+	if err != nil {
+		return nil, err
+	}
+	defer r.Close()
+	return io.ReadAll(r)
 }
 
 // GetManifest delegates to the delta (the authoritative holder of the target
@@ -91,12 +151,6 @@ func (c *CompositeSource) LayerInfosForCopy(
 	ctx context.Context, instanceDigest *digest.Digest,
 ) ([]types.BlobInfo, error) {
 	return c.delta.LayerInfosForCopy(ctx, instanceDigest)
-}
-
-// isNotFound detects whether err represents a blob-not-found condition.
-// The directory: transport wraps os.ErrNotExist when a blob file is missing.
-func isNotFound(err error) bool {
-	return err != nil && errors.Is(err, os.ErrNotExist)
 }
 
 // Compile-time interface check.

@@ -66,13 +66,16 @@ func runImport(cmd *cobra.Command, _ []string) error {
 			return err
 		}
 		fmt.Fprintf(cmd.OutOrStdout(),
-			"required blobs: %d, all reachable: %t\n",
-			report.RequiredBlobs, report.AllReachable)
+			"required blobs: %d (patch refs: %d), all reachable: %t\n",
+			report.RequiredBlobs, report.RequiredPatchRefs, report.AllReachable)
 		for _, d := range report.MissingDigests {
 			fmt.Fprintf(cmd.ErrOrStderr(), "missing in baseline: %s\n", d)
 		}
+		for _, d := range report.MissingPatchRefs {
+			fmt.Fprintf(cmd.ErrOrStderr(), "missing patch reference in baseline: %s\n", d)
+		}
 		if !report.AllReachable {
-			return errors.New("baseline missing required blobs")
+			return errors.New("baseline missing required blobs or patch references")
 		}
 		return nil
 	}

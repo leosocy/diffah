@@ -54,3 +54,25 @@ func TestErrDigestMismatch_MentionsWantGot(t *testing.T) {
 	require.Contains(t, msg, "sha256:a")
 	require.Contains(t, msg, "sha256:b")
 }
+
+func TestErrIntraLayerAssemblyMismatch_MentionsBothDigests(t *testing.T) {
+	err := &ErrIntraLayerAssemblyMismatch{
+		Digest: "sha256:want", Got: "sha256:got",
+	}
+	require.Contains(t, err.Error(), "sha256:want")
+	require.Contains(t, err.Error(), "sha256:got")
+}
+
+func TestErrBaselineMissingPatchRef_MentionsDigestAndSource(t *testing.T) {
+	err := &ErrBaselineMissingPatchRef{
+		Digest: "sha256:ref", Source: "docker://baseline",
+	}
+	require.Contains(t, err.Error(), "sha256:ref")
+	require.Contains(t, err.Error(), "docker://baseline")
+	require.Contains(t, err.Error(), "patch")
+}
+
+func TestErrIntraLayerUnsupported_MentionsReason(t *testing.T) {
+	err := &ErrIntraLayerUnsupported{Reason: "baseline-manifest has no blob bytes"}
+	require.Contains(t, err.Error(), "baseline-manifest has no blob bytes")
+}

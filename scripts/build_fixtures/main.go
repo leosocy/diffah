@@ -5,7 +5,7 @@
 //
 //	go run -tags containers_image_openpgp ./scripts/build_fixtures
 //
-// Outputs: testdata/fixtures/v1_oci.tar, v2_oci.tar, v1_s2.tar, v2_s2.tar, CHECKSUMS
+// Outputs: testdata/fixtures/v{1,2,3}_oci.tar, v{1,2,3}_s2.tar, unrelated_oci.tar, CHECKSUMS
 package main
 
 import (
@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"sort"
@@ -334,31 +335,62 @@ func removeIfExists(path string) error {
 	return nil
 }
 
-// buildFixtures builds all 4 fixture archives and writes CHECKSUMS.
+// seededRandom returns size bytes of deterministic pseudo-random data from the given seed.
+func seededRandom(seed int64, size int) []byte {
+	rng := rand.New(rand.NewSource(seed)) //nolint:gosec // deterministic fixture data
+	buf := make([]byte, size)
+	for i := range buf {
+		//nolint:gosec // G115: rng.Intn(256) is bounded to [0, 255] — fits byte by construction.
+		buf[i] = byte(rng.Intn(256))
+	}
+	return buf
+}
+
+// buildFixtures builds all fixture archives and writes CHECKSUMS.
 func buildFixtures(ctx context.Context) error {
 	if err := os.MkdirAll(fixtureDir, 0o755); err != nil {
 		return fmt.Errorf("mkdir fixtures: %w", err)
 	}
 
 	// Remove any pre-existing fixture files so transports can create fresh archives.
-	for _, name := range []string{"v1_oci.tar", "v1_s2.tar", "v2_oci.tar", "v2_s2.tar", "unrelated_oci.tar", "CHECKSUMS"} {
+	existing := []string{
+		"v1_oci.tar", "v1_s2.tar",
+		"v2_oci.tar", "v2_s2.tar",
+		"v3_oci.tar", "v3_s2.tar",
+		"unrelated_oci.tar", "CHECKSUMS",
+	}
+	for _, name := range existing {
 		if err := removeIfExists(filepath.Join(fixtureDir, name)); err != nil {
 			return err
 		}
 	}
 
-	// Build shared base layer: /shared.bin = 32 KiB of zero bytes.
-	baseData := make([]byte, 32*1024)
+	// Build shared base layer for v1 and v2: /shared.bin = 1 MiB pseudo-random data.
+	// Using random data ensures zstd cannot collapse content with RLE, so patch-from
+	// between v2 and v3 (which differ by 1 byte) produces a meaningfully small patch.
+	baseData := seededRandom(42, 1<<20)
 	baseCompressed, baseDiffID, baseBlob := buildLayerBlob("shared.bin", baseData)
-	fmt.Printf("shared layer diffID: %s\n", baseDiffID)
-	fmt.Printf("shared layer blobDigest: %s\n", baseBlob)
+	fmt.Printf("shared layer (v1/v2) diffID: %s\n", baseDiffID)
+	fmt.Printf("shared layer (v1/v2) blobDigest: %s\n", baseBlob)
+
+	// Build v3 base layer: same as v1/v2 base but with 1 byte flipped.
+	v3BaseData := make([]byte, len(baseData))
+	copy(v3BaseData, baseData)
+	v3BaseData[0] ^= 0x01
+	v3BaseCompressed, v3BaseDiffID, v3BaseBlob := buildLayerBlob("shared.bin", v3BaseData)
+	fmt.Printf("v3 shared layer diffID: %s\n", v3BaseDiffID)
+	fmt.Printf("v3 shared layer blobDigest: %s\n", v3BaseBlob)
 
 	// Build version layers.
 	v1Compressed, v1DiffID, v1Blob := buildLayerBlob("version.txt", []byte("v1\n"))
 	v2Compressed, v2DiffID, v2Blob := buildLayerBlob("version.txt", []byte("v2\n"))
+	v3Compressed, v3DiffID, v3Blob := buildLayerBlob("version.txt", []byte("v3\n"))
 
 	type fixtureSpec struct {
 		name         string
+		baseLayer    []byte
+		baseDiff     digest.Digest
+		baseBlob     digest.Digest
 		versionLayer []byte
 		versionDiff  digest.Digest
 		versionBlob  digest.Digest
@@ -368,6 +400,9 @@ func buildFixtures(ctx context.Context) error {
 	versions := []fixtureSpec{
 		{
 			name:         "v1",
+			baseLayer:    baseCompressed,
+			baseDiff:     baseDiffID,
+			baseBlob:     baseBlob,
 			versionLayer: v1Compressed,
 			versionDiff:  v1DiffID,
 			versionBlob:  v1Blob,
@@ -375,10 +410,23 @@ func buildFixtures(ctx context.Context) error {
 		},
 		{
 			name:         "v2",
+			baseLayer:    baseCompressed,
+			baseDiff:     baseDiffID,
+			baseBlob:     baseBlob,
 			versionLayer: v2Compressed,
 			versionDiff:  v2DiffID,
 			versionBlob:  v2Blob,
 			version:      "v2",
+		},
+		{
+			name:         "v3",
+			baseLayer:    v3BaseCompressed,
+			baseDiff:     v3BaseDiffID,
+			baseBlob:     v3BaseBlob,
+			versionLayer: v3Compressed,
+			versionDiff:  v3DiffID,
+			versionBlob:  v3Blob,
+			version:      "v3",
 		},
 	}
 
@@ -388,11 +436,12 @@ func buildFixtures(ctx context.Context) error {
 	}
 	var outputs []archiveOutput
 
-	for _, vs := range versions {
-		layers := [][]byte{baseCompressed, vs.versionLayer}
-		layerDiffs := []digest.Digest{baseDiffID, vs.versionDiff}
+	for i := range versions {
+		vs := &versions[i]
+		layers := [][]byte{vs.baseLayer, vs.versionLayer}
+		layerDiffs := []digest.Digest{vs.baseDiff, vs.versionDiff}
 		layerBlobs := []types.BlobInfo{
-			{Digest: baseBlob, Size: int64(len(baseCompressed))},
+			{Digest: vs.baseBlob, Size: int64(len(vs.baseLayer))},
 			{Digest: vs.versionBlob, Size: int64(len(vs.versionLayer))},
 		}
 
