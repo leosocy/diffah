@@ -42,3 +42,30 @@ func TestBlobPool_SeedManifestAndConfig(t *testing.T) {
 	require.True(t, pool.has(p1.TargetConfigDesc.Digest))
 	require.Len(t, pool.sortedDigests(), 2, "same target → dedup to 2 unique blobs")
 }
+
+func TestEncodeShipped_ForcesFullOnCrossImageDup(t *testing.T) {
+	ctx := context.Background()
+	p1, err := planPair(ctx, Pair{Name: "a",
+		BaselinePath: "../../testdata/fixtures/v2_oci.tar",
+		TargetPath:   "../../testdata/fixtures/v3_oci.tar"}, "linux/amd64")
+	require.NoError(t, err)
+	p2, err := planPair(ctx, Pair{Name: "b",
+		BaselinePath: "../../testdata/fixtures/v2_oci.tar",
+		TargetPath:   "../../testdata/fixtures/v3_oci.tar"}, "linux/amd64")
+	require.NoError(t, err)
+
+	pool := newBlobPool()
+	seedManifestAndConfig(pool, p1)
+	seedManifestAndConfig(pool, p2)
+	for _, p := range []*pairPlan{p1, p2} {
+		for _, s := range p.Shipped {
+			pool.countShipped(s.Digest)
+		}
+	}
+	require.NoError(t, encodeShipped(ctx, pool, []*pairPlan{p1, p2}, "off", nil))
+
+	for _, s := range p1.Shipped {
+		entry := pool.entries[s.Digest]
+		require.Equal(t, diff.EncodingFull, entry.Encoding, "shared shipped must be full")
+	}
+}
