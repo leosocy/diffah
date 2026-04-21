@@ -422,7 +422,6 @@ func seededRandom(seed int64, size int) []byte {
 	rng := rand.New(rand.NewSource(seed)) //nolint:gosec // deterministic fixture data
 	buf := make([]byte, size)
 	for i := range buf {
-		//nolint:gosec // G115: rng.Intn(256) is bounded to [0, 255] — fits byte by construction.
 		buf[i] = byte(rng.Intn(256))
 	}
 	return buf
