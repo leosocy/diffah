@@ -67,6 +67,8 @@ func TestPair_DuplicateNameRejected(t *testing.T) {
 
 func TestExport_RequiredMode_FailsWhenProbeMissing(t *testing.T) {
 	tmp := t.TempDir()
+	// Note: resolveMode returns an error before planPair is called, so the
+	// dummy paths are never touched. This tests the probe failure path only.
 	opts := exporter.Options{
 		Pairs:       []exporter.Pair{{Name: "a", BaselinePath: "does-not-matter", TargetPath: "ditto"}},
 		Platform:    "linux/amd64",
