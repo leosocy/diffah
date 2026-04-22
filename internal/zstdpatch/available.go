@@ -8,7 +8,6 @@ import (
 	"os/exec"
 	"regexp"
 	"strconv"
-	"sync"
 	"time"
 )
 
@@ -18,19 +17,12 @@ func newErrZstdBinaryMissing(reason string) error {
 	return fmt.Errorf("%w: %s", ErrZstdBinaryMissing, reason)
 }
 
-type availableCtx struct {
-	once   sync.Once
-	ok     bool
-	reason string
-}
-
-var probeCache availableCtx
-
+// Available reports whether zstd >= 1.5 is usable for patch-from
+// encode/decode. Each call does a fresh LookPath + `zstd --version`;
+// callers invoke Available at most once per top-level operation, so
+// process-wide caching isn't worth the concurrency hazard.
 func Available(ctx context.Context) (ok bool, reason string) {
-	probeCache.once.Do(func() {
-		probeCache.ok, probeCache.reason = availableForTesting(ctx, exec.LookPath, runZstdVersion)
-	})
-	return probeCache.ok, probeCache.reason
+	return availableForTesting(ctx, exec.LookPath, runZstdVersion)
 }
 
 func availableForTesting(
@@ -98,8 +90,4 @@ func firstLine(s string) string {
 		}
 	}
 	return s
-}
-
-func ResetProbeCache() {
-	probeCache = availableCtx{}
 }
