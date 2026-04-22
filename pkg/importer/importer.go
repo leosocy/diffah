@@ -66,7 +66,7 @@ func Import(ctx context.Context, opts Options) error {
 		}
 	}
 
-	ci, err := composeImage(ctx, img, bundle.sidecar, bundle, rb.Ref)
+	ci, err := composeImageLegacy(ctx, img, bundle.sidecar, bundle, rb.Ref)
 	if err != nil {
 		return fmt.Errorf("compose image %q: %w", rb.Name, err)
 	}
