@@ -76,16 +76,11 @@ func runImport(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(cmd.OutOrStdout(),
 			"images: %d, blobs: %d, archive size: %d\n",
 			len(report.Images), report.Blobs.FullCount+report.Blobs.PatchCount, report.ArchiveBytes)
-		for _, img := range report.Images {
-			if !img.BaselineProvided {
-				fmt.Fprintf(cmd.ErrOrStderr(), "missing baseline: %s\n", img.Name)
-			}
-		}
 		var missing bool
 		for _, img := range report.Images {
 			if !img.BaselineProvided {
+				fmt.Fprintf(cmd.ErrOrStderr(), "missing baseline: %s\n", img.Name)
 				missing = true
-				break
 			}
 		}
 		if missing {

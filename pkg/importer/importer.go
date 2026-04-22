@@ -148,6 +148,7 @@ func DryRun(ctx context.Context, opts Options) (DryRunReport, error) {
 					patchCount++
 				}
 			} else {
+				// Layers not present in the archive (must come from baseline)
 				baseCount++
 			}
 		}
@@ -170,9 +171,11 @@ func DryRun(ctx context.Context, opts Options) (DryRunReport, error) {
 	}
 
 	var archiveBytes int64
-	if info, err := os.Stat(opts.DeltaPath); err == nil {
-		archiveBytes = info.Size()
+	info, err := os.Stat(opts.DeltaPath)
+	if err != nil {
+		return DryRunReport{}, fmt.Errorf("stat delta archive %s: %w", opts.DeltaPath, err)
 	}
+	archiveBytes = info.Size()
 
 	return DryRunReport{
 		Feature:      bundle.sidecar.Feature,
@@ -200,6 +203,9 @@ func readManifestLayers(bundle *extractedBundle, mfDigest digest.Digest) ([]dige
 	}
 	if err := json.Unmarshal(raw, &m); err != nil {
 		return nil, fmt.Errorf("parse manifest: %w", err)
+	}
+	if len(m.Layers) == 0 {
+		return nil, fmt.Errorf("manifest %s has no layers", mfDigest)
 	}
 	out := make([]digest.Digest, 0, len(m.Layers))
 	for _, l := range m.Layers {
@@ -236,7 +242,7 @@ type ImageDryRun struct {
 	SkipReason             string
 	LayerCount             int
 	ArchiveLayerCount      int
-	BaselineLayerCount     int
+	BaselineLayerCount     int // layers not present in the archive (sourced from baseline)
 	PatchLayerCount        int
 }
 
