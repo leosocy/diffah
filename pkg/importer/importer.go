@@ -173,7 +173,7 @@ func DryRun(ctx context.Context, opts Options) (DryRunReport, error) {
 	requiresZstd := sidecarHasPatch(bundle.sidecar)
 	var zstdAvailable bool
 	if requiresZstd {
-		zstdAvailable, _ = opts.probeOrDefault()(ctx)
+		zstdAvailable, _ = opts.probeOrDefault()(ctx) // reason is only used in Import's error path; DryRun discards it
 	}
 
 	return DryRunReport{
