@@ -21,7 +21,7 @@ type probeStub struct {
 	calls  int
 }
 
-func (p *probeStub) probe(ctx context.Context) (bool, string) {
+func (p *probeStub) probe(_ context.Context) (bool, string) {
 	p.calls++
 	return p.ok, p.reason
 }

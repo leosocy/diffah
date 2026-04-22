@@ -8,30 +8,35 @@ import (
 	"github.com/leosocy/diffah/internal/zstdpatch"
 )
 
+const (
+	modeAuto = "auto"
+	modeOff  = "off"
+)
+
 type Probe func(context.Context) (ok bool, reason string)
 
 func resolveMode(
 	ctx context.Context, userMode string, probe Probe, warn io.Writer,
 ) (effective string, err error) {
 	if userMode == "" {
-		userMode = "auto"
+		userMode = modeAuto
 	}
 	switch userMode {
-	case "auto":
+	case modeAuto:
 		ok, reason := probe(ctx)
 		if ok {
-			return "auto", nil
+			return modeAuto, nil
 		}
 		if warn != nil {
 			fmt.Fprintf(warn, "diffah: %s; disabling intra-layer for this run\n", reason)
 		}
-		return "off", nil
-	case "off":
-		return "off", nil
+		return modeOff, nil
+	case modeOff:
+		return modeOff, nil
 	case "required":
 		ok, reason := probe(ctx)
 		if ok {
-			return "auto", nil
+			return modeAuto, nil
 		}
 		return "", fmt.Errorf("%w: %s", zstdpatch.ErrZstdBinaryMissing, reason)
 	default:

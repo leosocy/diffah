@@ -435,7 +435,7 @@ func TestIntegration_Import_OutputMustBeDirectory(t *testing.T) {
 	require.Contains(t, err.Error(), "must be a directory")
 }
 
-func fixtureImageName(t *testing.T) string {
+func fixtureImageName(_ *testing.T) string {
 	return "svc-a"
 }
 

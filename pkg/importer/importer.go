@@ -41,9 +41,7 @@ func (o *Options) probeOrDefault() func(context.Context) (bool, string) {
 	if o.Probe != nil {
 		return o.Probe
 	}
-	return func(ctx context.Context) (bool, string) {
-		return zstdpatch.Available(ctx)
-	}
+	return zstdpatch.Available
 }
 
 func sidecarHasPatch(sc *diff.Sidecar) bool {

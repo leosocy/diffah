@@ -13,13 +13,13 @@ import (
 
 func TestResolveMode_Table(t *testing.T) {
 	cases := []struct {
-		name        string
-		input       string
-		probeOK     bool
-		reason      string
-		wantEff     string
-		wantWarn    string
-		wantErrIs   error
+		name      string
+		input     string
+		probeOK   bool
+		reason    string
+		wantEff   string
+		wantWarn  string
+		wantErrIs error
 	}{
 		{"auto+ok", "auto", true, "", "auto", "", nil},
 		{"empty+ok_defaults_to_auto", "", true, "", "auto", "", nil},
