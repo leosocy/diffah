@@ -16,6 +16,7 @@ import (
 	ociarchive "go.podman.io/image/v5/oci/archive"
 	"go.podman.io/image/v5/types"
 
+	"github.com/leosocy/diffah/internal/zstdpatch"
 	"github.com/leosocy/diffah/pkg/diff"
 )
 
@@ -33,6 +34,25 @@ type Options struct {
 	OutputFormat string
 	AllowConvert bool
 	Progress     io.Writer
+	Probe        func(context.Context) (bool, string)
+}
+
+func (o *Options) probeOrDefault() func(context.Context) (bool, string) {
+	if o.Probe != nil {
+		return o.Probe
+	}
+	return func(ctx context.Context) (bool, string) {
+		return zstdpatch.Available(ctx)
+	}
+}
+
+func sidecarHasPatch(sc *diff.Sidecar) bool {
+	for _, b := range sc.Blobs {
+		if b.Encoding == diff.EncodingPatch {
+			return true
+		}
+	}
+	return false
 }
 
 func Import(ctx context.Context, opts Options) error {
@@ -41,6 +61,13 @@ func Import(ctx context.Context, opts Options) error {
 		return err
 	}
 	defer bundle.cleanup()
+
+	if sidecarHasPatch(bundle.sidecar) {
+		ok, reason := opts.probeOrDefault()(ctx)
+		if !ok {
+			return fmt.Errorf("%w: %s", zstdpatch.ErrZstdBinaryMissing, reason)
+		}
+	}
 
 	if err := validatePositionalBaseline(bundle.sidecar, opts.Baselines); err != nil {
 		return err
@@ -143,16 +170,24 @@ func DryRun(ctx context.Context, opts Options) (DryRunReport, error) {
 	}
 	archiveBytes = info.Size()
 
+	requiresZstd := sidecarHasPatch(bundle.sidecar)
+	var zstdAvailable bool
+	if requiresZstd {
+		zstdAvailable, _ = opts.probeOrDefault()(ctx)
+	}
+
 	return DryRunReport{
-		Feature:      bundle.sidecar.Feature,
-		Version:      bundle.sidecar.Version,
-		Tool:         bundle.sidecar.Tool,
-		ToolVersion:  bundle.sidecar.ToolVersion,
-		CreatedAt:    bundle.sidecar.CreatedAt,
-		Platform:     bundle.sidecar.Platform,
-		Images:       images,
-		Blobs:        blobStats,
-		ArchiveBytes: archiveBytes,
+		Feature:       bundle.sidecar.Feature,
+		Version:       bundle.sidecar.Version,
+		Tool:          bundle.sidecar.Tool,
+		ToolVersion:   bundle.sidecar.ToolVersion,
+		CreatedAt:     bundle.sidecar.CreatedAt,
+		Platform:      bundle.sidecar.Platform,
+		Images:        images,
+		Blobs:         blobStats,
+		ArchiveBytes:  archiveBytes,
+		RequiresZstd:  requiresZstd,
+		ZstdAvailable: zstdAvailable,
 	}, nil
 }
 
@@ -223,15 +258,17 @@ func readManifestLayers(bundle *extractedBundle, mfDigest digest.Digest) ([]dige
 }
 
 type DryRunReport struct {
-	Feature      string
-	Version      string
-	Tool         string
-	ToolVersion  string
-	CreatedAt    time.Time
-	Platform     string
-	Images       []ImageDryRun
-	Blobs        BlobStats
-	ArchiveBytes int64
+	Feature       string
+	Version       string
+	Tool          string
+	ToolVersion   string
+	CreatedAt     time.Time
+	Platform      string
+	Images        []ImageDryRun
+	Blobs         BlobStats
+	ArchiveBytes  int64
+	RequiresZstd  bool
+	ZstdAvailable bool
 }
 
 type BlobStats struct {
