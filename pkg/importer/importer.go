@@ -2,10 +2,15 @@ package importer
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"time"
 
+	"github.com/leosocy/diffah/pkg/diff"
+	"github.com/opencontainers/go-digest"
 	"go.podman.io/image/v5/directory"
 	dockerarchive "go.podman.io/image/v5/docker/archive"
 	dockerref "go.podman.io/image/v5/docker/reference"
@@ -108,47 +113,131 @@ func DryRun(ctx context.Context, opts Options) (DryRunReport, error) {
 		return DryRunReport{}, err
 	}
 
-	report := DryRunReport{
-		TotalImages: len(bundle.sidecar.Images),
-		TotalBlobs:  len(bundle.sidecar.Blobs),
-	}
-	for _, e := range bundle.sidecar.Blobs {
-		report.ArchiveSize += e.ArchiveSize
+	var blobStats BlobStats
+	for _, b := range bundle.sidecar.Blobs {
+		switch b.Encoding {
+		case diff.EncodingFull:
+			blobStats.FullCount++
+			blobStats.FullBytes += b.ArchiveSize
+		case diff.EncodingPatch:
+			blobStats.PatchCount++
+			blobStats.PatchBytes += b.ArchiveSize
+		}
 	}
 
 	resolved, err := resolveBaselines(ctx, bundle.sidecar, opts.Baselines, opts.Strict)
 	if err != nil {
-		return report, err
+		return DryRunReport{}, err
 	}
-	resolvedNames := make(map[string]struct{}, len(resolved))
+	provided := make(map[string]struct{}, len(resolved))
 	for _, r := range resolved {
-		resolvedNames[r.Name] = struct{}{}
-		report.PerImage = append(report.PerImage, ImageDryRunStats{
-			Name: r.Name,
-		})
-	}
-	for _, img := range bundle.sidecar.Images {
-		if _, ok := resolvedNames[img.Name]; !ok {
-			report.MissingNames = append(report.MissingNames, img.Name)
-		}
+		provided[r.Name] = struct{}{}
 	}
 
-	return report, nil
+	images := make([]ImageDryRun, 0, len(bundle.sidecar.Images))
+	for _, img := range bundle.sidecar.Images {
+		layers, err := readManifestLayers(bundle, img.Target.ManifestDigest)
+		if err != nil {
+			return DryRunReport{}, fmt.Errorf("read target manifest for %q: %w", img.Name, err)
+		}
+		var archCount, baseCount, patchCount int
+		for _, l := range layers {
+			if entry, ok := bundle.sidecar.Blobs[l]; ok {
+				archCount++
+				if entry.Encoding == diff.EncodingPatch {
+					patchCount++
+				}
+			} else {
+				baseCount++
+			}
+		}
+		_, has := provided[img.Name]
+		row := ImageDryRun{
+			Name:                   img.Name,
+			BaselineManifestDigest: img.Baseline.ManifestDigest,
+			TargetManifestDigest:   img.Target.ManifestDigest,
+			BaselineProvided:       has,
+			WouldImport:            has,
+			LayerCount:             len(layers),
+			ArchiveLayerCount:      archCount,
+			BaselineLayerCount:     baseCount,
+			PatchLayerCount:        patchCount,
+		}
+		if !has {
+			row.SkipReason = "no baseline provided"
+		}
+		images = append(images, row)
+	}
+
+	var archiveBytes int64
+	if info, err := os.Stat(opts.DeltaPath); err == nil {
+		archiveBytes = info.Size()
+	}
+
+	return DryRunReport{
+		Feature:      bundle.sidecar.Feature,
+		Version:      bundle.sidecar.Version,
+		Tool:         bundle.sidecar.Tool,
+		ToolVersion:  bundle.sidecar.ToolVersion,
+		CreatedAt:    bundle.sidecar.CreatedAt,
+		Platform:     bundle.sidecar.Platform,
+		Images:       images,
+		Blobs:        blobStats,
+		ArchiveBytes: archiveBytes,
+	}, nil
+}
+
+func readManifestLayers(bundle *extractedBundle, mfDigest digest.Digest) ([]digest.Digest, error) {
+	path := filepath.Join(bundle.blobDir, mfDigest.Algorithm().String(), mfDigest.Encoded())
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var m struct {
+		Layers []struct {
+			Digest digest.Digest `json:"digest"`
+		} `json:"layers"`
+	}
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return nil, fmt.Errorf("parse manifest: %w", err)
+	}
+	out := make([]digest.Digest, 0, len(m.Layers))
+	for _, l := range m.Layers {
+		out = append(out, l.Digest)
+	}
+	return out, nil
 }
 
 type DryRunReport struct {
-	TotalImages  int
-	TotalBlobs   int
-	ArchiveSize  int64
-	PerImage     []ImageDryRunStats
-	MissingNames []string
+	Feature      string
+	Version      string
+	Tool         string
+	ToolVersion  string
+	CreatedAt    time.Time
+	Platform     string
+	Images       []ImageDryRun
+	Blobs        BlobStats
+	ArchiveBytes int64
 }
 
-type ImageDryRunStats struct {
-	Name          string
-	ShippedBlobs  int
-	RequiredBlobs int
-	ArchiveSize   int64
+type BlobStats struct {
+	FullCount  int
+	PatchCount int
+	FullBytes  int64
+	PatchBytes int64
+}
+
+type ImageDryRun struct {
+	Name                   string
+	BaselineManifestDigest digest.Digest
+	TargetManifestDigest   digest.Digest
+	BaselineProvided       bool
+	WouldImport            bool
+	SkipReason             string
+	LayerCount             int
+	ArchiveLayerCount      int
+	BaselineLayerCount     int
+	PatchLayerCount        int
 }
 
 func buildOutputRef(path, format string) (types.ImageReference, error) {

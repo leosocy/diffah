@@ -282,13 +282,22 @@ func TestIntegration_MultiImageBundle_DryRunReport(t *testing.T) {
 	}, false)
 	report, err := DryRun(h.ctx, opts)
 	require.NoError(t, err)
-	require.Equal(t, 2, report.TotalImages)
-	require.NotEmpty(t, report.TotalBlobs)
-	require.NotZero(t, report.ArchiveSize)
-	require.Len(t, report.PerImage, 1, "only svc-a baseline was provided")
-	require.Equal(t, "svc-a", report.PerImage[0].Name)
-	require.Equal(t, []string{"svc-b"}, report.MissingNames,
-		"svc-b baseline was not provided")
+	require.Len(t, report.Images, 2)
+	require.Greater(t, report.Blobs.FullCount+report.Blobs.PatchCount, 0)
+	require.NotZero(t, report.ArchiveBytes)
+	var provided, missing []ImageDryRun
+	for _, img := range report.Images {
+		if img.BaselineProvided {
+			provided = append(provided, img)
+		} else {
+			missing = append(missing, img)
+		}
+	}
+	require.Len(t, provided, 1, "only svc-a baseline was provided")
+	require.Equal(t, "svc-a", provided[0].Name)
+	require.Len(t, missing, 1, "svc-b baseline was not provided")
+	require.Equal(t, "svc-b", missing[0].Name)
+	require.Contains(t, missing[0].SkipReason, "no baseline provided")
 }
 
 func TestIntegration_MultiImageBundle_ForceFullDedup(t *testing.T) {
@@ -363,6 +372,47 @@ func TestIntegration_MultiImageBundle_PartialSkip(t *testing.T) {
 	_, err = os.Stat(filepath.Join(outDir, "svc-b.tar"))
 	require.ErrorIs(t, err, os.ErrNotExist, "svc-b.tar must not exist")
 	require.Contains(t, progress.String(), "svc-b: skipped (no baseline provided)")
+}
+
+func TestDryRun_PopulatesAllFields(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	h := newMultiImageBundleHarness(t)
+	opts := h.importOpts(map[string]string{
+		"svc-a": "../../testdata/fixtures/v1_oci.tar",
+	}, false)
+	report, err := DryRun(h.ctx, opts)
+	require.NoError(t, err)
+
+	require.Equal(t, "bundle", report.Feature)
+	require.Equal(t, "v1", report.Version)
+	require.Equal(t, "diffah", report.Tool)
+	require.Equal(t, "test", report.ToolVersion)
+	require.Equal(t, "linux/amd64", report.Platform)
+	require.NotZero(t, report.ArchiveBytes, "ArchiveBytes is the bundle file size")
+	require.Greater(t, report.Blobs.FullCount+report.Blobs.PatchCount, 0)
+
+	require.Len(t, report.Images, 2)
+	var a, b ImageDryRun
+	for _, i := range report.Images {
+		switch i.Name {
+		case "svc-a":
+			a = i
+		case "svc-b":
+			b = i
+		}
+	}
+	require.Equal(t, "svc-a", a.Name)
+	require.True(t, a.BaselineProvided)
+	require.True(t, a.WouldImport)
+	require.Empty(t, a.SkipReason)
+	require.Greater(t, a.LayerCount, 0)
+
+	require.Equal(t, "svc-b", b.Name)
+	require.False(t, b.BaselineProvided)
+	require.False(t, b.WouldImport)
+	require.Contains(t, b.SkipReason, "no baseline provided")
 }
 
 func TestIntegration_Import_OutputMustBeDirectory(t *testing.T) {
