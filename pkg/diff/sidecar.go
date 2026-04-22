@@ -131,6 +131,18 @@ func validateBlobEntry(d digest.Digest, b BlobEntry) error {
 	return nil
 }
 
+// RequiresZstd reports whether this archive contains at least one
+// intra-layer patch payload. Importers and inspectors use this to
+// decide whether the zstd binary is required at import time.
+func (s Sidecar) RequiresZstd() bool {
+	for _, b := range s.Blobs {
+		if b.Encoding == EncodingPatch {
+			return true
+		}
+	}
+	return false
+}
+
 func (s Sidecar) Marshal() ([]byte, error) {
 	if err := s.validate(); err != nil {
 		return nil, err

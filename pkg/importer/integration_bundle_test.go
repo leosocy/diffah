@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -432,4 +433,52 @@ func TestIntegration_Import_OutputMustBeDirectory(t *testing.T) {
 	err := Import(h.ctx, opts)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "must be a directory")
+}
+
+func fixtureImageName(_ *testing.T) string {
+	return "svc-a"
+}
+
+func fixtureBaselinePath(t *testing.T) string {
+	return fixturePair(t).BaselinePath
+}
+
+func TestIntegration_AutoDowngradesUnderReducedPATH(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	t.Setenv("PATH", "")
+
+	tmp := t.TempDir()
+	bundlePath := filepath.Join(tmp, "bundle.tar")
+	var warn bytes.Buffer
+	err := exporter.Export(context.Background(), exporter.Options{
+		Pairs:       []exporter.Pair{fixturePair(t)},
+		Platform:    "linux/amd64",
+		IntraLayer:  "auto",
+		OutputPath:  bundlePath,
+		ToolVersion: "test",
+		CreatedAt:   time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		WarnOut:     &warn,
+	})
+	require.NoError(t, err)
+	require.Equal(t, 1, strings.Count(warn.String(), "disabling intra-layer for this run"),
+		"downgrade warning must appear exactly once")
+
+	b, err := extractBundle(bundlePath)
+	require.NoError(t, err)
+	defer b.cleanup()
+	for d, b := range b.sidecar.Blobs {
+		require.Equal(t, diff.EncodingFull, b.Encoding, "blob %s encoded as %s", d, b.Encoding)
+	}
+
+	outDir := filepath.Join(tmp, "out")
+	require.NoError(t, os.MkdirAll(outDir, 0o755))
+	err = Import(context.Background(), Options{
+		DeltaPath:    bundlePath,
+		Baselines:    map[string]string{fixtureImageName(t): fixtureBaselinePath(t)},
+		OutputPath:   outDir,
+		OutputFormat: "oci-archive",
+	})
+	require.NoError(t, err)
 }

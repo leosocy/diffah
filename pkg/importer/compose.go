@@ -106,7 +106,7 @@ func (s *bundleImageSource) servePatch(
 	if err != nil {
 		return nil, 0, fmt.Errorf("fetch patch-from blob %s: %w", entry.PatchFromDigest, err)
 	}
-	out, err := zstdpatch.Decode(baseBytes, patchBytes)
+	out, err := zstdpatch.Decode(ctx, baseBytes, patchBytes)
 	if err != nil {
 		return nil, 0, fmt.Errorf("decode patch for %s: %w", target, err)
 	}

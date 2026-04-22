@@ -23,7 +23,7 @@ func encodeShipped(
 			if err != nil {
 				return fmt.Errorf("read shipped %s: %w", s.Digest, err)
 			}
-			if pool.refCount(s.Digest) > 1 || mode == "off" {
+			if pool.refCount(s.Digest) > 1 || mode == modeOff {
 				pool.addIfAbsent(s.Digest, layerBytes, fullBlobEntry(s))
 				continue
 			}

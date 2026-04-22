@@ -12,34 +12,6 @@ import (
 	"github.com/leosocy/diffah/pkg/diff"
 )
 
-func buildInspectTestDelta(t *testing.T) string {
-	t.Skip("rewritten in Task 17")
-	t.Helper()
-	return ""
-}
-
-func TestInspectCommand_PrintsSidecarFields(t *testing.T) {
-	delta := buildInspectTestDelta(t)
-
-	var buf bytes.Buffer
-	rootCmd.SetOut(&buf)
-	rootCmd.SetErr(&buf)
-	rootCmd.SetArgs([]string{"inspect", delta})
-	require.NoError(t, rootCmd.Execute())
-
-	out := buf.String()
-	require.Contains(t, out, "version: v1")
-	require.Contains(t, out, "platform:")
-	require.Contains(t, out, "target manifest digest:")
-	require.Contains(t, out, "baseline manifest digest:")
-	require.Contains(t, out, "shipped:")
-	require.Contains(t, out, "shipped blobs:")
-	require.Contains(t, out, "full:")
-	require.Contains(t, out, "total archive:")
-	require.Contains(t, out, "required:")
-	require.Regexp(t, `saved\s+[0-9.]+%\s+vs full image`, out)
-}
-
 func TestPrintBundleSidecar_PerImageStats(t *testing.T) {
 	s := &diff.Sidecar{
 		Version:     "v1",
@@ -84,7 +56,7 @@ func TestPrintBundleSidecar_PerImageStats(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := printBundleSidecar(&buf, "/tmp/bundle.tar", s)
+	err := printBundleSidecar(&buf, "/tmp/bundle.tar", s, true, true)
 	require.NoError(t, err)
 
 	out := buf.String()
@@ -96,6 +68,8 @@ func TestPrintBundleSidecar_PerImageStats(t *testing.T) {
 	require.Contains(t, out, "total archive: 4500 bytes")
 	require.Contains(t, out, "avg patch ratio: 20.0%")
 	require.Contains(t, out, "patch savings: 4000 bytes (80.0% vs full)")
+	require.Contains(t, out, "intra-layer patches required: yes")
+	require.Contains(t, out, "zstd available: yes")
 
 	require.Contains(t, out, "--- image: service-a ---")
 	require.Contains(t, out, "target manifest digest: sha256:manifest-a")
@@ -161,7 +135,7 @@ func TestRunInspect_BundleSidecar_ParsesDirectly(t *testing.T) {
 	require.NoError(t, perr, "ParseSidecar should succeed on bundle JSON")
 
 	var buf bytes.Buffer
-	err = printBundleSidecar(&buf, "/tmp/bundle.tar", parsed)
+	err = printBundleSidecar(&buf, "/tmp/bundle.tar", parsed, false, false)
 	require.NoError(t, err)
 	require.Contains(t, buf.String(), "feature: bundle")
 	require.Contains(t, buf.String(), "--- image: svc ---")

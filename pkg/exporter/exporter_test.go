@@ -1,10 +1,18 @@
 package exporter_test
 
 import (
+	"bytes"
+	"context"
+	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/leosocy/diffah/internal/archive"
+	"github.com/leosocy/diffah/internal/zstdpatch"
+	"github.com/leosocy/diffah/pkg/diff"
 	"github.com/leosocy/diffah/pkg/exporter"
 )
 
@@ -55,4 +63,55 @@ func TestPair_DuplicateNameRejected(t *testing.T) {
 	}
 	err := exporter.ValidatePairs(pairs)
 	require.Error(t, err)
+}
+
+func TestExport_RequiredMode_FailsWhenProbeMissing(t *testing.T) {
+	tmp := t.TempDir()
+	// Dummy paths are safe here because resolveMode runs before any
+	// file-touching work in buildBundle. If that ordering ever changes,
+	// this test will fail loudly on the dummy paths rather than silently
+	// skip the probe assertion.
+	opts := exporter.Options{
+		Pairs:       []exporter.Pair{{Name: "a", BaselinePath: "does-not-matter", TargetPath: "ditto"}},
+		Platform:    "linux/amd64",
+		IntraLayer:  "required",
+		OutputPath:  filepath.Join(tmp, "bundle.tar"),
+		ToolVersion: "test",
+		Probe:       func(context.Context) (bool, string) { return false, "zstd not on $PATH" },
+	}
+	err := exporter.Export(context.Background(), opts)
+	require.Error(t, err)
+	require.True(t, errors.Is(err, zstdpatch.ErrZstdBinaryMissing))
+	_, statErr := os.Stat(opts.OutputPath)
+	require.True(t, os.IsNotExist(statErr))
+}
+
+func TestExport_AutoMode_DowngradesSilentlyWhenProbeMissing(t *testing.T) {
+	tmp := t.TempDir()
+	var warn bytes.Buffer
+	opts := exporter.Options{
+		Pairs:       []exporter.Pair{{Name: "a", BaselinePath: "../../testdata/fixtures/v1_oci.tar", TargetPath: "../../testdata/fixtures/v2_oci.tar"}},
+		Platform:    "linux/amd64",
+		IntraLayer:  "auto",
+		OutputPath:  filepath.Join(tmp, "bundle.tar"),
+		ToolVersion: "test",
+		Probe:       func(context.Context) (bool, string) { return false, "zstd not on $PATH" },
+		WarnOut:     &warn,
+	}
+	err := exporter.Export(context.Background(), opts)
+	require.NoError(t, err)
+	require.Contains(t, warn.String(), "disabling intra-layer for this run")
+	requireAllFullEncoding(t, opts.OutputPath)
+}
+
+func requireAllFullEncoding(t *testing.T, path string) {
+	t.Helper()
+	raw, err := archive.ReadSidecar(path)
+	require.NoError(t, err)
+	sc, err := diff.ParseSidecar(raw)
+	require.NoError(t, err)
+	for d, b := range sc.Blobs {
+		require.Equal(t, diff.EncodingFull, b.Encoding,
+			"blob %s unexpectedly encoded as %s", d, b.Encoding)
+	}
 }

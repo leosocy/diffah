@@ -66,3 +66,20 @@ func TestExportCommand_DryRun(t *testing.T) {
 	require.True(t, os.IsNotExist(err))
 	require.Contains(t, string(output), "blobs")
 }
+
+func TestExport_RejectsUnknownIntraLayerValue(t *testing.T) {
+	repoRoot := findRepoRoot(t)
+	cmd := exec.Command(
+		"go", "run", "-tags", "containers_image_openpgp exclude_graphdriver_btrfs exclude_graphdriver_devicemapper", ".",
+		"export",
+		"--pair", "a="+filepath.Join(repoRoot, "testdata/fixtures/v1_oci.tar")+","+filepath.Join(repoRoot, "testdata/fixtures/v2_oci.tar"),
+		"--intra-layer", "aggressive",
+		filepath.Join(t.TempDir(), "out.tar"),
+	)
+	cmd.Dir = repoRoot
+	out, err := cmd.CombinedOutput()
+	t.Logf("output: %s", out)
+	require.Error(t, err)
+	require.Contains(t, string(out), "aggressive")
+	require.Contains(t, string(out), "--intra-layer")
+}

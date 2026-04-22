@@ -2,6 +2,7 @@ package zstdpatch
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"os/exec"
 	"testing"
@@ -20,9 +21,9 @@ func skipWithoutZstd(t *testing.T) {
 func TestRoundTrip_Empty(t *testing.T) {
 	skipWithoutZstd(t)
 	ref := []byte("unused reference bytes")
-	patch, err := Encode(ref, nil)
+	patch, err := Encode(context.Background(), ref, nil)
 	require.NoError(t, err)
-	got, err := Decode(ref, patch)
+	got, err := Decode(context.Background(), ref, patch)
 	require.NoError(t, err)
 	require.Empty(t, got)
 }
@@ -36,12 +37,12 @@ func TestRoundTrip_SmallDelta(t *testing.T) {
 	target := append([]byte(nil), ref...)
 	target[len(target)/2] ^= 0xFF
 
-	patch, err := Encode(ref, target)
+	patch, err := Encode(context.Background(), ref, target)
 	require.NoError(t, err)
 	require.Less(t, len(patch), len(target)/2,
 		"patch of a 1-byte delta should be far smaller than half the target")
 
-	got, err := Decode(ref, patch)
+	got, err := Decode(context.Background(), ref, patch)
 	require.NoError(t, err)
 	require.True(t, bytes.Equal(got, target), "decoded bytes differ from target")
 }
@@ -60,10 +61,10 @@ func TestDecode_WrongReference(t *testing.T) {
 	target := append([]byte(nil), refA...)
 	target[0] ^= 0xFF
 
-	patch, err := Encode(refA, target)
+	patch, err := Encode(context.Background(), refA, target)
 	require.NoError(t, err)
 
-	got, err := Decode(refB, patch)
+	got, err := Decode(context.Background(), refB, patch)
 	if err == nil {
 		// Decode may succeed but must not return the original target bytes.
 		require.False(t, bytes.Equal(got, target),
@@ -71,17 +72,25 @@ func TestDecode_WrongReference(t *testing.T) {
 	}
 }
 
-// TestEncodeFull_RoundTrip — EncodeFull is a plain zstd encode with no
-// reference; DecodeFull must recover the target.
-func TestEncodeFull_RoundTrip(t *testing.T) {
+// TestEncode_PreCancelledCtx_ReturnsErrorIsCanceled — if the caller's
+// ctx is already cancelled when Encode is invoked, exec.CommandContext
+// refuses to spawn the subprocess and Encode's error chain surfaces
+// context.Canceled via the %w wrap in cli.go's encode error return.
+//
+// This test deliberately does NOT verify mid-flight subprocess kill —
+// that would require a goroutine + timing synchronization. It only
+// guarantees the pre-start cancellation path is wired correctly.
+func TestEncode_PreCancelledCtx_ReturnsErrorIsCanceled(t *testing.T) {
 	skipWithoutZstd(t)
-	target := bytes.Repeat([]byte("hello, diffah "), 1<<10)
+	// Tiny payload — subprocess never spawns, so size doesn't matter.
+	// Empty target would hit the empty-frame short-circuit in Encode and
+	// bypass the CommandContext path entirely, so use one non-zero byte.
+	ref := []byte{0x00}
+	target := []byte{0x01}
 
-	compressed, err := EncodeFull(target)
-	require.NoError(t, err)
-	require.Less(t, len(compressed), len(target))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
 
-	got, err := DecodeFull(compressed)
-	require.NoError(t, err)
-	require.True(t, bytes.Equal(got, target))
+	_, err := Encode(ctx, ref, target)
+	require.ErrorIs(t, err, context.Canceled, "Encode must surface ctx cancellation")
 }

@@ -101,7 +101,7 @@ func (p *Planner) Run(
 				"read baseline reference %s: %w", bestRef.Digest, err)
 		}
 
-		patch, err := zstdpatch.Encode(refBytes, target)
+		patch, err := zstdpatch.Encode(ctx, refBytes, target)
 		if err != nil {
 			return nil, nil, fmt.Errorf("encode patch %s: %w", l.Digest, err)
 		}

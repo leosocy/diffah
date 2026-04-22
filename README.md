@@ -47,6 +47,20 @@ go install -tags containers_image_openpgp github.com/leosocy/diffah@latest
 
 [releases]: https://github.com/leosocy/diffah/releases
 
+## Requirements
+
+- Go 1.25+ (build only).
+- `zstd ≥ 1.5` on `$PATH` — **recommended for best compression**. Required only when:
+  - using `--intra-layer=required` on `diffah export`;
+  - importing an archive that was produced with intra-layer patches.
+
+Archives produced with `--intra-layer=off` (or `auto` on a host without
+zstd — `auto` downgrades silently and warns on stderr) import anywhere,
+including hosts with no `zstd` binary at all.
+
+Run `diffah inspect <archive>` to see whether a given archive requires
+`zstd` at import time.
+
 ## Usage
 
 ### Single-image delta
