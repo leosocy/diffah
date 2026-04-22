@@ -12,35 +12,6 @@ import (
 	"github.com/leosocy/diffah/pkg/diff"
 )
 
-func buildInspectTestDelta(t *testing.T) string {
-	t.Skip("rewritten in Task 17")
-	t.Helper()
-	return ""
-}
-
-func TestInspectCommand_PrintsSidecarFields(t *testing.T) {
-	t.Skip("rewritten in Task 17")
-	delta := buildInspectTestDelta(t)
-
-	var buf bytes.Buffer
-	rootCmd.SetOut(&buf)
-	rootCmd.SetErr(&buf)
-	rootCmd.SetArgs([]string{"inspect", delta})
-	require.NoError(t, rootCmd.Execute())
-
-	out := buf.String()
-	require.Contains(t, out, "version: v1")
-	require.Contains(t, out, "platform:")
-	require.Contains(t, out, "target manifest digest:")
-	require.Contains(t, out, "baseline manifest digest:")
-	require.Contains(t, out, "shipped:")
-	require.Contains(t, out, "shipped blobs:")
-	require.Contains(t, out, "full:")
-	require.Contains(t, out, "total archive:")
-	require.Contains(t, out, "required:")
-	require.Regexp(t, `saved\s+[0-9.]+%\s+vs full image`, out)
-}
-
 func TestPrintBundleSidecar_PerImageStats(t *testing.T) {
 	s := &diff.Sidecar{
 		Version:     "v1",
