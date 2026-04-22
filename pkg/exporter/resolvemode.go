@@ -9,8 +9,9 @@ import (
 )
 
 const (
-	modeAuto = "auto"
-	modeOff  = "off"
+	modeAuto     = "auto"
+	modeOff      = "off"
+	modeRequired = "required"
 )
 
 type Probe func(context.Context) (ok bool, reason string)
@@ -33,7 +34,7 @@ func resolveMode(
 		return modeOff, nil
 	case modeOff:
 		return modeOff, nil
-	case "required":
+	case modeRequired:
 		ok, reason := probe(ctx)
 		if ok {
 			return modeAuto, nil

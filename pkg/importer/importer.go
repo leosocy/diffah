@@ -162,7 +162,10 @@ func DryRun(ctx context.Context, opts Options) (DryRunReport, error) {
 	requiresZstd := bundle.sidecar.RequiresZstd()
 	var zstdAvailable bool
 	if requiresZstd {
-		zstdAvailable, _ = opts.probeOrDefault()(ctx) // reason is only used in Import's error path; DryRun discards it
+		// DryRun is informational and must not fail on a missing probe —
+		// callers want to know whether zstd is required, not be blocked by
+		// its absence.
+		zstdAvailable, _ = opts.probeOrDefault()(ctx)
 	}
 
 	return DryRunReport{
