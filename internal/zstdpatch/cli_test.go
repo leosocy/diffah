@@ -86,5 +86,5 @@ func TestEncode_CtxCancellation_KillsSubprocess(t *testing.T) {
 	cancel() // cancel before calling Encode
 
 	_, err := Encode(ctx, ref, target)
-	require.Error(t, err, "Encode must surface the cancellation")
+	require.ErrorIs(t, err, context.Canceled, "Encode must surface ctx cancellation")
 }
