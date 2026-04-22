@@ -33,14 +33,18 @@ type ImageStats struct {
 	ArchiveSize  int64
 }
 
-func Export(ctx context.Context, opts Options) error {
+type builtBundle struct {
+	plans []*pairPlan
+	pool  *blobPool
+}
+
+func buildBundle(ctx context.Context, opts *Options) (*builtBundle, error) {
 	if err := ValidatePairs(opts.Pairs); err != nil {
-		return err
+		return nil, err
 	}
 	if opts.CreatedAt.IsZero() {
 		opts.CreatedAt = time.Now().UTC()
 	}
-
 	if opts.Progress != nil {
 		fmt.Fprintf(opts.Progress, "planning %d pairs...\n", len(opts.Pairs))
 	}
@@ -51,36 +55,38 @@ func Export(ctx context.Context, opts Options) error {
 	for _, p := range opts.Pairs {
 		plan, err := planPair(ctx, p, opts.Platform)
 		if err != nil {
-			return fmt.Errorf("plan pair %q: %w", p.Name, err)
+			return nil, fmt.Errorf("plan pair %q: %w", p.Name, err)
 		}
 		plans = append(plans, plan)
 		seedManifestAndConfig(pool, plan)
 	}
-
 	for _, plan := range plans {
 		for _, s := range plan.Shipped {
 			pool.countShipped(s.Digest)
 		}
 	}
-
 	if opts.Progress != nil {
 		fmt.Fprintf(opts.Progress, "planned %d pairs\n", len(plans))
 	}
 
 	if err := encodeShipped(ctx, pool, plans, opts.IntraLayer, opts.fingerprinter, opts.Progress); err != nil {
-		return fmt.Errorf("encode shipped layers: %w", err)
+		return nil, fmt.Errorf("encode shipped layers: %w", err)
 	}
-
 	if opts.Progress != nil {
 		fmt.Fprintf(opts.Progress, "encoded %d blobs\n", len(pool.entries))
 	}
+	return &builtBundle{plans: plans, pool: pool}, nil
+}
 
-	sidecar := assembleSidecar(pool, plans, opts.Platform, opts.ToolVersion, opts.CreatedAt)
-
-	if err := writeBundleArchive(opts.OutputPath, sidecar, pool); err != nil {
+func Export(ctx context.Context, opts Options) error {
+	bb, err := buildBundle(ctx, &opts)
+	if err != nil {
+		return err
+	}
+	sidecar := assembleSidecar(bb.pool, bb.plans, opts.Platform, opts.ToolVersion, opts.CreatedAt)
+	if err := writeBundleArchive(opts.OutputPath, sidecar, bb.pool); err != nil {
 		return fmt.Errorf("write archive: %w", err)
 	}
-
 	if opts.Progress != nil {
 		var archiveSize int64
 		for _, e := range sidecar.Blobs {
@@ -88,42 +94,15 @@ func Export(ctx context.Context, opts Options) error {
 		}
 		fmt.Fprintf(opts.Progress, "wrote %s (%d bytes)\n", opts.OutputPath, archiveSize)
 	}
-
 	return nil
 }
 
 func DryRun(ctx context.Context, opts Options) (DryRunStats, error) {
-	if err := ValidatePairs(opts.Pairs); err != nil {
+	bb, err := buildBundle(ctx, &opts)
+	if err != nil {
 		return DryRunStats{}, err
 	}
-	if opts.CreatedAt.IsZero() {
-		opts.CreatedAt = time.Now().UTC()
-	}
-
-	plans := make([]*pairPlan, 0, len(opts.Pairs))
-	pool := newBlobPool()
-
-	for _, p := range opts.Pairs {
-		plan, err := planPair(ctx, p, opts.Platform)
-		if err != nil {
-			return DryRunStats{}, fmt.Errorf("plan pair %q: %w", p.Name, err)
-		}
-		plans = append(plans, plan)
-		seedManifestAndConfig(pool, plan)
-	}
-
-	for _, plan := range plans {
-		for _, s := range plan.Shipped {
-			pool.countShipped(s.Digest)
-		}
-	}
-
-	if err := encodeShipped(ctx, pool, plans, opts.IntraLayer, opts.fingerprinter, opts.Progress); err != nil {
-		return DryRunStats{}, fmt.Errorf("encode shipped layers: %w", err)
-	}
-
-	sidecar := assembleSidecar(pool, plans, opts.Platform, opts.ToolVersion, opts.CreatedAt)
-
+	sidecar := assembleSidecar(bb.pool, bb.plans, opts.Platform, opts.ToolVersion, opts.CreatedAt)
 	stats := DryRunStats{
 		TotalBlobs:  len(sidecar.Blobs),
 		TotalImages: len(sidecar.Images),
@@ -131,11 +110,11 @@ func DryRun(ctx context.Context, opts Options) (DryRunStats, error) {
 	for _, e := range sidecar.Blobs {
 		stats.ArchiveSize += e.ArchiveSize
 	}
-	for _, plan := range plans {
+	for _, plan := range bb.plans {
 		var imgSize int64
 		var shippedCount int
 		for _, s := range plan.Shipped {
-			if e, ok := pool.entries[s.Digest]; ok {
+			if e, ok := bb.pool.entries[s.Digest]; ok {
 				imgSize += e.ArchiveSize
 				shippedCount++
 			}
