@@ -64,8 +64,8 @@ func runZstdVersion(ctx context.Context, path string) (string, error) {
 	cmd.Stdout = &out
 	cmd.Stderr = &out
 	if err := cmd.Run(); err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
-			return "", fmt.Errorf("zstd --version timed out")
+		if ctxErr := ctx.Err(); errors.Is(ctxErr, context.DeadlineExceeded) {
+			return "", fmt.Errorf("zstd --version timed out: %w", ctxErr)
 		}
 		return "", err
 	}

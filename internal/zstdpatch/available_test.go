@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os/exec"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -82,4 +83,23 @@ func TestErrZstdBinaryMissing_IsSentinel(t *testing.T) {
 	wrapped := newErrZstdBinaryMissing("zstd 1.4.4 too old; need ≥1.5")
 	require.True(t, errors.Is(wrapped, ErrZstdBinaryMissing))
 	require.Contains(t, wrapped.Error(), "1.4.4")
+}
+
+func TestRunZstdVersion_TimeoutWrapsCtxErr(t *testing.T) {
+	// Simulate a slow binary by pointing at `sleep`.
+	sleep, err := exec.LookPath("sleep")
+	if err != nil {
+		t.Skip("sleep not on $PATH")
+	}
+	// Shorten the timeout by swapping the function out of context's way:
+	// runZstdVersion has a 1s timeout; we invoke with a pre-cancelled ctx
+	// to force the timeout branch deterministically.
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
+	defer cancel()
+	time.Sleep(5 * time.Millisecond) // ensure ctx is already dead
+
+	_, err = runZstdVersion(ctx, sleep) // will attempt `sleep --version`
+	require.Error(t, err)
+	require.True(t, errors.Is(err, context.DeadlineExceeded),
+		"expected errors.Is(err, context.DeadlineExceeded); got %v", err)
 }
