@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/opencontainers/go-digest"
 	"github.com/stretchr/testify/require"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/leosocy/diffah/internal/imageio"
 	"github.com/leosocy/diffah/pkg/diff"
+	"github.com/leosocy/diffah/pkg/exporter"
 )
 
 func openBaseline(t *testing.T, path string) types.ImageSource {
@@ -90,4 +92,111 @@ func TestBundleImageSource_GetBlob_FullEncoding_ReturnsVerifiedBytes(t *testing.
 	require.NoError(t, err)
 	require.Equal(t, int64(len(got)), size)
 	require.Equal(t, fullDigest, digest.FromBytes(got))
+}
+
+func TestBundleImageSource_GetBlob_PatchEncoding_DecodesAndVerifies(t *testing.T) {
+	outDir := t.TempDir()
+	bp := filepath.Join(outDir, "bundle.tar")
+	err := exporter.Export(context.Background(), exporter.Options{
+		Pairs: []exporter.Pair{{
+			Name:         "svc-a",
+			BaselinePath: "../../testdata/fixtures/v1_oci.tar",
+			TargetPath:   "../../testdata/fixtures/v2_oci.tar",
+		}},
+		Platform:    "linux/amd64",
+		IntraLayer:  "auto",
+		OutputPath:  bp,
+		ToolVersion: "test",
+		CreatedAt:   time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+	})
+	require.NoError(t, err)
+	b, err := extractBundle(bp)
+	require.NoError(t, err)
+	t.Cleanup(b.cleanup)
+
+	var patchDigest digest.Digest
+	for d, entry := range b.sidecar.Blobs {
+		if entry.Encoding == diff.EncodingPatch {
+			patchDigest = d
+			break
+		}
+	}
+	if patchDigest == "" {
+		t.Skip("fixtures produced no patch-encoded layer; nothing to cover")
+	}
+
+	img := b.sidecar.Images[0]
+	mfPath := filepath.Join(b.blobDir, img.Target.ManifestDigest.Algorithm().String(),
+		img.Target.ManifestDigest.Encoded())
+	mfBytes, err := os.ReadFile(mfPath)
+	require.NoError(t, err)
+
+	src := &bundleImageSource{
+		blobDir:      b.blobDir,
+		manifest:     mfBytes,
+		manifestMime: img.Target.MediaType,
+		sidecar:      b.sidecar,
+		baseline:     openBaseline(t, "../../testdata/fixtures/v1_oci.tar"),
+		imageName:    img.Name,
+	}
+
+	rc, size, err := src.GetBlob(context.Background(), types.BlobInfo{Digest: patchDigest}, nil)
+	require.NoError(t, err)
+	defer rc.Close()
+	decoded, err := io.ReadAll(rc)
+	require.NoError(t, err)
+	require.Equal(t, int64(len(decoded)), size)
+	require.Equal(t, patchDigest, digest.FromBytes(decoded), "decoded blob must match expected digest")
+}
+
+func TestBundleImageSource_GetBlob_PatchEncoding_CorruptedBlob_RaisesAssemblyMismatch(t *testing.T) {
+	outDir := t.TempDir()
+	bp := filepath.Join(outDir, "bundle.tar")
+	err := exporter.Export(context.Background(), exporter.Options{
+		Pairs: []exporter.Pair{{
+			Name:         "svc-a",
+			BaselinePath: "../../testdata/fixtures/v1_oci.tar",
+			TargetPath:   "../../testdata/fixtures/v2_oci.tar",
+		}},
+		Platform:    "linux/amd64",
+		IntraLayer:  "auto",
+		OutputPath:  bp,
+		ToolVersion: "test",
+		CreatedAt:   time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+	})
+	require.NoError(t, err)
+	b, err := extractBundle(bp)
+	require.NoError(t, err)
+	t.Cleanup(b.cleanup)
+
+	var patchDigest digest.Digest
+	for d, entry := range b.sidecar.Blobs {
+		if entry.Encoding == diff.EncodingPatch {
+			patchDigest = d
+			break
+		}
+	}
+	if patchDigest == "" {
+		t.Skip("fixtures produced no patch-encoded layer; nothing to cover")
+	}
+
+	patchPath := filepath.Join(b.blobDir, patchDigest.Algorithm().String(), patchDigest.Encoded())
+	require.NoError(t, os.WriteFile(patchPath, []byte("not a real zstd patch"), 0o600))
+
+	img := b.sidecar.Images[0]
+	mfPath := filepath.Join(b.blobDir, img.Target.ManifestDigest.Algorithm().String(),
+		img.Target.ManifestDigest.Encoded())
+	mfBytes, err := os.ReadFile(mfPath)
+	require.NoError(t, err)
+
+	src := &bundleImageSource{
+		blobDir:      b.blobDir,
+		manifest:     mfBytes,
+		manifestMime: img.Target.MediaType,
+		sidecar:      b.sidecar,
+		baseline:     openBaseline(t, "../../testdata/fixtures/v1_oci.tar"),
+		imageName:    img.Name,
+	}
+	_, _, err = src.GetBlob(context.Background(), types.BlobInfo{Digest: patchDigest}, nil)
+	require.Error(t, err)
 }

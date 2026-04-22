@@ -11,6 +11,7 @@ import (
 	"github.com/opencontainers/go-digest"
 	"go.podman.io/image/v5/types"
 
+	"github.com/leosocy/diffah/internal/zstdpatch"
 	"github.com/leosocy/diffah/pkg/diff"
 )
 
@@ -57,7 +58,7 @@ func (s *bundleImageSource) LayerInfosForCopy(
 }
 
 func (s *bundleImageSource) GetBlob(
-	_ context.Context, info types.BlobInfo, _ types.BlobInfoCache,
+	ctx context.Context, info types.BlobInfo, cache types.BlobInfoCache,
 ) (io.ReadCloser, int64, error) {
 	entry, ok := s.sidecar.Blobs[info.Digest]
 	if !ok {
@@ -67,7 +68,7 @@ func (s *bundleImageSource) GetBlob(
 	case diff.EncodingFull:
 		return s.serveFull(info.Digest)
 	case diff.EncodingPatch:
-		return nil, 0, fmt.Errorf("patch decode not implemented yet") // TASK-4
+		return s.servePatch(ctx, info.Digest, entry, cache)
 	}
 	return nil, 0, fmt.Errorf("unknown encoding %q for blob %s", entry.Encoding, info.Digest)
 }
@@ -84,4 +85,51 @@ func (s *bundleImageSource) serveFull(d digest.Digest) (io.ReadCloser, int64, er
 		}
 	}
 	return io.NopCloser(bytes.NewReader(data)), int64(len(data)), nil
+}
+
+func (s *bundleImageSource) servePatch(
+	ctx context.Context, target digest.Digest, entry diff.BlobEntry, cache types.BlobInfoCache,
+) (io.ReadCloser, int64, error) {
+	patchPath := filepath.Join(s.blobDir, target.Algorithm().String(), target.Encoded())
+	patchBytes, err := os.ReadFile(patchPath)
+	if err != nil {
+		return nil, 0, fmt.Errorf("read patch blob %s: %w", target, err)
+	}
+	baseBytes, err := s.fetchVerifiedBaselineBlob(ctx, entry.PatchFromDigest, cache)
+	if err != nil {
+		return nil, 0, fmt.Errorf("fetch patch-from blob %s: %w", entry.PatchFromDigest, err)
+	}
+	out, err := zstdpatch.Decode(baseBytes, patchBytes)
+	if err != nil {
+		return nil, 0, fmt.Errorf("decode patch for %s: %w", target, err)
+	}
+	if got := digest.FromBytes(out); got != target {
+		return nil, 0, &diff.ErrIntraLayerAssemblyMismatch{
+			Digest: target.String(), Got: got.String(),
+		}
+	}
+	return io.NopCloser(bytes.NewReader(out)), int64(len(out)), nil
+}
+
+// fetchVerifiedBaselineBlob reads `d` from the wrapped baseline source and
+// verifies its digest. Used both for patch-from references (Task 4) and for
+// blobs the sidecar did not ship (Task 5).
+func (s *bundleImageSource) fetchVerifiedBaselineBlob(
+	ctx context.Context, d digest.Digest, cache types.BlobInfoCache,
+) ([]byte, error) {
+	rc, _, err := s.baseline.GetBlob(ctx, types.BlobInfo{Digest: d}, cache)
+	if err != nil {
+		return nil, err
+	}
+	defer rc.Close()
+	data, err := io.ReadAll(rc)
+	if err != nil {
+		return nil, err
+	}
+	if got := digest.FromBytes(data); got != d {
+		return nil, &diff.ErrBaselineBlobDigestMismatch{
+			ImageName: s.imageName, Digest: d.String(), Got: got.String(),
+		}
+	}
+	return data, nil
 }
