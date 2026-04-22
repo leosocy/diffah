@@ -6,6 +6,7 @@ package zstdpatch
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -14,8 +15,9 @@ import (
 
 // Encode produces a zstd frame using --patch-from=ref that decodes to target.
 // An empty target returns a precomputed empty frame to avoid invoking the CLI
-// on a degenerate case that crashes older zstd builds.
-func Encode(ref, target []byte) ([]byte, error) {
+// on a degenerate case that crashes older zstd builds. ctx cancellation kills
+// the zstd subprocess.
+func Encode(ctx context.Context, ref, target []byte) ([]byte, error) {
 	if len(target) == 0 {
 		return append([]byte(nil), emptyZstdFrame()...), nil
 	}
@@ -37,7 +39,7 @@ func Encode(ref, target []byte) ([]byte, error) {
 	}
 
 	//nolint:gosec // G204: every argv path is created by this function via MkdirTemp; no user input reaches exec.Command.
-	cmd := exec.Command("zstd",
+	cmd := exec.CommandContext(ctx, "zstd",
 		"-3", "--long=27",
 		"--patch-from="+refPath,
 		targetPath,
@@ -58,8 +60,8 @@ func Encode(ref, target []byte) ([]byte, error) {
 // Decode reads a zstd frame produced by Encode and returns the original
 // target bytes. ref must be byte-identical to the ref used at encode time.
 // Callers are expected to verify the decoded bytes against the content
-// digest recorded in the sidecar.
-func Decode(ref, patch []byte) ([]byte, error) {
+// digest recorded in the sidecar. ctx cancellation kills the zstd subprocess.
+func Decode(ctx context.Context, ref, patch []byte) ([]byte, error) {
 	if bytes.Equal(patch, emptyZstdFrame()) {
 		return nil, nil
 	}
@@ -81,7 +83,7 @@ func Decode(ref, patch []byte) ([]byte, error) {
 	}
 
 	//nolint:gosec // G204: every argv path is mktempd above; no user input.
-	cmd := exec.Command("zstd",
+	cmd := exec.CommandContext(ctx, "zstd",
 		"-d", "--long=27",
 		"--patch-from="+refPath,
 		patchPath,

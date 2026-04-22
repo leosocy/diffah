@@ -2,6 +2,7 @@ package zstdpatch
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"os/exec"
 	"testing"
@@ -20,9 +21,9 @@ func skipWithoutZstd(t *testing.T) {
 func TestRoundTrip_Empty(t *testing.T) {
 	skipWithoutZstd(t)
 	ref := []byte("unused reference bytes")
-	patch, err := Encode(ref, nil)
+	patch, err := Encode(context.Background(), ref, nil)
 	require.NoError(t, err)
-	got, err := Decode(ref, patch)
+	got, err := Decode(context.Background(), ref, patch)
 	require.NoError(t, err)
 	require.Empty(t, got)
 }
@@ -36,12 +37,12 @@ func TestRoundTrip_SmallDelta(t *testing.T) {
 	target := append([]byte(nil), ref...)
 	target[len(target)/2] ^= 0xFF
 
-	patch, err := Encode(ref, target)
+	patch, err := Encode(context.Background(), ref, target)
 	require.NoError(t, err)
 	require.Less(t, len(patch), len(target)/2,
 		"patch of a 1-byte delta should be far smaller than half the target")
 
-	got, err := Decode(ref, patch)
+	got, err := Decode(context.Background(), ref, patch)
 	require.NoError(t, err)
 	require.True(t, bytes.Equal(got, target), "decoded bytes differ from target")
 }
@@ -60,13 +61,30 @@ func TestDecode_WrongReference(t *testing.T) {
 	target := append([]byte(nil), refA...)
 	target[0] ^= 0xFF
 
-	patch, err := Encode(refA, target)
+	patch, err := Encode(context.Background(), refA, target)
 	require.NoError(t, err)
 
-	got, err := Decode(refB, patch)
+	got, err := Decode(context.Background(), refB, patch)
 	if err == nil {
 		// Decode may succeed but must not return the original target bytes.
 		require.False(t, bytes.Equal(got, target),
 			"decoding with the wrong reference returned target bytes silently")
 	}
+}
+
+// TestEncode_CtxCancellation_KillsSubprocess — a cancelled ctx must
+// kill the zstd subprocess instead of blocking until it completes.
+func TestEncode_CtxCancellation_KillsSubprocess(t *testing.T) {
+	skipWithoutZstd(t)
+	// 64 MB target — big enough that zstd takes noticeable time.
+	ref := make([]byte, 1<<26)
+	_, _ = rand.Read(ref)
+	target := append([]byte(nil), ref...)
+	target[len(target)/2] ^= 0xFF
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel before calling Encode
+
+	_, err := Encode(ctx, ref, target)
+	require.Error(t, err, "Encode must surface the cancellation")
 }
