@@ -67,7 +67,7 @@ func Export(ctx context.Context, opts Options) error {
 		fmt.Fprintf(opts.Progress, "planned %d pairs\n", len(plans))
 	}
 
-	if err := encodeShipped(ctx, pool, plans, opts.IntraLayer, opts.fingerprinter); err != nil {
+	if err := encodeShipped(ctx, pool, plans, opts.IntraLayer, opts.fingerprinter, opts.Progress); err != nil {
 		return fmt.Errorf("encode shipped layers: %w", err)
 	}
 
@@ -118,7 +118,7 @@ func DryRun(ctx context.Context, opts Options) (DryRunStats, error) {
 		}
 	}
 
-	if err := encodeShipped(ctx, pool, plans, opts.IntraLayer, opts.fingerprinter); err != nil {
+	if err := encodeShipped(ctx, pool, plans, opts.IntraLayer, opts.fingerprinter, opts.Progress); err != nil {
 		return DryRunStats{}, fmt.Errorf("encode shipped layers: %w", err)
 	}
 

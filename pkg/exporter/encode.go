@@ -3,6 +3,7 @@ package exporter
 import (
 	"context"
 	"fmt"
+	"io"
 
 	"github.com/opencontainers/go-digest"
 
@@ -11,7 +12,7 @@ import (
 
 func encodeShipped(
 	ctx context.Context, pool *blobPool, pairs []*pairPlan,
-	mode string, fp Fingerprinter,
+	mode string, fp Fingerprinter, progress io.Writer,
 ) error {
 	for _, p := range pairs {
 		for _, s := range p.Shipped {
@@ -23,18 +24,17 @@ func encodeShipped(
 				return fmt.Errorf("read shipped %s: %w", s.Digest, err)
 			}
 			if pool.refCount(s.Digest) > 1 || mode == "off" {
-				pool.addIfAbsent(s.Digest, layerBytes, diff.BlobEntry{
-					Size: s.Size, MediaType: s.MediaType,
-					Encoding: diff.EncodingFull, ArchiveSize: s.Size,
-				})
+				pool.addIfAbsent(s.Digest, layerBytes, fullBlobEntry(s))
 				continue
 			}
-			_, payload, entry, err := encodeSingleShipped(ctx, p, s, layerBytes, fp)
+			payload, entry, err := encodeSingleShipped(ctx, p, s, layerBytes, fp)
 			if err != nil {
-				pool.addIfAbsent(s.Digest, layerBytes, diff.BlobEntry{
-					Size: s.Size, MediaType: s.MediaType,
-					Encoding: diff.EncodingFull, ArchiveSize: s.Size,
-				})
+				if progress != nil {
+					fmt.Fprintf(progress,
+						"warning: %s: patch encode failed for %s (%v), falling back to full\n",
+						p.Name, s.Digest, err)
+				}
+				pool.addIfAbsent(s.Digest, layerBytes, fullBlobEntry(s))
 				continue
 			}
 			pool.addIfAbsent(s.Digest, payload, entry)
@@ -46,7 +46,7 @@ func encodeShipped(
 func encodeSingleShipped(
 	ctx context.Context, p *pairPlan, s diff.BlobRef,
 	target []byte, fp Fingerprinter,
-) (string, []byte, diff.BlobEntry, error) {
+) ([]byte, diff.BlobEntry, error) {
 	readBlob := func(d digest.Digest) ([]byte, error) {
 		if d == s.Digest {
 			return target, nil
@@ -55,10 +55,10 @@ func encodeSingleShipped(
 	}
 	entries, payloads, err := NewPlanner(p.BaselineLayerMeta, readBlob, fp).Run(ctx, []diff.BlobRef{s})
 	if err != nil {
-		return "", nil, diff.BlobEntry{}, err
+		return nil, diff.BlobEntry{}, err
 	}
 	if len(entries) == 0 {
-		return "", nil, diff.BlobEntry{}, fmt.Errorf("planner returned no entries")
+		return nil, diff.BlobEntry{}, fmt.Errorf("planner returned no entries")
 	}
 	entry := entries[0]
 	var payload []byte
@@ -73,5 +73,12 @@ func encodeSingleShipped(
 		PatchFromDigest: entry.PatchFromDigest,
 		ArchiveSize:     entry.ArchiveSize,
 	}
-	return "", payload, bEntry, nil
+	return payload, bEntry, nil
+}
+
+func fullBlobEntry(s diff.BlobRef) diff.BlobEntry {
+	return diff.BlobEntry{
+		Size: s.Size, MediaType: s.MediaType,
+		Encoding: diff.EncodingFull, ArchiveSize: s.Size,
+	}
 }
