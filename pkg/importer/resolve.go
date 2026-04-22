@@ -5,9 +5,10 @@ import (
 	"fmt"
 
 	"github.com/opencontainers/go-digest"
+	"go.podman.io/image/v5/types"
+
 	"github.com/leosocy/diffah/internal/imageio"
 	"github.com/leosocy/diffah/pkg/diff"
-	"go.podman.io/image/v5/types"
 )
 
 type resolvedBaseline struct {
@@ -66,25 +67,28 @@ func resolveBaselines(
 		}
 	}
 
+	if err := rejectUnknownBaselineNames(sc, expanded); err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+
+func rejectUnknownBaselineNames(sc *diff.Sidecar, expanded map[string]string) error {
 	knownNames := make(map[string]struct{}, len(sc.Images))
 	for _, img := range sc.Images {
 		knownNames[img.Name] = struct{}{}
 	}
 	for name := range expanded {
 		if _, ok := knownNames[name]; !ok {
-			return nil, &diff.ErrBaselineNameUnknown{
-				Name: name, Available: func() []string {
-					names := make([]string, 0, len(sc.Images))
-					for _, img := range sc.Images {
-						names = append(names, img.Name)
-					}
-					return names
-				}(),
+			names := make([]string, 0, len(sc.Images))
+			for _, img := range sc.Images {
+				names = append(names, img.Name)
 			}
+			return &diff.ErrBaselineNameUnknown{Name: name, Available: names}
 		}
 	}
-
-	return result, nil
+	return nil
 }
 
 func expandDefaultBaseline(sc *diff.Sidecar, baselines map[string]string) map[string]string {

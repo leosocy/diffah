@@ -109,13 +109,13 @@ func TestPrintBundleSidecar_PerImageStats(t *testing.T) {
 
 func TestRunInspect_Phase1Archive_PrintsHint(t *testing.T) {
 	legacyJSON := map[string]interface{}{
-		"version":               "v1",
-		"tool":                  "diffah",
-		"tool_version":          "v0.1.0",
-		"created_at":            "2026-04-20T10:00:00Z",
-		"platform":              "linux/amd64",
-		"target":                map[string]string{"manifest_digest": "sha256:aaa", "media_type": "m"},
-		"baseline":              map[string]string{"manifest_digest": "sha256:bbb", "media_type": "m"},
+		"version":                "v1",
+		"tool":                   "diffah",
+		"tool_version":           "v0.1.0",
+		"created_at":             "2026-04-20T10:00:00Z",
+		"platform":               "linux/amd64",
+		"target":                 map[string]string{"manifest_digest": "sha256:aaa", "media_type": "m"},
+		"baseline":               map[string]string{"manifest_digest": "sha256:bbb", "media_type": "m"},
 		"required_from_baseline": []interface{}{},
 		"shipped_in_delta":       []interface{}{},
 	}

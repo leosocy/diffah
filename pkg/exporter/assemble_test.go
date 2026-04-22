@@ -5,8 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/leosocy/diffah/pkg/diff"
 	"github.com/stretchr/testify/require"
+
+	"github.com/leosocy/diffah/pkg/diff"
 )
 
 func TestAssembleSidecar_Minimal(t *testing.T) {

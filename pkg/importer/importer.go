@@ -9,13 +9,14 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/leosocy/diffah/pkg/diff"
 	"github.com/opencontainers/go-digest"
 	"go.podman.io/image/v5/directory"
 	dockerarchive "go.podman.io/image/v5/docker/archive"
 	dockerref "go.podman.io/image/v5/docker/reference"
 	ociarchive "go.podman.io/image/v5/oci/archive"
 	"go.podman.io/image/v5/types"
+
+	"github.com/leosocy/diffah/pkg/diff"
 )
 
 const (
@@ -129,45 +130,10 @@ func DryRun(ctx context.Context, opts Options) (DryRunReport, error) {
 	if err != nil {
 		return DryRunReport{}, err
 	}
-	provided := make(map[string]struct{}, len(resolved))
-	for _, r := range resolved {
-		provided[r.Name] = struct{}{}
-	}
 
-	images := make([]ImageDryRun, 0, len(bundle.sidecar.Images))
-	for _, img := range bundle.sidecar.Images {
-		layers, err := readManifestLayers(bundle, img.Target.ManifestDigest)
-		if err != nil {
-			return DryRunReport{}, fmt.Errorf("read target manifest for %q: %w", img.Name, err)
-		}
-		var archCount, baseCount, patchCount int
-		for _, l := range layers {
-			if entry, ok := bundle.sidecar.Blobs[l]; ok {
-				archCount++
-				if entry.Encoding == diff.EncodingPatch {
-					patchCount++
-				}
-			} else {
-				// Layers not present in the archive (must come from baseline)
-				baseCount++
-			}
-		}
-		_, has := provided[img.Name]
-		row := ImageDryRun{
-			Name:                   img.Name,
-			BaselineManifestDigest: img.Baseline.ManifestDigest,
-			TargetManifestDigest:   img.Target.ManifestDigest,
-			BaselineProvided:       has,
-			WouldImport:            has,
-			LayerCount:             len(layers),
-			ArchiveLayerCount:      archCount,
-			BaselineLayerCount:     baseCount,
-			PatchLayerCount:        patchCount,
-		}
-		if !has {
-			row.SkipReason = "no baseline provided"
-		}
-		images = append(images, row)
+	images, err := buildImageDryRuns(bundle, resolved)
+	if err != nil {
+		return DryRunReport{}, err
 	}
 
 	var archiveBytes int64
@@ -188,6 +154,48 @@ func DryRun(ctx context.Context, opts Options) (DryRunReport, error) {
 		Blobs:        blobStats,
 		ArchiveBytes: archiveBytes,
 	}, nil
+}
+
+func buildImageDryRuns(bundle *extractedBundle, resolved []resolvedBaseline) ([]ImageDryRun, error) {
+	provided := make(map[string]struct{}, len(resolved))
+	for _, r := range resolved {
+		provided[r.Name] = struct{}{}
+	}
+	images := make([]ImageDryRun, 0, len(bundle.sidecar.Images))
+	for _, img := range bundle.sidecar.Images {
+		layers, err := readManifestLayers(bundle, img.Target.ManifestDigest)
+		if err != nil {
+			return nil, fmt.Errorf("read target manifest for %q: %w", img.Name, err)
+		}
+		var archCount, baseCount, patchCount int
+		for _, l := range layers {
+			if entry, ok := bundle.sidecar.Blobs[l]; ok {
+				archCount++
+				if entry.Encoding == diff.EncodingPatch {
+					patchCount++
+				}
+			} else {
+				baseCount++
+			}
+		}
+		_, has := provided[img.Name]
+		row := ImageDryRun{
+			Name:                   img.Name,
+			BaselineManifestDigest: img.Baseline.ManifestDigest,
+			TargetManifestDigest:   img.Target.ManifestDigest,
+			BaselineProvided:       has,
+			WouldImport:            has,
+			LayerCount:             len(layers),
+			ArchiveLayerCount:      archCount,
+			BaselineLayerCount:     baseCount,
+			PatchLayerCount:        patchCount,
+		}
+		if !has {
+			row.SkipReason = "no baseline provided"
+		}
+		images = append(images, row)
+	}
+	return images, nil
 }
 
 func readManifestLayers(bundle *extractedBundle, mfDigest digest.Digest) ([]digest.Digest, error) {

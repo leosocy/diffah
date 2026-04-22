@@ -9,8 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/leosocy/diffah/pkg/diff"
 	"github.com/stretchr/testify/require"
+
+	"github.com/leosocy/diffah/pkg/diff"
 )
 
 func TestWriteBundleArchive(t *testing.T) {

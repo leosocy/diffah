@@ -11,6 +11,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const (
+	testCodecZstdPatch  = "zstd-patch"
+	testPatchFromDigest = digest.Digest("sha256:bb")
+)
+
 func minimalValidBundle(t *testing.T) Sidecar {
 	t.Helper()
 	return Sidecar{
@@ -23,7 +28,7 @@ func minimalValidBundle(t *testing.T) Sidecar {
 		},
 		Images: []ImageEntry{{
 			Name:     "service-a",
-			Baseline: BaselineRef{ManifestDigest: "sha256:bb", MediaType: "application/vnd.oci.image.manifest.v1+json"},
+			Baseline: BaselineRef{ManifestDigest: testPatchFromDigest, MediaType: "application/vnd.oci.image.manifest.v1+json"},
 			Target:   TargetRef{ManifestDigest: "sha256:aa", ManifestSize: 5, MediaType: "application/vnd.oci.image.manifest.v1+json"},
 		}},
 	}
@@ -56,12 +61,12 @@ func TestSidecar_Validate_RejectsMalformed(t *testing.T) {
 		}, "blobs"},
 		{"full blob with codec", func(s *Sidecar) {
 			e := s.Blobs["sha256:aa"]
-			e.Codec = "zstd-patch"
+			e.Codec = testCodecZstdPatch
 			s.Blobs["sha256:aa"] = e
 		}, "codec"},
 		{"full blob with patch_from_digest", func(s *Sidecar) {
 			e := s.Blobs["sha256:aa"]
-			e.PatchFromDigest = "sha256:bb"
+			e.PatchFromDigest = testPatchFromDigest
 			s.Blobs["sha256:aa"] = e
 		}, "codec"},
 		{"full blob archive_size != size", func(s *Sidecar) {
@@ -72,7 +77,7 @@ func TestSidecar_Validate_RejectsMalformed(t *testing.T) {
 		{"patch blob missing codec", func(s *Sidecar) {
 			e := s.Blobs["sha256:aa"]
 			e.Encoding = EncodingPatch
-			e.PatchFromDigest = "sha256:bb"
+			e.PatchFromDigest = testPatchFromDigest
 			e.ArchiveSize = 2
 			e.Size = 5
 			s.Blobs["sha256:aa"] = e
@@ -80,7 +85,7 @@ func TestSidecar_Validate_RejectsMalformed(t *testing.T) {
 		{"patch blob missing patch_from_digest", func(s *Sidecar) {
 			e := s.Blobs["sha256:aa"]
 			e.Encoding = EncodingPatch
-			e.Codec = "zstd-patch"
+			e.Codec = testCodecZstdPatch
 			e.ArchiveSize = 2
 			e.Size = 5
 			s.Blobs["sha256:aa"] = e
@@ -88,8 +93,8 @@ func TestSidecar_Validate_RejectsMalformed(t *testing.T) {
 		{"patch blob archive_size >= size", func(s *Sidecar) {
 			e := s.Blobs["sha256:aa"]
 			e.Encoding = EncodingPatch
-			e.Codec = "zstd-patch"
-			e.PatchFromDigest = "sha256:bb"
+			e.Codec = testCodecZstdPatch
+			e.PatchFromDigest = testPatchFromDigest
 			e.ArchiveSize = 5
 			e.Size = 5
 			s.Blobs["sha256:aa"] = e
@@ -97,8 +102,8 @@ func TestSidecar_Validate_RejectsMalformed(t *testing.T) {
 		{"patch blob archive_size <= 0", func(s *Sidecar) {
 			e := s.Blobs["sha256:aa"]
 			e.Encoding = EncodingPatch
-			e.Codec = "zstd-patch"
-			e.PatchFromDigest = "sha256:bb"
+			e.Codec = testCodecZstdPatch
+			e.PatchFromDigest = testPatchFromDigest
 			e.ArchiveSize = 0
 			e.Size = 5
 			s.Blobs["sha256:aa"] = e
@@ -148,7 +153,7 @@ func TestSidecar_Marshal_DeterministicOrder(t *testing.T) {
 	s := minimalValidBundle(t)
 	s.Blobs["sha256:cc"] = BlobEntry{Size: 3, MediaType: "text/plain",
 		Encoding: EncodingFull, ArchiveSize: 3}
-	s.Blobs["sha256:bb"] = BlobEntry{Size: 4, MediaType: "text/plain",
+	s.Blobs[testPatchFromDigest] = BlobEntry{Size: 4, MediaType: "text/plain",
 		Encoding: EncodingFull, ArchiveSize: 4}
 
 	first, err := s.Marshal()

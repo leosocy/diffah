@@ -142,7 +142,9 @@ func (e *ErrInvalidBundleFormat) Unwrap() error { return e.Cause }
 type ErrMultiImageNeedsNamedBaselines struct{ N int }
 
 func (e *ErrMultiImageNeedsNamedBaselines) Error() string {
-	return fmt.Sprintf("archive contains %d images; multi-image import requires --baseline NAME=PATH or --baseline-spec", e.N)
+	return fmt.Sprintf(
+		"archive contains %d images; multi-image import requires --baseline NAME=PATH or --baseline-spec",
+		e.N)
 }
 
 type ErrBaselineNameUnknown struct {

@@ -222,12 +222,20 @@ func composeImage(
 		return err
 	}
 
+	return copyBundleToOutput(ctx, src, outputDir, img.Name, resolvedFmt)
+}
+
+func copyBundleToOutput(
+	ctx context.Context,
+	src *bundleImageSource,
+	outputDir, imgName, resolvedFmt string,
+) error {
 	var outPath string
 	switch resolvedFmt {
 	case FormatDir:
-		outPath = filepath.Join(outputDir, img.Name)
+		outPath = filepath.Join(outputDir, imgName)
 	case FormatDockerArchive, FormatOCIArchive:
-		outPath = filepath.Join(outputDir, img.Name+".tar")
+		outPath = filepath.Join(outputDir, imgName+".tar")
 	default:
 		return fmt.Errorf("unknown --output-format %q", resolvedFmt)
 	}
@@ -252,7 +260,7 @@ func composeImage(
 		} else {
 			_ = os.Remove(outPath)
 		}
-		return fmt.Errorf("compose %q: %w", img.Name, err)
+		return fmt.Errorf("compose %q: %w", imgName, err)
 	}
 	return nil
 }

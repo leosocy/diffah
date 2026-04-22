@@ -12,12 +12,12 @@ import (
 )
 
 var exportFlags = struct {
-	pairs     []string
-	bundle    string
-	platform  string
-	compress  string
+	pairs      []string
+	bundle     string
+	platform   string
+	compress   string
 	intraLayer string
-	dryRun    bool
+	dryRun     bool
 }{}
 
 func newExportCommand() *cobra.Command {

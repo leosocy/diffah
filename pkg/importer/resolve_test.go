@@ -4,8 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/leosocy/diffah/pkg/diff"
 	"github.com/stretchr/testify/require"
+
+	"github.com/leosocy/diffah/pkg/diff"
 )
 
 func TestResolveBaselines_HappyPath(t *testing.T) {

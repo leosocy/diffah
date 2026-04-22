@@ -13,7 +13,9 @@ func TestPair_ResolveUnique(t *testing.T) {
 	}
 	require.NoError(t, ValidatePairs(pairs))
 
-	dup := append(pairs, Pair{Name: "a", BaselinePath: "x", TargetPath: "y"})
-	err := ValidatePairs(dup)
+	dupPairs := make([]Pair, 0, len(pairs)+1)
+	dupPairs = append(dupPairs, pairs...)
+	dupPairs = append(dupPairs, Pair{Name: "a", BaselinePath: "x", TargetPath: "y"})
+	err := ValidatePairs(dupPairs)
 	require.Error(t, err)
 }
