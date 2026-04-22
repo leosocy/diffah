@@ -6,14 +6,12 @@ import (
 	"io"
 	"os"
 
-	"go.podman.io/image/v5/copy"
 	"go.podman.io/image/v5/directory"
 	dockerarchive "go.podman.io/image/v5/docker/archive"
 	dockerref "go.podman.io/image/v5/docker/reference"
 	ociarchive "go.podman.io/image/v5/oci/archive"
 	"go.podman.io/image/v5/types"
 
-	"github.com/leosocy/diffah/internal/imageio"
 	"github.com/leosocy/diffah/pkg/diff"
 )
 
@@ -66,24 +64,12 @@ func Import(ctx context.Context, opts Options) error {
 		}
 	}
 
-	ci, err := composeImageLegacy(ctx, img, bundle.sidecar, bundle, rb.Ref)
-	if err != nil {
-		return fmt.Errorf("compose image %q: %w", rb.Name, err)
+	if err := os.MkdirAll(opts.OutputPath, 0o755); err != nil {
+		return fmt.Errorf("mkdir output %s: %w", opts.OutputPath, err)
 	}
-	defer ci.cleanup()
-
-	resolvedFmt, err := resolveOutputFormat(opts.OutputFormat, img.Target.MediaType, opts.AllowConvert)
-	if err != nil {
+	if err := composeImage(ctx, img, bundle, rb,
+		opts.OutputPath, opts.OutputFormat, opts.AllowConvert); err != nil {
 		return err
-	}
-
-	tmpOut := opts.OutputPath + ".tmp"
-	if err := runCopy(ctx, ci.Ref, tmpOut, resolvedFmt); err != nil {
-		_ = removeOutput(tmpOut, resolvedFmt)
-		return fmt.Errorf("copy image %q: %w", rb.Name, err)
-	}
-	if err := os.Rename(tmpOut, opts.OutputPath); err != nil {
-		return fmt.Errorf("rename output: %w", err)
 	}
 
 	return nil
@@ -141,34 +127,6 @@ type ImageDryRunStats struct {
 	ShippedBlobs  int
 	RequiredBlobs int
 	ArchiveSize   int64
-}
-
-func runCopy(ctx context.Context, srcRef types.ImageReference, tmpOut, format string) error {
-	outRef, err := buildOutputRef(tmpOut, format)
-	if err != nil {
-		return err
-	}
-	policyCtx, err := imageio.DefaultPolicyContext()
-	if err != nil {
-		return err
-	}
-	defer func() { _ = policyCtx.Destroy() }()
-
-	copyOpts := &copy.Options{}
-	if format == FormatDir {
-		copyOpts.PreserveDigests = true
-	}
-	if _, err := copy.Image(ctx, policyCtx, outRef, srcRef, copyOpts); err != nil {
-		return fmt.Errorf("copy composite into output: %w", err)
-	}
-	return nil
-}
-
-func removeOutput(path, format string) error {
-	if format == FormatDir {
-		return os.RemoveAll(path)
-	}
-	return os.Remove(path)
 }
 
 func buildOutputRef(path, format string) (types.ImageReference, error) {
