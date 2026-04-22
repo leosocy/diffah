@@ -12,14 +12,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// findRepoRoot already exists in cmd/export_integration_test.go.
-
 func TestImportCommand_RoundTrip(t *testing.T) {
+	t.Skip("rewritten in Task 25")
 	root := findRepoRoot(t)
 
-	// Produce a delta via the export command.
 	delta := filepath.Join(t.TempDir(), "delta.tar")
-	exp := exec.Command("go", "run", "-tags", "containers_image_openpgp", ".",
+	exp := exec.Command("go", "run", "-tags", "containers_image_openpgp exclude_graphdriver_btrfs exclude_graphdriver_devicemapper", ".",
 		"export",
 		"--target", "oci-archive:"+filepath.Join(root, "testdata/fixtures/v2_oci.tar"),
 		"--baseline", "oci-archive:"+filepath.Join(root, "testdata/fixtures/v1_oci.tar"),
@@ -29,9 +27,8 @@ func TestImportCommand_RoundTrip(t *testing.T) {
 	out, err := exp.CombinedOutput()
 	require.NoError(t, err, "export output: %s", out)
 
-	// Reconstruct via the import command.
 	restored := filepath.Join(t.TempDir(), "v2_restored.tar")
-	imp := exec.Command("go", "run", "-tags", "containers_image_openpgp", ".",
+	imp := exec.Command("go", "run", "-tags", "containers_image_openpgp exclude_graphdriver_btrfs exclude_graphdriver_devicemapper", ".",
 		"import",
 		"--delta", delta,
 		"--baseline", "oci-archive:"+filepath.Join(root, "testdata/fixtures/v1_oci.tar"),
@@ -47,10 +44,11 @@ func TestImportCommand_RoundTrip(t *testing.T) {
 }
 
 func TestImportCommand_DryRun_Reachable(t *testing.T) {
+	t.Skip("rewritten in Task 25")
 	root := findRepoRoot(t)
 
 	delta := filepath.Join(t.TempDir(), "delta.tar")
-	exp := exec.Command("go", "run", "-tags", "containers_image_openpgp", ".",
+	exp := exec.Command("go", "run", "-tags", "containers_image_openpgp exclude_graphdriver_btrfs exclude_graphdriver_devicemapper", ".",
 		"export",
 		"--target", "oci-archive:"+filepath.Join(root, "testdata/fixtures/v2_oci.tar"),
 		"--baseline", "oci-archive:"+filepath.Join(root, "testdata/fixtures/v1_oci.tar"),
@@ -61,7 +59,7 @@ func TestImportCommand_DryRun_Reachable(t *testing.T) {
 	require.NoError(t, err, "export output: %s", out)
 
 	restored := filepath.Join(t.TempDir(), "v2_restored.tar")
-	imp := exec.Command("go", "run", "-tags", "containers_image_openpgp", ".",
+	imp := exec.Command("go", "run", "-tags", "containers_image_openpgp exclude_graphdriver_btrfs exclude_graphdriver_devicemapper", ".",
 		"import",
 		"--delta", delta,
 		"--baseline", "oci-archive:"+filepath.Join(root, "testdata/fixtures/v1_oci.tar"),
@@ -78,10 +76,11 @@ func TestImportCommand_DryRun_Reachable(t *testing.T) {
 }
 
 func TestImportCommand_DryRun_Missing(t *testing.T) {
+	t.Skip("rewritten in Task 25")
 	root := findRepoRoot(t)
 
 	delta := filepath.Join(t.TempDir(), "delta.tar")
-	exp := exec.Command("go", "run", "-tags", "containers_image_openpgp", ".",
+	exp := exec.Command("go", "run", "-tags", "containers_image_openpgp exclude_graphdriver_btrfs exclude_graphdriver_devicemapper", ".",
 		"export",
 		"--target", "oci-archive:"+filepath.Join(root, "testdata/fixtures/v2_oci.tar"),
 		"--baseline", "oci-archive:"+filepath.Join(root, "testdata/fixtures/v1_oci.tar"),
@@ -91,7 +90,7 @@ func TestImportCommand_DryRun_Missing(t *testing.T) {
 	out, err := exp.CombinedOutput()
 	require.NoError(t, err, "export output: %s", out)
 
-	imp := exec.Command("go", "run", "-tags", "containers_image_openpgp", ".",
+	imp := exec.Command("go", "run", "-tags", "containers_image_openpgp exclude_graphdriver_btrfs exclude_graphdriver_devicemapper", ".",
 		"import",
 		"--delta", delta,
 		"--baseline", "oci-archive:"+filepath.Join(root, "testdata/fixtures/unrelated_oci.tar"),

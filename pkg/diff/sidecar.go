@@ -3,55 +3,134 @@ package diff
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"time"
 
 	"github.com/opencontainers/go-digest"
 )
 
-// SidecarFilename is the canonical file name of the sidecar written at the
-// top level of every delta archive.
+var nameRegex = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]*$`)
+
 const SidecarFilename = "diffah.json"
 
-// SchemaVersionV1 is the sidecar schema version this package writes and
-// accepts.
 const SchemaVersionV1 = "v1"
 
-// ImageRef describes the target image manifest pointer recorded in a
-// sidecar.
-type ImageRef struct {
+const FeatureBundle = "bundle"
+
+type TargetRef struct {
 	ManifestDigest digest.Digest `json:"manifest_digest"`
 	ManifestSize   int64         `json:"manifest_size"`
 	MediaType      string        `json:"media_type"`
 }
 
-// BaselineRef describes the baseline image manifest pointer recorded in a
-// sidecar. SourceHint is informational only.
 type BaselineRef struct {
 	ManifestDigest digest.Digest `json:"manifest_digest"`
 	MediaType      string        `json:"media_type"`
 	SourceHint     string        `json:"source_hint,omitempty"`
 }
 
-// Sidecar is the diffah.json file written inside every delta archive.
-//
-// It serves three purposes: schema versioning (Version), fail-fast
-// verification (RequiredFromBaseline is probed at import time), and human
-// inspection (ShippedInDelta plus size fields let `diffah inspect` report
-// savings without scanning the archive).
-type Sidecar struct {
-	Version              string      `json:"version"`
-	Tool                 string      `json:"tool"`
-	ToolVersion          string      `json:"tool_version"`
-	CreatedAt            time.Time   `json:"created_at"`
-	Platform             string      `json:"platform"`
-	Target               ImageRef    `json:"target"`
-	Baseline             BaselineRef `json:"baseline"`
-	RequiredFromBaseline []BlobRef   `json:"required_from_baseline"`
-	ShippedInDelta       []BlobRef   `json:"shipped_in_delta"`
+type ImageEntry struct {
+	Name     string      `json:"name"`
+	Baseline BaselineRef `json:"baseline"`
+	Target   TargetRef   `json:"target"`
 }
 
-// Marshal encodes the sidecar with two-space indentation. It validates the
-// payload before writing so an invalid Sidecar cannot be persisted.
+type BlobEntry struct {
+	Size            int64         `json:"size"`
+	MediaType       string        `json:"media_type"`
+	Encoding        Encoding      `json:"encoding"`
+	Codec           string        `json:"codec,omitempty"`
+	PatchFromDigest digest.Digest `json:"patch_from_digest,omitempty"`
+	ArchiveSize     int64         `json:"archive_size"`
+}
+
+type Sidecar struct {
+	Version     string                      `json:"version"`
+	Feature     string                      `json:"feature"`
+	Tool        string                      `json:"tool"`
+	ToolVersion string                      `json:"tool_version"`
+	CreatedAt   time.Time                   `json:"created_at"`
+	Platform    string                      `json:"platform"`
+	Blobs       map[digest.Digest]BlobEntry `json:"blobs"`
+	Images      []ImageEntry                `json:"images"`
+}
+
+func (s Sidecar) validate() error {
+	if s.Platform == "" {
+		return &ErrSidecarSchema{Reason: "platform is required"}
+	}
+	if s.Blobs == nil {
+		return &ErrSidecarSchema{Reason: "blobs is required (may be empty)"}
+	}
+	if len(s.Images) == 0 {
+		return &ErrSidecarSchema{Reason: "images must contain at least one entry"}
+	}
+	seen := make(map[string]struct{}, len(s.Images))
+	for i, img := range s.Images {
+		if !nameRegex.MatchString(img.Name) {
+			return &ErrSidecarSchema{Reason: fmt.Sprintf(
+				"images[%d].name %q does not match %s", i, img.Name, nameRegex)}
+		}
+		if _, dup := seen[img.Name]; dup {
+			return &ErrSidecarSchema{Reason: fmt.Sprintf(
+				"images[%d].name %q must be unique", i, img.Name)}
+		}
+		seen[img.Name] = struct{}{}
+		if img.Target.ManifestDigest == "" {
+			return &ErrSidecarSchema{Reason: fmt.Sprintf(
+				"images[%d].target.manifest_digest is required", i)}
+		}
+		if _, ok := s.Blobs[img.Target.ManifestDigest]; !ok {
+			return &ErrSidecarSchema{Reason: fmt.Sprintf(
+				"images[%d].target.manifest_digest %s must appear in blobs",
+				i, img.Target.ManifestDigest)}
+		}
+		if img.Baseline.ManifestDigest == "" {
+			return &ErrSidecarSchema{Reason: fmt.Sprintf(
+				"images[%d].baseline.manifest_digest is required", i)}
+		}
+	}
+	for d, b := range s.Blobs {
+		if err := validateBlobEntry(d, b); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateBlobEntry(d digest.Digest, b BlobEntry) error {
+	switch b.Encoding {
+	case EncodingFull:
+		if b.Codec != "" || b.PatchFromDigest != "" {
+			return &ErrSidecarSchema{Reason: fmt.Sprintf(
+				"blobs[%s] encoding=full must not set codec/patch_from_digest", d)}
+		}
+		if b.ArchiveSize != b.Size {
+			return &ErrSidecarSchema{Reason: fmt.Sprintf(
+				"blobs[%s] encoding=full requires archive_size == size (got %d vs %d)",
+				d, b.ArchiveSize, b.Size)}
+		}
+	case EncodingPatch:
+		if b.Codec == "" {
+			return &ErrSidecarSchema{Reason: fmt.Sprintf(
+				"blobs[%s] encoding=patch requires codec", d)}
+		}
+		if b.PatchFromDigest == "" {
+			return &ErrSidecarSchema{Reason: fmt.Sprintf(
+				"blobs[%s] encoding=patch requires patch_from_digest", d)}
+		}
+		if b.ArchiveSize <= 0 || b.ArchiveSize >= b.Size {
+			return &ErrSidecarSchema{Reason: fmt.Sprintf(
+				"blobs[%s] encoding=patch requires 0 < archive_size < size (got %d vs %d)",
+				d, b.ArchiveSize, b.Size)}
+		}
+	default:
+		return &ErrSidecarSchema{Reason: fmt.Sprintf(
+			"blobs[%s] encoding=%q is not recognized", d, b.Encoding)}
+	}
+	return nil
+}
+
 func (s Sidecar) Marshal() ([]byte, error) {
 	if err := s.validate(); err != nil {
 		return nil, err
@@ -63,99 +142,19 @@ func (s Sidecar) Marshal() ([]byte, error) {
 	return out, nil
 }
 
-// ParseSidecar decodes sidecar bytes and validates required fields and the
-// schema version. The returned *Sidecar is safe to inspect only if err is
-// nil.
 func ParseSidecar(raw []byte) (*Sidecar, error) {
 	var s Sidecar
 	if err := json.Unmarshal(raw, &s); err != nil {
-		return nil, fmt.Errorf("decode sidecar: %w", err)
+		return nil, &ErrInvalidBundleFormat{Cause: err}
 	}
-	if s.Version != SchemaVersionV1 {
-		return nil, &ErrUnsupportedSchemaVersion{Got: s.Version}
+	switch {
+	case s.Feature != FeatureBundle:
+		return nil, &ErrPhase1Archive{GotFeature: s.Feature}
+	case s.Version != SchemaVersionV1:
+		return nil, &ErrUnknownBundleVersion{Got: s.Version}
 	}
 	if err := s.validate(); err != nil {
 		return nil, err
 	}
 	return &s, nil
-}
-
-func (s Sidecar) validate() error {
-	switch {
-	case s.Platform == "":
-		return &ErrSidecarSchema{Reason: "platform is required"}
-	case s.Target.ManifestDigest == "":
-		return &ErrSidecarSchema{Reason: "target.manifest_digest is required"}
-	case s.RequiredFromBaseline == nil:
-		return &ErrSidecarSchema{Reason: "required_from_baseline is required (may be empty slice)"}
-	case s.ShippedInDelta == nil:
-		return &ErrSidecarSchema{Reason: "shipped_in_delta is required (may be empty slice)"}
-	}
-	for i, b := range s.RequiredFromBaseline {
-		if err := validateRequiredEntry(i, b); err != nil {
-			return err
-		}
-	}
-	for i, b := range s.ShippedInDelta {
-		if err := validateShippedEntry(i, b); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// validateRequiredEntry: required-from-baseline entries must not carry any
-// intra-layer fields. Those fields describe archive-side encoding and
-// baseline-fetched blobs have no archive-side bytes.
-func validateRequiredEntry(i int, b BlobRef) error {
-	switch {
-	case b.Encoding != "",
-		b.Codec != "",
-		b.PatchFromDigest != "",
-		b.ArchiveSize != 0:
-		return &ErrSidecarSchema{Reason: fmt.Sprintf(
-			"required_from_baseline[%d] must not set encoding/codec/patch_from_digest/archive_size",
-			i)}
-	}
-	return nil
-}
-
-// validateShippedEntry: every shipped entry must declare an encoding, and
-// that encoding's peer fields must be consistent with the declaration.
-func validateShippedEntry(i int, b BlobRef) error {
-	switch b.Encoding {
-	case "":
-		return &ErrSidecarSchema{Reason: fmt.Sprintf(
-			"shipped_in_delta[%d].encoding is required", i)}
-	case EncodingFull:
-		if b.Codec != "" || b.PatchFromDigest != "" {
-			return &ErrSidecarSchema{Reason: fmt.Sprintf(
-				"shipped_in_delta[%d] encoding=full must not set codec/patch_from_digest",
-				i)}
-		}
-		if b.ArchiveSize != b.Size {
-			return &ErrSidecarSchema{Reason: fmt.Sprintf(
-				"shipped_in_delta[%d] encoding=full requires archive_size == size (got %d vs %d)",
-				i, b.ArchiveSize, b.Size)}
-		}
-	case EncodingPatch:
-		if b.Codec == "" {
-			return &ErrSidecarSchema{Reason: fmt.Sprintf(
-				"shipped_in_delta[%d] encoding=patch requires codec", i)}
-		}
-		if b.PatchFromDigest == "" {
-			return &ErrSidecarSchema{Reason: fmt.Sprintf(
-				"shipped_in_delta[%d] encoding=patch requires patch_from_digest", i)}
-		}
-		if b.ArchiveSize <= 0 || b.ArchiveSize >= b.Size {
-			return &ErrSidecarSchema{Reason: fmt.Sprintf(
-				"shipped_in_delta[%d] encoding=patch requires 0 < archive_size < size (got %d vs %d)",
-				i, b.ArchiveSize, b.Size)}
-		}
-	default:
-		return &ErrSidecarSchema{Reason: fmt.Sprintf(
-			"shipped_in_delta[%d] encoding=%q is not recognized",
-			i, b.Encoding)}
-	}
-	return nil
 }
