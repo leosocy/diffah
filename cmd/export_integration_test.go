@@ -34,9 +34,8 @@ func TestExportCommand_WithFixtures(t *testing.T) {
 	cmd := exec.Command(
 		"go", "run", "-tags", "containers_image_openpgp exclude_graphdriver_btrfs exclude_graphdriver_devicemapper", ".",
 		"export",
-		"--target", "oci-archive:"+filepath.Join(root, "testdata/fixtures/v2_oci.tar"),
-		"--baseline", "oci-archive:"+filepath.Join(root, "testdata/fixtures/v1_oci.tar"),
-		"--output", out,
+		"--pair", "app="+filepath.Join(root, "testdata/fixtures/v1_oci.tar")+","+filepath.Join(root, "testdata/fixtures/v2_oci.tar"),
+		out,
 	)
 	cmd.Dir = root
 	output, err := cmd.CombinedOutput()
@@ -54,10 +53,9 @@ func TestExportCommand_DryRun(t *testing.T) {
 	cmd := exec.Command(
 		"go", "run", "-tags", "containers_image_openpgp exclude_graphdriver_btrfs exclude_graphdriver_devicemapper", ".",
 		"export",
-		"--target", "oci-archive:"+filepath.Join(root, "testdata/fixtures/v2_oci.tar"),
-		"--baseline", "oci-archive:"+filepath.Join(root, "testdata/fixtures/v1_oci.tar"),
-		"--output", out,
+		"--pair", "app="+filepath.Join(root, "testdata/fixtures/v1_oci.tar")+","+filepath.Join(root, "testdata/fixtures/v2_oci.tar"),
 		"--dry-run",
+		out,
 	)
 	cmd.Dir = root
 	output, err := cmd.CombinedOutput()
@@ -66,5 +64,5 @@ func TestExportCommand_DryRun(t *testing.T) {
 	// Output file must NOT exist.
 	_, err = os.Stat(out)
 	require.True(t, os.IsNotExist(err))
-	require.Contains(t, string(output), "delta would ship")
+	require.Contains(t, string(output), "archive:")
 }

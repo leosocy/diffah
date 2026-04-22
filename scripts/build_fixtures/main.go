@@ -419,7 +419,7 @@ func removeIfExists(path string) error {
 
 // seededRandom returns size bytes of deterministic pseudo-random data from the given seed.
 func seededRandom(seed int64, size int) []byte {
-	rng := rand.New(rand.NewSource(seed)) //nolint:gosec // deterministic fixture data
+	rng := rand.New(rand.NewSource(seed))
 	buf := make([]byte, size)
 	for i := range buf {
 		buf[i] = byte(rng.Intn(256))
