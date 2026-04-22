@@ -11,6 +11,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/leosocy/diffah/internal/zstdpatch"
 	"github.com/leosocy/diffah/pkg/diff"
 	"github.com/leosocy/diffah/pkg/exporter"
 )
@@ -447,6 +448,7 @@ func TestIntegration_AutoDowngradesUnderReducedPATH(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
+	zstdpatch.ResetProbeCache()
 	t.Setenv("PATH", "")
 
 	tmp := t.TempDir()
