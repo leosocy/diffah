@@ -447,7 +447,6 @@ func TestIntegration_AutoDowngradesUnderReducedPATH(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
-	origPath := os.Getenv("PATH")
 	t.Setenv("PATH", "")
 
 	tmp := t.TempDir()
@@ -475,7 +474,6 @@ func TestIntegration_AutoDowngradesUnderReducedPATH(t *testing.T) {
 
 	outDir := filepath.Join(tmp, "out")
 	require.NoError(t, os.MkdirAll(outDir, 0o755))
-	_ = origPath
 	err = Import(context.Background(), Options{
 		DeltaPath:    bundlePath,
 		Baselines:    map[string]string{fixtureImageName(t): fixtureBaselinePath(t)},
