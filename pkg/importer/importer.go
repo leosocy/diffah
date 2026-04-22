@@ -44,15 +44,6 @@ func (o *Options) probeOrDefault() func(context.Context) (bool, string) {
 	return zstdpatch.Available
 }
 
-func sidecarHasPatch(sc *diff.Sidecar) bool {
-	for _, b := range sc.Blobs {
-		if b.Encoding == diff.EncodingPatch {
-			return true
-		}
-	}
-	return false
-}
-
 func Import(ctx context.Context, opts Options) error {
 	bundle, err := extractBundle(opts.DeltaPath)
 	if err != nil {
@@ -60,7 +51,7 @@ func Import(ctx context.Context, opts Options) error {
 	}
 	defer bundle.cleanup()
 
-	if sidecarHasPatch(bundle.sidecar) {
+	if bundle.sidecar.RequiresZstd() {
 		ok, reason := opts.probeOrDefault()(ctx)
 		if !ok {
 			return fmt.Errorf("%w: %s", zstdpatch.ErrZstdBinaryMissing, reason)
@@ -168,7 +159,7 @@ func DryRun(ctx context.Context, opts Options) (DryRunReport, error) {
 	}
 	archiveBytes = info.Size()
 
-	requiresZstd := sidecarHasPatch(bundle.sidecar)
+	requiresZstd := bundle.sidecar.RequiresZstd()
 	var zstdAvailable bool
 	if requiresZstd {
 		zstdAvailable, _ = opts.probeOrDefault()(ctx) // reason is only used in Import's error path; DryRun discards it

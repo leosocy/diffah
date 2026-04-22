@@ -175,6 +175,31 @@ func TestSidecar_RoundTrip_PreservesAllFields(t *testing.T) {
 	require.Equal(t, original, *parsed)
 }
 
+func TestSidecar_RequiresZstd(t *testing.T) {
+	t.Run("all full returns false", func(t *testing.T) {
+		s := Sidecar{
+			Blobs: map[digest.Digest]BlobEntry{
+				"sha256:a": {Encoding: EncodingFull},
+				"sha256:b": {Encoding: EncodingFull},
+			},
+		}
+		require.False(t, s.RequiresZstd())
+	})
+	t.Run("any patch returns true", func(t *testing.T) {
+		s := Sidecar{
+			Blobs: map[digest.Digest]BlobEntry{
+				"sha256:a": {Encoding: EncodingFull},
+				"sha256:b": {Encoding: EncodingPatch},
+			},
+		}
+		require.True(t, s.RequiresZstd())
+	})
+	t.Run("empty blobs returns false", func(t *testing.T) {
+		s := Sidecar{Blobs: map[digest.Digest]BlobEntry{}}
+		require.False(t, s.RequiresZstd())
+	})
+}
+
 func orderOfTopLevelBlobsKeys(t *testing.T, raw []byte) []string {
 	t.Helper()
 	dec := json.NewDecoder(bytes.NewReader(raw))
