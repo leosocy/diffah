@@ -1,6 +1,7 @@
 package importer
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -50,10 +51,6 @@ func (h *bundleHarness) importOpts(baselines map[string]string, strict bool) Opt
 		OutputPath:   outPath,
 		OutputFormat: "oci-archive",
 	}
-}
-
-func (h *bundleHarness) baselinePath(name string) string {
-	return "../../testdata/fixtures/v1_oci.tar"
 }
 
 func TestIntegration_PartialImport(t *testing.T) {
@@ -196,20 +193,6 @@ func TestIntegration_BundleOfOnePositional(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestIntegration_MultiImageBundle_RejectsImport(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-	h := newMultiImageBundleHarness(t)
-	opts := h.importOpts(map[string]string{
-		"svc-a": "../../testdata/fixtures/v1_oci.tar",
-		"svc-b": "../../testdata/fixtures/v1_oci.tar",
-	}, false)
-	err := Import(h.ctx, opts)
-	require.Error(t, err, "multi-image bundle import must be rejected")
-	require.Contains(t, err.Error(), "multi-image bundle import is not yet supported")
-}
-
 func TestIntegration_MultiImageBundle_UnknownBaselineName(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
@@ -332,4 +315,74 @@ func newMultiImageBundleHarness(t *testing.T) *bundleHarness {
 		{Name: "svc-b", BaselinePath: "../../testdata/fixtures/v1_oci.tar",
 			TargetPath: "../../testdata/fixtures/v2_oci.tar"},
 	})
+}
+
+func TestIntegration_MultiImageBundle_ImportsBoth(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	h := newMultiImageBundleHarness(t)
+	outDir := filepath.Join(h.tmpDir, "out")
+	opts := Options{
+		DeltaPath: h.bundlePath,
+		Baselines: map[string]string{
+			"svc-a": "../../testdata/fixtures/v1_oci.tar",
+			"svc-b": "../../testdata/fixtures/v1_oci.tar",
+		},
+		OutputPath:   outDir,
+		OutputFormat: "oci-archive",
+	}
+	err := Import(h.ctx, opts)
+	require.NoError(t, err)
+
+	_, err = os.Stat(filepath.Join(outDir, "svc-a.tar"))
+	require.NoError(t, err, "svc-a.tar must exist")
+	_, err = os.Stat(filepath.Join(outDir, "svc-b.tar"))
+	require.NoError(t, err, "svc-b.tar must exist")
+}
+
+func TestIntegration_MultiImageBundle_PartialSkip(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	h := newMultiImageBundleHarness(t)
+	outDir := filepath.Join(h.tmpDir, "out")
+	var progress bytes.Buffer
+	opts := Options{
+		DeltaPath:    h.bundlePath,
+		Baselines:    map[string]string{"svc-a": "../../testdata/fixtures/v1_oci.tar"},
+		OutputPath:   outDir,
+		OutputFormat: "oci-archive",
+		Progress:     &progress,
+	}
+	err := Import(h.ctx, opts)
+	require.NoError(t, err)
+
+	_, err = os.Stat(filepath.Join(outDir, "svc-a.tar"))
+	require.NoError(t, err, "svc-a.tar must exist")
+	_, err = os.Stat(filepath.Join(outDir, "svc-b.tar"))
+	require.ErrorIs(t, err, os.ErrNotExist, "svc-b.tar must not exist")
+	require.Contains(t, progress.String(), "svc-b: skipped (no baseline provided)")
+}
+
+func TestIntegration_Import_OutputMustBeDirectory(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	h := newBundleHarness(t, []exporter.Pair{{
+		Name:         "svc-a",
+		BaselinePath: "../../testdata/fixtures/v1_oci.tar",
+		TargetPath:   "../../testdata/fixtures/v2_oci.tar",
+	}})
+	preExisting := filepath.Join(h.tmpDir, "not-a-dir")
+	require.NoError(t, os.WriteFile(preExisting, []byte("file not dir"), 0o600))
+	opts := Options{
+		DeltaPath:    h.bundlePath,
+		Baselines:    map[string]string{"default": "../../testdata/fixtures/v1_oci.tar"},
+		OutputPath:   preExisting,
+		OutputFormat: "oci-archive",
+	}
+	err := Import(h.ctx, opts)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "must be a directory")
 }
