@@ -15,6 +15,7 @@ import (
 
 type pairPlan struct {
 	Name              string
+	BaselinePath      string
 	BaselineRef       types.ImageReference
 	TargetRef         types.ImageReference
 	TargetManifest    []byte
@@ -26,8 +27,8 @@ type pairPlan struct {
 	BaselineManifest  []byte
 	BaselineMediaType string
 	BaselineLayerMeta []BaselineLayerMeta
-	Shipped  []diff.BlobRef
-	Required []diff.BlobRef
+	Shipped           []diff.BlobRef
+	Required          []diff.BlobRef
 }
 
 func planPair(ctx context.Context, p Pair, platform string) (*pairPlan, error) {
@@ -64,7 +65,7 @@ func planPair(ctx context.Context, p Pair, platform string) (*pairPlan, error) {
 	}
 
 	return &pairPlan{
-		Name: p.Name, BaselineRef: baseRef, TargetRef: tgtRef,
+		Name: p.Name, BaselinePath: p.BaselinePath, BaselineRef: baseRef, TargetRef: tgtRef,
 		TargetManifest: tgtMfBytes, TargetMediaType: tgtMime,
 		TargetLayerDescs: tgtLayers,
 		TargetConfigRaw:  cfgBytes,

@@ -30,10 +30,6 @@ func (p *blobPool) addIfAbsent(d digest.Digest, data []byte, e diff.BlobEntry) {
 	p.entries[d] = e
 }
 
-func (p *blobPool) setEntry(d digest.Digest, e diff.BlobEntry) {
-	p.entries[d] = e
-}
-
 func (p *blobPool) has(d digest.Digest) bool {
 	_, ok := p.bytes[d]
 	return ok

@@ -1,6 +1,7 @@
 package exporter
 
 import (
+	"path/filepath"
 	"time"
 
 	"github.com/opencontainers/go-digest"
@@ -31,7 +32,7 @@ func assembleSidecar(
 			Baseline: diff.BaselineRef{
 				ManifestDigest: digest.FromBytes(p.BaselineManifest),
 				MediaType:      p.BaselineMediaType,
-				SourceHint:     p.Name + "-baseline",
+				SourceHint:     filepath.Base(p.BaselinePath),
 			},
 			Target: diff.TargetRef{
 				ManifestDigest: mfDigest,
