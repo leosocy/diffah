@@ -87,7 +87,7 @@ func (s *bundleImageSource) serveFull(d digest.Digest) (io.ReadCloser, int64, er
 		return nil, 0, fmt.Errorf("read full blob %s: %w", d, err)
 	}
 	if got := digest.FromBytes(data); got != d {
-		return nil, 0, &diff.ErrBaselineBlobDigestMismatch{
+		return nil, 0, &diff.ErrShippedBlobDigestMismatch{
 			ImageName: s.imageName, Digest: d.String(), Got: got.String(),
 		}
 	}
@@ -247,6 +247,11 @@ func composeImage(
 		copyOpts.PreserveDigests = true
 	}
 	if _, err := copy.Image(ctx, policyCtx, outRef, src.ref, copyOpts); err != nil {
+		if resolvedFmt == FormatDir {
+			_ = os.RemoveAll(outPath)
+		} else {
+			_ = os.Remove(outPath)
+		}
 		return fmt.Errorf("compose %q: %w", img.Name, err)
 	}
 	return nil

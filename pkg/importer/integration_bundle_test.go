@@ -43,12 +43,12 @@ func newBundleHarness(t *testing.T, pairs []exporter.Pair) *bundleHarness {
 }
 
 func (h *bundleHarness) importOpts(baselines map[string]string, strict bool) Options {
-	outPath := filepath.Join(h.tmpDir, "output.tar")
+	outDir := filepath.Join(h.tmpDir, "output")
 	return Options{
 		DeltaPath:    h.bundlePath,
 		Baselines:    baselines,
 		Strict:       strict,
-		OutputPath:   outPath,
+		OutputPath:   outDir,
 		OutputFormat: "oci-archive",
 	}
 }
@@ -139,7 +139,7 @@ func TestIntegration_LegacyArchiveRejected(t *testing.T) {
 	opts := Options{
 		DeltaPath:    "../../testdata/fixtures/v1_phase1.tar",
 		Baselines:    map[string]string{"default": "../../testdata/fixtures/v1_oci.tar"},
-		OutputPath:   filepath.Join(t.TempDir(), "output.tar"),
+		OutputPath:   filepath.Join(t.TempDir(), "output"),
 		OutputFormat: "oci-archive",
 	}
 	err := Import(context.Background(), opts)

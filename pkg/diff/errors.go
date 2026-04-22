@@ -83,6 +83,20 @@ func (e *ErrBaselineBlobDigestMismatch) Error() string {
 		e.ImageName, e.Digest, e.Got)
 }
 
+// ErrShippedBlobDigestMismatch reports that a bundle-shipped blob's
+// computed sha256 did not match the digest recorded in the sidecar.
+// This indicates bundle corruption or a writer bug.
+type ErrShippedBlobDigestMismatch struct {
+	ImageName string
+	Digest    string
+	Got       string
+}
+
+func (e *ErrShippedBlobDigestMismatch) Error() string {
+	return fmt.Sprintf("image %q: shipped blob %s has digest %s",
+		e.ImageName, e.Digest, e.Got)
+}
+
 // ErrBaselineMissingPatchRef is the patch-specific sibling of
 // ErrBaselineMissingBlob. Raised when a shipped layer with encoding=patch
 // names a patch_from_digest that is absent from the provided baseline.
