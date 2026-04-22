@@ -9,6 +9,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const fakeZstdPath = "/usr/bin/zstd"
+
 func TestAvailable_Table(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -50,7 +52,7 @@ func TestAvailable_Table(t *testing.T) {
 		},
 		{
 			name:   "unparseable banner",
-			lookup: func(string) (string, error) { return "/usr/bin/zstd", nil },
+			lookup: func(string) (string, error) { return fakeZstdPath, nil },
 			version: func(context.Context, string) (string, error) {
 				return "this is not a version string\n", nil
 			},

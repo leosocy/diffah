@@ -4,7 +4,10 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"time"
+
+	"github.com/leosocy/diffah/internal/zstdpatch"
 )
 
 type Options struct {
@@ -17,7 +20,26 @@ type Options struct {
 	CreatedAt   time.Time
 	Progress    io.Writer
 
+	Probe   Probe
+	WarnOut io.Writer
+
 	fingerprinter Fingerprinter
+}
+
+func (o *Options) defaultedProbe() Probe {
+	if o.Probe != nil {
+		return o.Probe
+	}
+	return func(ctx context.Context) (bool, string) {
+		return zstdpatch.Available(ctx)
+	}
+}
+
+func (o *Options) defaultedWarnOut() io.Writer {
+	if o.WarnOut != nil {
+		return o.WarnOut
+	}
+	return os.Stderr
 }
 
 type DryRunStats struct {
@@ -40,6 +62,11 @@ type builtBundle struct {
 
 func buildBundle(ctx context.Context, opts *Options) (*builtBundle, error) {
 	if err := ValidatePairs(opts.Pairs); err != nil {
+		return nil, err
+	}
+	effectiveMode, err := resolveMode(
+		ctx, opts.IntraLayer, opts.defaultedProbe(), opts.defaultedWarnOut())
+	if err != nil {
 		return nil, err
 	}
 	if opts.CreatedAt.IsZero() {
@@ -69,7 +96,7 @@ func buildBundle(ctx context.Context, opts *Options) (*builtBundle, error) {
 		fmt.Fprintf(opts.Progress, "planned %d pairs\n", len(plans))
 	}
 
-	if err := encodeShipped(ctx, pool, plans, opts.IntraLayer, opts.fingerprinter, opts.Progress); err != nil {
+	if err := encodeShipped(ctx, pool, plans, effectiveMode, opts.fingerprinter, opts.Progress); err != nil {
 		return nil, fmt.Errorf("encode shipped layers: %w", err)
 	}
 	if opts.Progress != nil {

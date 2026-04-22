@@ -4,7 +4,6 @@
 // exporter for the size-ceiling comparison in intralayer.go, and kept in
 // the API for decoder symmetry (no current production caller decodes
 // zstd-full bytes — see spec §1 and §4.4).
-
 package zstdpatch
 
 import (
