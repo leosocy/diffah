@@ -11,8 +11,6 @@ import (
 	dockerref "go.podman.io/image/v5/docker/reference"
 	ociarchive "go.podman.io/image/v5/oci/archive"
 	"go.podman.io/image/v5/types"
-
-	"github.com/leosocy/diffah/pkg/diff"
 )
 
 const (
@@ -41,37 +39,61 @@ func Import(ctx context.Context, opts Options) error {
 	if err := validatePositionalBaseline(bundle.sidecar, opts.Baselines); err != nil {
 		return err
 	}
-
 	resolved, err := resolveBaselines(ctx, bundle.sidecar, opts.Baselines, opts.Strict)
 	if err != nil {
 		return err
 	}
 
-	if len(resolved) == 0 {
-		return fmt.Errorf("no baselines resolved; at least one is required for import")
+	if err := ensureOutputIsDirectory(opts.OutputPath); err != nil {
+		return err
 	}
-
-	if len(bundle.sidecar.Images) > 1 {
-		return fmt.Errorf("multi-image bundle import is not yet supported; specify a single image to import")
-	}
-
-	rb := resolved[0]
-	var img diff.ImageEntry
-	for _, i := range bundle.sidecar.Images {
-		if i.Name == rb.Name {
-			img = i
-			break
-		}
-	}
-
 	if err := os.MkdirAll(opts.OutputPath, 0o755); err != nil {
 		return fmt.Errorf("mkdir output %s: %w", opts.OutputPath, err)
 	}
-	if err := composeImage(ctx, img, bundle, rb,
-		opts.OutputPath, opts.OutputFormat, opts.AllowConvert); err != nil {
-		return err
+
+	progress := opts.Progress
+	if progress == nil {
+		progress = io.Discard
 	}
 
+	resolvedByName := make(map[string]resolvedBaseline, len(resolved))
+	for _, r := range resolved {
+		resolvedByName[r.Name] = r
+	}
+
+	imported := 0
+	skipped := make([]string, 0)
+	for _, img := range bundle.sidecar.Images {
+		rb, ok := resolvedByName[img.Name]
+		if !ok {
+			fmt.Fprintf(progress, "%s: skipped (no baseline provided)\n", img.Name)
+			skipped = append(skipped, img.Name)
+			continue
+		}
+		if err := composeImage(ctx, img, bundle, rb,
+			opts.OutputPath, opts.OutputFormat, opts.AllowConvert); err != nil {
+			return err
+		}
+		imported++
+	}
+	fmt.Fprintf(progress, "imported %d of %d images; skipped: %v\n",
+		imported, len(bundle.sidecar.Images), skipped)
+	return nil
+}
+
+func ensureOutputIsDirectory(path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("stat output %s: %w", path, err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf(
+			"OUTPUT %s must be a directory (bundle output is written to OUTPUT/<name>.tar or OUTPUT/<name>/)",
+			path)
+	}
 	return nil
 }
 
