@@ -64,5 +64,5 @@ func TestExportCommand_DryRun(t *testing.T) {
 	// Output file must NOT exist.
 	_, err = os.Stat(out)
 	require.True(t, os.IsNotExist(err))
-	require.Contains(t, string(output), "archive:")
+	require.Contains(t, string(output), "blobs")
 }
