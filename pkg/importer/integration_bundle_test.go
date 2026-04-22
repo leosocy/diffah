@@ -282,22 +282,19 @@ func TestIntegration_MultiImageBundle_DryRunReport(t *testing.T) {
 	}, false)
 	report, err := DryRun(h.ctx, opts)
 	require.NoError(t, err)
+
+	require.Equal(t, "bundle", report.Feature)
+	require.Equal(t, "v1", report.Version)
 	require.Len(t, report.Images, 2)
-	require.Greater(t, report.Blobs.FullCount+report.Blobs.PatchCount, 0)
-	require.NotZero(t, report.ArchiveBytes)
-	var provided, missing []ImageDryRun
-	for _, img := range report.Images {
-		if img.BaselineProvided {
-			provided = append(provided, img)
-		} else {
-			missing = append(missing, img)
-		}
+
+	byName := map[string]ImageDryRun{}
+	for _, i := range report.Images {
+		byName[i.Name] = i
 	}
-	require.Len(t, provided, 1, "only svc-a baseline was provided")
-	require.Equal(t, "svc-a", provided[0].Name)
-	require.Len(t, missing, 1, "svc-b baseline was not provided")
-	require.Equal(t, "svc-b", missing[0].Name)
-	require.Contains(t, missing[0].SkipReason, "no baseline provided")
+	require.True(t, byName["svc-a"].WouldImport)
+	require.False(t, byName["svc-b"].WouldImport)
+	require.Contains(t, byName["svc-b"].SkipReason, "no baseline provided")
+	require.Greater(t, report.Blobs.FullCount, 0)
 }
 
 func TestIntegration_MultiImageBundle_ForceFullDedup(t *testing.T) {
