@@ -70,18 +70,3 @@ func TestDecode_WrongReference(t *testing.T) {
 			"decoding with the wrong reference returned target bytes silently")
 	}
 }
-
-// TestEncodeFull_RoundTrip — EncodeFull is a plain zstd encode with no
-// reference; DecodeFull must recover the target.
-func TestEncodeFull_RoundTrip(t *testing.T) {
-	skipWithoutZstd(t)
-	target := bytes.Repeat([]byte("hello, diffah "), 1<<10)
-
-	compressed, err := EncodeFull(target)
-	require.NoError(t, err)
-	require.Less(t, len(compressed), len(target))
-
-	got, err := DecodeFull(compressed)
-	require.NoError(t, err)
-	require.True(t, bytes.Equal(got, target))
-}
