@@ -2,6 +2,7 @@ package importer
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
@@ -199,4 +200,65 @@ func TestBundleImageSource_GetBlob_PatchEncoding_CorruptedBlob_RaisesAssemblyMis
 	}
 	_, _, err = src.GetBlob(context.Background(), types.BlobInfo{Digest: patchDigest}, nil)
 	require.Error(t, err)
+}
+
+func TestBundleImageSource_GetBlob_BaselineDelegation_Verified(t *testing.T) {
+	outDir := t.TempDir()
+	bp := filepath.Join(outDir, "bundle.tar")
+	err := exporter.Export(context.Background(), exporter.Options{
+		Pairs: []exporter.Pair{{
+			Name:         "svc-a",
+			BaselinePath: "../../testdata/fixtures/v1_oci.tar",
+			TargetPath:   "../../testdata/fixtures/v2_oci.tar",
+		}},
+		Platform:    "linux/amd64",
+		IntraLayer:  "off",
+		OutputPath:  bp,
+		ToolVersion: "test",
+		CreatedAt:   time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+	})
+	require.NoError(t, err)
+	b, err := extractBundle(bp)
+	require.NoError(t, err)
+	t.Cleanup(b.cleanup)
+
+	img := b.sidecar.Images[0]
+	mfPath := filepath.Join(b.blobDir, img.Target.ManifestDigest.Algorithm().String(),
+		img.Target.ManifestDigest.Encoded())
+	mfBytes, err := os.ReadFile(mfPath)
+	require.NoError(t, err)
+
+	var mf struct {
+		Layers []struct {
+			Digest digest.Digest `json:"digest"`
+		} `json:"layers"`
+	}
+	require.NoError(t, json.Unmarshal(mfBytes, &mf))
+
+	var requiredDigest digest.Digest
+	for _, l := range mf.Layers {
+		if _, ok := b.sidecar.Blobs[l.Digest]; !ok {
+			requiredDigest = l.Digest
+			break
+		}
+	}
+	if requiredDigest == "" {
+		t.Skip("all target layers shipped; no baseline-delegated blob to cover")
+	}
+
+	src := &bundleImageSource{
+		blobDir:      b.blobDir,
+		manifest:     mfBytes,
+		manifestMime: img.Target.MediaType,
+		sidecar:      b.sidecar,
+		baseline:     openBaseline(t, "../../testdata/fixtures/v1_oci.tar"),
+		imageName:    img.Name,
+	}
+	rc, size, err := src.GetBlob(context.Background(), types.BlobInfo{Digest: requiredDigest}, nil)
+	require.NoError(t, err)
+	defer rc.Close()
+	got, err := io.ReadAll(rc)
+	require.NoError(t, err)
+	require.Equal(t, int64(len(got)), size)
+	require.Equal(t, requiredDigest, digest.FromBytes(got))
 }

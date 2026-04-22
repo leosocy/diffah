@@ -62,7 +62,11 @@ func (s *bundleImageSource) GetBlob(
 ) (io.ReadCloser, int64, error) {
 	entry, ok := s.sidecar.Blobs[info.Digest]
 	if !ok {
-		return nil, 0, fmt.Errorf("baseline delegation not implemented yet") // TASK-5
+		data, err := s.fetchVerifiedBaselineBlob(ctx, info.Digest, cache)
+		if err != nil {
+			return nil, 0, fmt.Errorf("baseline serve %s: %w", info.Digest, err)
+		}
+		return io.NopCloser(bytes.NewReader(data)), int64(len(data)), nil
 	}
 	switch entry.Encoding {
 	case diff.EncodingFull:
