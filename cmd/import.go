@@ -3,7 +3,9 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"io"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -73,25 +75,35 @@ func runImport(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(cmd.OutOrStdout(),
-			"images: %d, blobs: %d, archive size: %d\n",
-			len(report.Images), report.Blobs.FullCount+report.Blobs.PatchCount, report.ArchiveBytes)
-		var missing bool
-		for _, img := range report.Images {
-			if !img.BaselineProvided {
-				fmt.Fprintf(cmd.ErrOrStderr(), "missing baseline: %s\n", img.Name)
-				missing = true
-			}
-		}
-		if missing {
-			return fmt.Errorf("baseline missing required blobs")
-		}
-		return nil
+		return renderDryRunReport(cmd.OutOrStdout(), report)
 	}
 	if err := importer.Import(ctx, opts); err != nil {
 		return err
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "wrote %s\n", args[1])
+	return nil
+}
+
+func renderDryRunReport(w io.Writer, r importer.DryRunReport) error {
+	fmt.Fprintf(w, "archive: feature=%s version=%s platform=%s\n",
+		r.Feature, r.Version, r.Platform)
+	fmt.Fprintf(w, "tool: %s %s, created %s\n",
+		r.Tool, r.ToolVersion, r.CreatedAt.UTC().Format(time.RFC3339))
+	fmt.Fprintf(w, "archive bytes: %d\n", r.ArchiveBytes)
+	fmt.Fprintf(w, "blobs: %d (full: %d, patch: %d) — full: %d B, patch: %d B\n",
+		r.Blobs.FullCount+r.Blobs.PatchCount,
+		r.Blobs.FullCount, r.Blobs.PatchCount,
+		r.Blobs.FullBytes, r.Blobs.PatchBytes)
+	fmt.Fprintf(w, "images: %d\n", len(r.Images))
+	for _, img := range r.Images {
+		state := "would import"
+		if !img.WouldImport {
+			state = fmt.Sprintf("skip — %s", img.SkipReason)
+		}
+		fmt.Fprintf(w, "  %-20s target=%s (%s)\n", img.Name, img.TargetManifestDigest, state)
+		fmt.Fprintf(w, "    layers: %d total — %d shipped, %d from baseline, %d patched\n",
+			img.LayerCount, img.ArchiveLayerCount, img.BaselineLayerCount, img.PatchLayerCount)
+	}
 	return nil
 }
 
