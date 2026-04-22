@@ -69,7 +69,8 @@ func TestExportCommand_DryRun(t *testing.T) {
 
 func TestExport_RejectsUnknownIntraLayerValue(t *testing.T) {
 	repoRoot := findRepoRoot(t)
-	cmd := exec.Command("go", "run", ".",
+	cmd := exec.Command(
+		"go", "run", "-tags", "containers_image_openpgp exclude_graphdriver_btrfs exclude_graphdriver_devicemapper", ".",
 		"export",
 		"--pair", "a="+filepath.Join(repoRoot, "testdata/fixtures/v1_oci.tar")+","+filepath.Join(repoRoot, "testdata/fixtures/v2_oci.tar"),
 		"--intra-layer", "aggressive",
