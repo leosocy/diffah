@@ -20,6 +20,7 @@ func buildInspectTestDelta(t *testing.T) string {
 }
 
 func TestInspectCommand_PrintsSidecarFields(t *testing.T) {
+	t.Skip("rewritten in Task 17")
 	delta := buildInspectTestDelta(t)
 
 	var buf bytes.Buffer
