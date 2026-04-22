@@ -66,7 +66,8 @@ Reconstruct the full image on the consumer side:
 diffah import \
   --baseline app=v1.tar \
   ./app_v1_to_v2.tar \
-  ./app_v2.tar
+  ./out/
+# output at ./out/app.tar
 ```
 
 ### Multi-image bundle
@@ -81,14 +82,20 @@ diffah export \
   ./bundle.tar
 ```
 
-Import a specific image from the bundle:
+Import every image from the bundle in one command:
 
 ```bash
 diffah import \
   --baseline svc-a=v1a.tar \
+  --baseline svc-b=v1b.tar \
   ./bundle.tar \
-  ./svc-a-v2.tar
+  ./out/
+# output at ./out/svc-a.tar and ./out/svc-b.tar
 ```
+
+`OUTPUT` is always a directory. Per-image output lands at
+`OUTPUT/<name>.tar` for archive output formats, or `OUTPUT/<name>/` for
+`--output-format dir`.
 
 ### Using spec files
 

@@ -13,6 +13,11 @@
 - **Sidecar schema**: The sidecar JSON (`diffah.json`) now uses the bundle
   format with `feature: "bundle"`, a `blobs` map, and an `images` array.
   Phase 1 archives are detected and rejected with a helpful hint.
+- **`diffah import`**: `OUTPUT` positional argument is now a directory.
+  Per-image output lands at `OUTPUT/<name>.tar` (archive formats) or
+  `OUTPUT/<name>/` (`dir` format). Single-image bundles still use a
+  per-image sub-entry — the default-mapped bundle-of-one produces
+  `OUTPUT/default.tar` (or `OUTPUT/default/`).
 
 ### New features
 
