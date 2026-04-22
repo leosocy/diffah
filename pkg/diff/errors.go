@@ -69,6 +69,20 @@ func (e *ErrIntraLayerAssemblyMismatch) Error() string {
 		e.Digest, e.Got)
 }
 
+// ErrBaselineBlobDigestMismatch reports that a baseline-served blob's
+// computed sha256 did not match the digest the sidecar expected. Bytes
+// are never written to the output when this fires.
+type ErrBaselineBlobDigestMismatch struct {
+	ImageName string
+	Digest    string
+	Got       string
+}
+
+func (e *ErrBaselineBlobDigestMismatch) Error() string {
+	return fmt.Sprintf("image %q: baseline blob %s has digest %s",
+		e.ImageName, e.Digest, e.Got)
+}
+
 // ErrBaselineMissingPatchRef is the patch-specific sibling of
 // ErrBaselineMissingBlob. Raised when a shipped layer with encoding=patch
 // names a patch_from_digest that is absent from the provided baseline.

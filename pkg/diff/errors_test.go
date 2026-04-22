@@ -29,3 +29,14 @@ func TestBundleErrorMessages(t *testing.T) {
 		})
 	}
 }
+
+func TestErrBaselineBlobDigestMismatch_Message(t *testing.T) {
+	e := &ErrBaselineBlobDigestMismatch{
+		ImageName: "svc-a",
+		Digest:    "sha256:aa",
+		Got:       "sha256:bb",
+	}
+	require.Contains(t, e.Error(), "svc-a")
+	require.Contains(t, e.Error(), "sha256:aa")
+	require.Contains(t, e.Error(), "sha256:bb")
+}
