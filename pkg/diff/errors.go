@@ -13,14 +13,6 @@ func (e *ErrManifestListUnselected) Error() string {
 	return fmt.Sprintf("image %q is a manifest list: re-run with --platform os/arch[/variant]", e.Ref)
 }
 
-// ErrUnsupportedSchemaVersion is returned when a sidecar's version is not
-// recognized by the current reader.
-type ErrUnsupportedSchemaVersion struct{ Got string }
-
-func (e *ErrUnsupportedSchemaVersion) Error() string {
-	return fmt.Sprintf("unsupported sidecar version %q (this build supports v1)", e.Got)
-}
-
 // ErrSidecarSchema wraps a sidecar JSON decoding or validation failure.
 type ErrSidecarSchema struct{ Reason string }
 
@@ -77,6 +69,34 @@ func (e *ErrIntraLayerAssemblyMismatch) Error() string {
 		e.Digest, e.Got)
 }
 
+// ErrBaselineBlobDigestMismatch reports that a baseline-served blob's
+// computed sha256 did not match the digest the sidecar expected. Bytes
+// are never written to the output when this fires.
+type ErrBaselineBlobDigestMismatch struct {
+	ImageName string
+	Digest    string
+	Got       string
+}
+
+func (e *ErrBaselineBlobDigestMismatch) Error() string {
+	return fmt.Sprintf("image %q: baseline blob %s has digest %s",
+		e.ImageName, e.Digest, e.Got)
+}
+
+// ErrShippedBlobDigestMismatch reports that a bundle-shipped blob's
+// computed sha256 did not match the digest recorded in the sidecar.
+// This indicates bundle corruption or a writer bug.
+type ErrShippedBlobDigestMismatch struct {
+	ImageName string
+	Digest    string
+	Got       string
+}
+
+func (e *ErrShippedBlobDigestMismatch) Error() string {
+	return fmt.Sprintf("image %q: shipped blob %s has digest %s",
+		e.ImageName, e.Digest, e.Got)
+}
+
 // ErrBaselineMissingPatchRef is the patch-specific sibling of
 // ErrBaselineMissingBlob. Raised when a shipped layer with encoding=patch
 // names a patch_from_digest that is absent from the provided baseline.
@@ -94,4 +114,74 @@ type ErrIntraLayerUnsupported struct{ Reason string }
 
 func (e *ErrIntraLayerUnsupported) Error() string {
 	return fmt.Sprintf("intra-layer mode unsupported: %s", e.Reason)
+}
+
+type ErrPhase1Archive struct{ GotFeature string }
+
+func (e *ErrPhase1Archive) Error() string {
+	if e.GotFeature == "" {
+		return "archive uses Phase 1 schema (feature marker missing); re-export with the current diffah"
+	}
+	return fmt.Sprintf("archive uses Phase 1 schema (feature=%q); re-export with the current diffah", e.GotFeature)
+}
+
+type ErrUnknownBundleVersion struct{ Got string }
+
+func (e *ErrUnknownBundleVersion) Error() string {
+	return fmt.Sprintf("unknown bundle version %q (this build supports %q)", e.Got, SchemaVersionV1)
+}
+
+type ErrInvalidBundleFormat struct{ Cause error }
+
+func (e *ErrInvalidBundleFormat) Error() string {
+	return fmt.Sprintf("invalid bundle format: %v", e.Cause)
+}
+
+func (e *ErrInvalidBundleFormat) Unwrap() error { return e.Cause }
+
+type ErrMultiImageNeedsNamedBaselines struct{ N int }
+
+func (e *ErrMultiImageNeedsNamedBaselines) Error() string {
+	return fmt.Sprintf(
+		"archive contains %d images; multi-image import requires --baseline NAME=PATH or --baseline-spec",
+		e.N)
+}
+
+type ErrBaselineNameUnknown struct {
+	Name      string
+	Available []string
+}
+
+func (e *ErrBaselineNameUnknown) Error() string {
+	return fmt.Sprintf("baseline name %q not in bundle (available: %v)", e.Name, e.Available)
+}
+
+type ErrBaselineMismatch struct{ Name, Expected, Got string }
+
+func (e *ErrBaselineMismatch) Error() string {
+	return fmt.Sprintf("wrong baseline for %q: manifest digest mismatch (expected %s, got %s)", e.Name, e.Expected, e.Got)
+}
+
+type ErrBaselineMissing struct{ Names []string }
+
+func (e *ErrBaselineMissing) Error() string {
+	return fmt.Sprintf("strict mode: missing baselines for %v", e.Names)
+}
+
+type ErrInvalidBundleSpec struct {
+	Path   string
+	Reason string
+}
+
+func (e *ErrInvalidBundleSpec) Error() string {
+	if e.Path != "" {
+		return fmt.Sprintf("invalid bundle spec %q: %s", e.Path, e.Reason)
+	}
+	return fmt.Sprintf("invalid bundle spec: %s", e.Reason)
+}
+
+type ErrDuplicateBundleName struct{ Name string }
+
+func (e *ErrDuplicateBundleName) Error() string {
+	return fmt.Sprintf("duplicate bundle image name %q", e.Name)
 }

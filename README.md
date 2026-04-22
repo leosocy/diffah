@@ -11,16 +11,17 @@ that actually changed travel.
 
 ## How it works
 
-**Producer side** — `diffah export` reads the target image and the baseline
-manifest, computes which layers are new, and packages only the new blobs plus
-the target manifest and config into a portable `.tar` along with a sidecar
-(`diffah.json`) describing which blobs the consumer must resolve from its
-local baseline.
+**Producer side** — `diffah export` reads one or more target images paired
+with their baselines, computes which layers are new, and packages only the
+unique blobs plus each target's manifest and config into a portable `.tar`
+along with a sidecar (`diffah.json`) describing which blobs the consumer must
+resolve from its local baselines. A content-addressed blob pool deduplicates
+layers, manifests, and configs across images — shared blobs are stored once.
 
 **Consumer side** — `diffah import` extracts the delta, opens the local
-baseline image, verifies every required baseline blob is reachable
-(fail-fast), then reconstructs the full target image by overlaying the delta
-over the baseline and writing the result in the requested format.
+baseline images, verifies every required baseline blob is reachable
+(fail-fast), then reconstructs each target image by overlaying the delta
+blobs over the baseline and writing the result in the requested format.
 
 ## How diffah picks baselines for intra-layer patches
 
@@ -48,24 +49,64 @@ go install -tags containers_image_openpgp github.com/leosocy/diffah@latest
 
 ## Usage
 
-Produce a delta archive from two image references:
+### Single-image delta
+
+Produce a delta archive from a baseline and target:
 
 ```bash
 diffah export \
-  --target   docker://registry.example.com/app:v2 \
-  --baseline docker://registry.example.com/app:v1 \
+  --pair app=v1.tar,v2.tar \
   --platform linux/amd64 \
-  --output   ./app_v1_to_v2.tar
+  ./app_v1_to_v2.tar
 ```
 
 Reconstruct the full image on the consumer side:
 
 ```bash
 diffah import \
-  --delta    ./app_v1_to_v2.tar \
-  --baseline docker://registry.internal/app:v1 \
-  --output   ./app_v2.tar
+  --baseline app=v1.tar \
+  ./app_v1_to_v2.tar \
+  ./out/
+# output at ./out/app.tar
 ```
+
+### Multi-image bundle
+
+Package multiple image deltas into a single deduplicated bundle:
+
+```bash
+diffah export \
+  --pair svc-a=v1a.tar,v2a.tar \
+  --pair svc-b=v1b.tar,v2b.tar \
+  --platform linux/amd64 \
+  ./bundle.tar
+```
+
+Import every image from the bundle in one command:
+
+```bash
+diffah import \
+  --baseline svc-a=v1a.tar \
+  --baseline svc-b=v1b.tar \
+  ./bundle.tar \
+  ./out/
+# output at ./out/svc-a.tar and ./out/svc-b.tar
+```
+
+`OUTPUT` is always a directory. Per-image output lands at
+`OUTPUT/<name>.tar` for archive output formats, or `OUTPUT/<name>/` for
+`--output-format dir`.
+
+### Using spec files
+
+For complex bundles, use a JSON spec file instead of repeating `--pair`:
+
+```bash
+diffah export --bundle bundle.json ./bundle.tar
+diffah import --baseline-spec baselines.json ./bundle.tar ./output.tar
+```
+
+### Output format
 
 By default `--output-format` is `auto`: the output format is chosen to
 match the source image's manifest media type so the reconstructed bytes
@@ -78,46 +119,63 @@ source) triggers a manifest media-type conversion, which changes every
 layer and manifest digest. diffah refuses this by default; pass
 `--allow-convert` to acknowledge the digest drift.
 
+### Inspect and dry-run
+
 Preview what a delta contains and how much it saves:
 
 ```bash
-diffah inspect ./app_v1_to_v2.tar
+diffah inspect ./bundle.tar
 ```
 
 Sample inspect output:
 
 ```
-archive: ./app_v1_to_v2.tar
+archive: ./bundle.tar
 version: v1
+feature: bundle
+tool: diffah
+tool_version: 0.3.0
 platform: linux/amd64
-target manifest digest: sha256:ef053f...
-baseline manifest digest: sha256:937a56...
-shipped: 1 blobs (2076 bytes)
-required: 1 blobs (34332 bytes)
-saved 94.3% vs full image
+images: 2
+blobs: 5 (full: 4, patch: 1)
+avg patch ratio: 12.3%
+total archive: 123456 bytes
+patch savings: 87654 bytes (41.5% vs full)
+
+--- image: svc-a ---
+  target manifest digest: sha256:ef053f... (application/vnd.oci.image.manifest.v1+json)
+  baseline manifest digest: sha256:937a56... (application/vnd.oci.image.manifest.v1+json)
+  baseline source: svc-a-baseline
 ```
 
 Verify baseline reachability without writing anything:
 
 ```bash
-diffah export --dry-run --target ... --baseline ... --output /dev/null
-diffah import --dry-run --delta ... --baseline ... --output /dev/null
+diffah export --dry-run --pair app=v1.tar,v2.tar ./bundle.tar
+diffah import --dry-run --baseline app=v1.tar ./bundle.tar ./output.tar
+```
+
+### Strict mode
+
+By default, `diffah import` skips images whose baselines are not provided.
+Pass `--strict` to require all baselines:
+
+```bash
+diffah import --strict \
+  --baseline svc-a=v1a.tar \
+  --baseline svc-b=v1b.tar \
+  ./bundle.tar ./output.tar
 ```
 
 ## Supported transports
 
-Both `--target` and `--baseline` accept any `containers-image` transport:
+Both baseline and target paths accept local archive files (OCI or Docker
+schema 2 format):
 
-| Transport        | Example                                            |
-|------------------|----------------------------------------------------|
-| `docker`         | `docker://registry.example.com/app:v1`             |
-| `docker-archive` | `docker-archive:./app-v1.tar`                      |
-| `oci-archive`    | `oci-archive:./app-v1.tar`                         |
-| `dir`            | `dir:/var/images/app-v1/`                          |
-
-Additionally, `--baseline-manifest` accepts a path to a standalone
-`manifest.json` for cases where the original baseline image is no longer
-available but its manifest digest set is known.
+| Format           | Example            |
+|------------------|--------------------|
+| OCI archive      | `./app-v1.tar`     |
+| Docker archive   | `./app-v1.tar`     |
 
 ## Design
 

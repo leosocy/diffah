@@ -1,8 +1,9 @@
 package diff
 
 import (
+	"bytes"
 	"encoding/json"
-	"strings"
+	"io"
 	"testing"
 	"time"
 
@@ -10,212 +11,204 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func validSidecar() Sidecar {
+const (
+	testCodecZstdPatch  = "zstd-patch"
+	testPatchFromDigest = digest.Digest("sha256:bb")
+)
+
+func minimalValidBundle(t *testing.T) Sidecar {
+	t.Helper()
 	return Sidecar{
-		Version:     "v1",
-		Tool:        "diffah",
-		ToolVersion: "v0.1.0",
-		CreatedAt:   time.Date(2026, 4, 20, 13, 21, 0, 0, time.UTC),
-		Platform:    "linux/amd64",
-		Target: ImageRef{
-			ManifestDigest: digest.Digest("sha256:aaa"),
-			ManifestSize:   1234,
-			MediaType:      "application/vnd.docker.distribution.manifest.v2+json",
+		Version: SchemaVersionV1, Feature: FeatureBundle, Tool: "diffah",
+		ToolVersion: "test", CreatedAt: time.Date(2026, 4, 20, 0, 0, 0, 0, time.UTC),
+		Platform: "linux/amd64",
+		Blobs: map[digest.Digest]BlobEntry{
+			"sha256:aa": {Size: 5, MediaType: "application/vnd.oci.image.manifest.v1+json",
+				Encoding: EncodingFull, ArchiveSize: 5},
 		},
-		Baseline: BaselineRef{
-			ManifestDigest: digest.Digest("sha256:bbb"),
-			MediaType:      "application/vnd.docker.distribution.manifest.v2+json",
-			SourceHint:     "docker://x/y:v1",
-		},
-		RequiredFromBaseline: []BlobRef{{Digest: "sha256:ccc", Size: 10, MediaType: "m"}},
-		ShippedInDelta: []BlobRef{{
-			Digest:      "sha256:eee",
-			Size:        20,
-			MediaType:   "m",
-			Encoding:    EncodingFull,
-			ArchiveSize: 20,
+		Images: []ImageEntry{{
+			Name:     "service-a",
+			Baseline: BaselineRef{ManifestDigest: testPatchFromDigest, MediaType: "application/vnd.oci.image.manifest.v1+json"},
+			Target:   TargetRef{ManifestDigest: "sha256:aa", ManifestSize: 5, MediaType: "application/vnd.oci.image.manifest.v1+json"},
 		}},
 	}
 }
 
-func TestSidecar_MarshalUnmarshalRoundTrip(t *testing.T) {
-	orig := validSidecar()
-
-	raw, err := orig.Marshal()
+func TestSidecar_Marshal_MinimalValidBundle(t *testing.T) {
+	s := minimalValidBundle(t)
+	out, err := s.Marshal()
 	require.NoError(t, err)
-	require.Contains(t, string(raw), `"version": "v1"`)
-
-	back, err := ParseSidecar(raw)
-	require.NoError(t, err)
-	require.Equal(t, orig, *back)
+	require.Contains(t, string(out), `"feature": "bundle"`)
+	require.Contains(t, string(out), `"name": "service-a"`)
 }
 
-func TestParseSidecar_RejectsUnknownVersion(t *testing.T) {
-	s := validSidecar()
-	s.Version = "v99"
-	raw, err := s.Marshal()
-	require.NoError(t, err)
-
-	_, err = ParseSidecar(raw)
-	var ve *ErrUnsupportedSchemaVersion
-	require.ErrorAs(t, err, &ve)
-	require.Equal(t, "v99", ve.Got)
-}
-
-func TestSidecar_MarshalRejectsMissingPlatform(t *testing.T) {
-	s := validSidecar()
-	s.Platform = ""
-
-	_, err := s.Marshal()
-	var se *ErrSidecarSchema
-	require.ErrorAs(t, err, &se)
-}
-
-func TestParseSidecar_RejectsMissingRequiredFields(t *testing.T) {
-	cases := map[string]func(s *Sidecar){
-		"no platform":       func(s *Sidecar) { s.Platform = "" },
-		"no target digest":  func(s *Sidecar) { s.Target.ManifestDigest = "" },
-		"no required slice": func(s *Sidecar) { s.RequiredFromBaseline = nil },
+func TestSidecar_Validate_RejectsMalformed(t *testing.T) {
+	cases := []struct {
+		name   string
+		mut    func(*Sidecar)
+		reason string
+	}{
+		{"empty platform", func(s *Sidecar) { s.Platform = "" }, "platform"},
+		{"nil blobs", func(s *Sidecar) { s.Blobs = nil }, "blobs"},
+		{"empty images", func(s *Sidecar) { s.Images = nil }, "images"},
+		{"bad name", func(s *Sidecar) { s.Images[0].Name = "-leading" }, "name"},
+		{"duplicate name", func(s *Sidecar) {
+			dup := s.Images[0]
+			s.Images = append(s.Images, dup)
+		}, "unique"},
+		{"target digest not in blobs", func(s *Sidecar) {
+			s.Images[0].Target.ManifestDigest = "sha256:ff"
+		}, "blobs"},
+		{"full blob with codec", func(s *Sidecar) {
+			e := s.Blobs["sha256:aa"]
+			e.Codec = testCodecZstdPatch
+			s.Blobs["sha256:aa"] = e
+		}, "codec"},
+		{"full blob with patch_from_digest", func(s *Sidecar) {
+			e := s.Blobs["sha256:aa"]
+			e.PatchFromDigest = testPatchFromDigest
+			s.Blobs["sha256:aa"] = e
+		}, "codec"},
+		{"full blob archive_size != size", func(s *Sidecar) {
+			e := s.Blobs["sha256:aa"]
+			e.ArchiveSize = 99
+			s.Blobs["sha256:aa"] = e
+		}, "archive_size"},
+		{"patch blob missing codec", func(s *Sidecar) {
+			e := s.Blobs["sha256:aa"]
+			e.Encoding = EncodingPatch
+			e.PatchFromDigest = testPatchFromDigest
+			e.ArchiveSize = 2
+			e.Size = 5
+			s.Blobs["sha256:aa"] = e
+		}, "codec"},
+		{"patch blob missing patch_from_digest", func(s *Sidecar) {
+			e := s.Blobs["sha256:aa"]
+			e.Encoding = EncodingPatch
+			e.Codec = testCodecZstdPatch
+			e.ArchiveSize = 2
+			e.Size = 5
+			s.Blobs["sha256:aa"] = e
+		}, "patch_from_digest"},
+		{"patch blob archive_size >= size", func(s *Sidecar) {
+			e := s.Blobs["sha256:aa"]
+			e.Encoding = EncodingPatch
+			e.Codec = testCodecZstdPatch
+			e.PatchFromDigest = testPatchFromDigest
+			e.ArchiveSize = 5
+			e.Size = 5
+			s.Blobs["sha256:aa"] = e
+		}, "archive_size"},
+		{"patch blob archive_size <= 0", func(s *Sidecar) {
+			e := s.Blobs["sha256:aa"]
+			e.Encoding = EncodingPatch
+			e.Codec = testCodecZstdPatch
+			e.PatchFromDigest = testPatchFromDigest
+			e.ArchiveSize = 0
+			e.Size = 5
+			s.Blobs["sha256:aa"] = e
+		}, "archive_size"},
+		{"empty encoding", func(s *Sidecar) {
+			e := s.Blobs["sha256:aa"]
+			e.Encoding = ""
+			s.Blobs["sha256:aa"] = e
+		}, "not recognized"},
+		{"missing target manifest_digest", func(s *Sidecar) {
+			s.Images[0].Target.ManifestDigest = ""
+		}, "manifest_digest"},
+		{"missing baseline manifest_digest", func(s *Sidecar) {
+			s.Images[0].Baseline.ManifestDigest = ""
+		}, "manifest_digest"},
 	}
-	for name, mutate := range cases {
-		t.Run(name, func(t *testing.T) {
-			s := validSidecar()
-			// Skip Marshal validation by encoding directly.
-			mutate(&s)
-			raw, err := json.Marshal(s)
-			require.NoError(t, err)
-
-			_, err = ParseSidecar(raw)
-			var se *ErrSidecarSchema
-			require.ErrorAs(t, err, &se)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := minimalValidBundle(t)
+			tc.mut(&s)
+			_, err := s.Marshal()
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tc.reason)
 		})
 	}
 }
 
-func TestParseSidecar_RejectsMalformedJSON(t *testing.T) {
-	_, err := ParseSidecar([]byte("not json"))
-	require.Error(t, err)
-	require.True(t, strings.Contains(err.Error(), "decode"))
+func TestParseSidecar_RejectsPhase1(t *testing.T) {
+	_, err := ParseSidecar([]byte(`{"version":"v1","tool":"diffah"}`))
+	var p1 *ErrPhase1Archive
+	require.ErrorAs(t, err, &p1)
 }
 
-func TestSidecar_MarshalIsPrettyPrinted(t *testing.T) {
-	s := validSidecar()
-	raw, err := s.Marshal()
+func TestParseSidecar_RejectsUnknownVersion(t *testing.T) {
+	_, err := ParseSidecar([]byte(`{"version":"v9","feature":"bundle","tool":"diffah","platform":"linux/amd64","blobs":{},"images":[]}`))
+	var uv *ErrUnknownBundleVersion
+	require.ErrorAs(t, err, &uv)
+}
+
+func TestParseSidecar_RejectsInvalidJSON(t *testing.T) {
+	_, err := ParseSidecar([]byte(`{bad`))
+	var ibf *ErrInvalidBundleFormat
+	require.ErrorAs(t, err, &ibf)
+}
+
+func TestSidecar_Marshal_DeterministicOrder(t *testing.T) {
+	s := minimalValidBundle(t)
+	s.Blobs["sha256:cc"] = BlobEntry{Size: 3, MediaType: "text/plain",
+		Encoding: EncodingFull, ArchiveSize: 3}
+	s.Blobs[testPatchFromDigest] = BlobEntry{Size: 4, MediaType: "text/plain",
+		Encoding: EncodingFull, ArchiveSize: 4}
+
+	first, err := s.Marshal()
 	require.NoError(t, err)
-	require.True(t, json.Valid(raw))
-	require.Contains(t, string(raw), "\n  ")
-}
-
-// --- Intra-layer validation tests (Task 2) ---
-
-func validSidecarWithEncoding() Sidecar {
-	s := validSidecar()
-	s.ShippedInDelta = []BlobRef{
-		{
-			Digest:      "sha256:eee",
-			Size:        20,
-			MediaType:   "m",
-			Encoding:    EncodingFull,
-			ArchiveSize: 20,
-		},
-	}
-	return s
-}
-
-func TestSidecar_Rejects_ShippedEntry_MissingEncoding(t *testing.T) {
-	s := validSidecarWithEncoding()
-	s.ShippedInDelta[0].Encoding = ""
-	_, err := s.Marshal()
-	var ve *ErrSidecarSchema
-	require.ErrorAs(t, err, &ve)
-	require.Contains(t, err.Error(), "encoding")
-}
-
-func TestSidecar_Rejects_PatchEntry_MissingFromDigest(t *testing.T) {
-	s := validSidecarWithEncoding()
-	s.ShippedInDelta[0] = BlobRef{
-		Digest: "sha256:eee", Size: 20, MediaType: "m",
-		Encoding:    EncodingPatch,
-		Codec:       "zstd-patch",
-		ArchiveSize: 5,
-		// PatchFromDigest intentionally empty
-	}
-	_, err := s.Marshal()
-	var ve *ErrSidecarSchema
-	require.ErrorAs(t, err, &ve)
-	require.Contains(t, err.Error(), "patch_from_digest")
-}
-
-func TestSidecar_Rejects_PatchEntry_MissingCodec(t *testing.T) {
-	s := validSidecarWithEncoding()
-	s.ShippedInDelta[0] = BlobRef{
-		Digest: "sha256:eee", Size: 20, MediaType: "m",
-		Encoding:        EncodingPatch,
-		PatchFromDigest: "sha256:ref",
-		ArchiveSize:     5,
-	}
-	_, err := s.Marshal()
-	var ve *ErrSidecarSchema
-	require.ErrorAs(t, err, &ve)
-	require.Contains(t, err.Error(), "codec")
-}
-
-func TestSidecar_Rejects_PatchEntry_ArchiveSize_NotLessThanSize(t *testing.T) {
-	s := validSidecarWithEncoding()
-	s.ShippedInDelta[0] = BlobRef{
-		Digest: "sha256:eee", Size: 20, MediaType: "m",
-		Encoding:        EncodingPatch,
-		Codec:           "zstd-patch",
-		PatchFromDigest: "sha256:ref",
-		ArchiveSize:     20, // must be < Size for patch entries
-	}
-	_, err := s.Marshal()
-	var ve *ErrSidecarSchema
-	require.ErrorAs(t, err, &ve)
-	require.Contains(t, err.Error(), "archive_size")
-}
-
-func TestSidecar_Rejects_FullEntry_Has_PatchFromDigest(t *testing.T) {
-	s := validSidecarWithEncoding()
-	s.ShippedInDelta[0].PatchFromDigest = "sha256:ref"
-	_, err := s.Marshal()
-	var ve *ErrSidecarSchema
-	require.ErrorAs(t, err, &ve)
-}
-
-func TestSidecar_Rejects_FullEntry_Archive_NotEqualSize(t *testing.T) {
-	s := validSidecarWithEncoding()
-	s.ShippedInDelta[0].ArchiveSize = 19
-	_, err := s.Marshal()
-	var ve *ErrSidecarSchema
-	require.ErrorAs(t, err, &ve)
-}
-
-func TestSidecar_Rejects_RequiredEntry_HasIntraLayerFields(t *testing.T) {
-	s := validSidecarWithEncoding()
-	s.RequiredFromBaseline[0].Encoding = EncodingFull
-	_, err := s.Marshal()
-	var ve *ErrSidecarSchema
-	require.ErrorAs(t, err, &ve)
-	require.Contains(t, err.Error(), "required_from_baseline")
-}
-
-func TestSidecar_PatchEntry_MarshalsCorrectly(t *testing.T) {
-	s := validSidecarWithEncoding()
-	s.ShippedInDelta[0] = BlobRef{
-		Digest: "sha256:eee", Size: 1000, MediaType: "m",
-		Encoding:        EncodingPatch,
-		Codec:           "zstd-patch",
-		PatchFromDigest: "sha256:ref",
-		ArchiveSize:     123,
-	}
-	raw, err := s.Marshal()
+	second, err := s.Marshal()
 	require.NoError(t, err)
-	require.Contains(t, string(raw), `"encoding": "patch"`)
-	require.Contains(t, string(raw), `"codec": "zstd-patch"`)
-	require.Contains(t, string(raw), `"patch_from_digest": "sha256:ref"`)
-	require.Contains(t, string(raw), `"archive_size": 123`)
+	require.Equal(t, first, second, "marshal must be deterministic")
 
-	// Required entry has none of the four fields in the JSON output.
-	require.NotContains(t, string(raw), `"encoding": ""`)
+	order := orderOfTopLevelBlobsKeys(t, first)
+	require.Equal(t, []string{"sha256:aa", "sha256:bb", "sha256:cc"}, order)
+}
+
+func TestSidecar_RoundTrip_PreservesAllFields(t *testing.T) {
+	original := minimalValidBundle(t)
+	raw, err := original.Marshal()
+	require.NoError(t, err)
+	parsed, err := ParseSidecar(raw)
+	require.NoError(t, err)
+	require.Equal(t, original, *parsed)
+}
+
+func orderOfTopLevelBlobsKeys(t *testing.T, raw []byte) []string {
+	t.Helper()
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	var keys []string
+	depth := 0
+	inBlobs := false
+	for {
+		tok, err := dec.Token()
+		if err == io.EOF {
+			break
+		}
+		require.NoError(t, err)
+		switch v := tok.(type) {
+		case json.Delim:
+			switch v {
+			case '{':
+				depth++
+			case '}':
+				if inBlobs && depth == 2 {
+					return keys
+				}
+				depth--
+			}
+		case string:
+			if depth == 1 && v == "blobs" {
+				inBlobs = true
+				continue
+			}
+			if inBlobs && depth == 2 {
+				keys = append(keys, v)
+				var discard BlobEntry
+				_ = dec.Decode(&discard)
+			}
+		}
+	}
+	return keys
 }
