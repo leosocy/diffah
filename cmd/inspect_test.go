@@ -10,7 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/leosocy/diffah/pkg/diff"
-	"github.com/leosocy/diffah/pkg/importer"
 )
 
 func buildInspectTestDelta(t *testing.T) string {
@@ -85,13 +84,8 @@ func TestPrintBundleSidecar_PerImageStats(t *testing.T) {
 		},
 	}
 
-	report := importer.DryRunReport{
-		RequiresZstd:  true,
-		ZstdAvailable: true,
-	}
-
 	var buf bytes.Buffer
-	err := printBundleSidecar(&buf, "/tmp/bundle.tar", s, report)
+	err := printBundleSidecar(&buf, "/tmp/bundle.tar", s, true, true)
 	require.NoError(t, err)
 
 	out := buf.String()
@@ -170,7 +164,7 @@ func TestRunInspect_BundleSidecar_ParsesDirectly(t *testing.T) {
 	require.NoError(t, perr, "ParseSidecar should succeed on bundle JSON")
 
 	var buf bytes.Buffer
-	err = printBundleSidecar(&buf, "/tmp/bundle.tar", parsed, importer.DryRunReport{})
+	err = printBundleSidecar(&buf, "/tmp/bundle.tar", parsed, false, false)
 	require.NoError(t, err)
 	require.Contains(t, buf.String(), "feature: bundle")
 	require.Contains(t, buf.String(), "--- image: svc ---")

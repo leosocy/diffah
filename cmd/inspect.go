@@ -8,8 +8,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/leosocy/diffah/internal/archive"
+	"github.com/leosocy/diffah/internal/zstdpatch"
 	"github.com/leosocy/diffah/pkg/diff"
-	"github.com/leosocy/diffah/pkg/importer"
 )
 
 func newInspectCommand() *cobra.Command {
@@ -41,11 +41,9 @@ func runInspect(cmd *cobra.Command, args []string) error {
 		}
 		return err
 	}
-	report, err := importer.DryRun(cmd.Context(), importer.Options{DeltaPath: args[0]})
-	if err != nil {
-		return err
-	}
-	return printBundleSidecar(cmd.OutOrStdout(), args[0], s, report)
+	requiresZstd := s.RequiresZstd()
+	zstdAvailable, _ := zstdpatch.Available(cmd.Context())
+	return printBundleSidecar(cmd.OutOrStdout(), args[0], s, requiresZstd, zstdAvailable)
 }
 
 type bundleStats struct {
@@ -69,7 +67,7 @@ func collectBundleStats(s *diff.Sidecar) bundleStats {
 	return bs
 }
 
-func printBundleSidecar(w io.Writer, path string, s *diff.Sidecar, report importer.DryRunReport) error {
+func printBundleSidecar(w io.Writer, path string, s *diff.Sidecar, requiresZstd, zstdAvailable bool) error {
 	bs := collectBundleStats(s)
 
 	fmt.Fprintf(w, "archive: %s\n", path)
@@ -86,8 +84,8 @@ func printBundleSidecar(w io.Writer, path string, s *diff.Sidecar, report import
 		fmt.Fprintf(w, "avg patch ratio: %.1f%%\n", avgRatio)
 	}
 	fmt.Fprintf(w, "total archive: %d bytes\n", bs.totalArchiveSize)
-	fmt.Fprintf(w, "intra-layer patches required: %s\n", yesNo(report.RequiresZstd))
-	fmt.Fprintf(w, "zstd available: %s\n", yesNo(report.ZstdAvailable))
+	fmt.Fprintf(w, "intra-layer patches required: %s\n", yesNo(requiresZstd))
+	fmt.Fprintf(w, "zstd available: %s\n", yesNo(zstdAvailable))
 	if bs.patchCount > 0 {
 		savings := bs.patchOrigSize - bs.patchArchiveSize
 		savingsPct := float64(savings) / float64(bs.patchOrigSize) * 100
