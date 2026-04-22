@@ -72,18 +72,24 @@ func TestDecode_WrongReference(t *testing.T) {
 	}
 }
 
-// TestEncode_CtxCancellation_KillsSubprocess — a cancelled ctx must
-// kill the zstd subprocess instead of blocking until it completes.
-func TestEncode_CtxCancellation_KillsSubprocess(t *testing.T) {
+// TestEncode_PreCancelledCtx_ReturnsErrorIsCanceled — if the caller's
+// ctx is already cancelled when Encode is invoked, exec.CommandContext
+// refuses to spawn the subprocess and Encode's error chain surfaces
+// context.Canceled via the %w wrap in cli.go's encode error return.
+//
+// This test deliberately does NOT verify mid-flight subprocess kill —
+// that would require a goroutine + timing synchronization. It only
+// guarantees the pre-start cancellation path is wired correctly.
+func TestEncode_PreCancelledCtx_ReturnsErrorIsCanceled(t *testing.T) {
 	skipWithoutZstd(t)
-	// 64 MB target — big enough that zstd takes noticeable time.
-	ref := make([]byte, 1<<26)
-	_, _ = rand.Read(ref)
-	target := append([]byte(nil), ref...)
-	target[len(target)/2] ^= 0xFF
+	// Tiny payload — subprocess never spawns, so size doesn't matter.
+	// Empty target would hit the empty-frame short-circuit in Encode and
+	// bypass the CommandContext path entirely, so use one non-zero byte.
+	ref := []byte{0x00}
+	target := []byte{0x01}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // cancel before calling Encode
+	cancel()
 
 	_, err := Encode(ctx, ref, target)
 	require.ErrorIs(t, err, context.Canceled, "Encode must surface ctx cancellation")
