@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/leosocy/diffah/pkg/diff"
+	"github.com/leosocy/diffah/pkg/importer"
 )
 
 func buildInspectTestDelta(t *testing.T) string {
@@ -83,8 +84,13 @@ func TestPrintBundleSidecar_PerImageStats(t *testing.T) {
 		},
 	}
 
+	report := importer.DryRunReport{
+		RequiresZstd:  true,
+		ZstdAvailable: true,
+	}
+
 	var buf bytes.Buffer
-	err := printBundleSidecar(&buf, "/tmp/bundle.tar", s)
+	err := printBundleSidecar(&buf, "/tmp/bundle.tar", s, report)
 	require.NoError(t, err)
 
 	out := buf.String()
@@ -96,6 +102,8 @@ func TestPrintBundleSidecar_PerImageStats(t *testing.T) {
 	require.Contains(t, out, "total archive: 4500 bytes")
 	require.Contains(t, out, "avg patch ratio: 20.0%")
 	require.Contains(t, out, "patch savings: 4000 bytes (80.0% vs full)")
+	require.Contains(t, out, "intra-layer patches required: yes")
+	require.Contains(t, out, "zstd available: yes")
 
 	require.Contains(t, out, "--- image: service-a ---")
 	require.Contains(t, out, "target manifest digest: sha256:manifest-a")
@@ -161,7 +169,7 @@ func TestRunInspect_BundleSidecar_ParsesDirectly(t *testing.T) {
 	require.NoError(t, perr, "ParseSidecar should succeed on bundle JSON")
 
 	var buf bytes.Buffer
-	err = printBundleSidecar(&buf, "/tmp/bundle.tar", parsed)
+	err = printBundleSidecar(&buf, "/tmp/bundle.tar", parsed, importer.DryRunReport{})
 	require.NoError(t, err)
 	require.Contains(t, buf.String(), "feature: bundle")
 	require.Contains(t, buf.String(), "--- image: svc ---")

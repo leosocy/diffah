@@ -43,7 +43,7 @@ func newExportCommand() *cobra.Command {
 	f.StringVar(&exportFlags.bundle, "bundle", "", "path to bundle spec JSON")
 	f.StringVar(&exportFlags.platform, "platform", "linux/amd64", "target platform")
 	f.StringVar(&exportFlags.compress, "compress", "", "compression algorithm")
-	f.StringVar(&exportFlags.intraLayer, "intra-layer", "auto", "intra-layer diff mode (auto|off)")
+	f.StringVar(&exportFlags.intraLayer, "intra-layer", "auto", "intra-layer diff mode (auto|off|required)")
 	f.BoolVar(&exportFlags.dryRun, "dry-run", false, "show stats without writing")
 	return c
 }
