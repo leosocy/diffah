@@ -1,9 +1,12 @@
 package importer
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 
 	"github.com/opencontainers/go-digest"
 	"go.podman.io/image/v5/types"
@@ -54,7 +57,31 @@ func (s *bundleImageSource) LayerInfosForCopy(
 }
 
 func (s *bundleImageSource) GetBlob(
-	_ context.Context, _ types.BlobInfo, _ types.BlobInfoCache,
+	_ context.Context, info types.BlobInfo, _ types.BlobInfoCache,
 ) (io.ReadCloser, int64, error) {
-	return nil, 0, fmt.Errorf("GetBlob not implemented yet") // TASK-3
+	entry, ok := s.sidecar.Blobs[info.Digest]
+	if !ok {
+		return nil, 0, fmt.Errorf("baseline delegation not implemented yet") // TASK-5
+	}
+	switch entry.Encoding {
+	case diff.EncodingFull:
+		return s.serveFull(info.Digest)
+	case diff.EncodingPatch:
+		return nil, 0, fmt.Errorf("patch decode not implemented yet") // TASK-4
+	}
+	return nil, 0, fmt.Errorf("unknown encoding %q for blob %s", entry.Encoding, info.Digest)
+}
+
+func (s *bundleImageSource) serveFull(d digest.Digest) (io.ReadCloser, int64, error) {
+	path := filepath.Join(s.blobDir, d.Algorithm().String(), d.Encoded())
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, 0, fmt.Errorf("read full blob %s: %w", d, err)
+	}
+	if got := digest.FromBytes(data); got != d {
+		return nil, 0, &diff.ErrBaselineBlobDigestMismatch{
+			ImageName: s.imageName, Digest: d.String(), Got: got.String(),
+		}
+	}
+	return io.NopCloser(bytes.NewReader(data)), int64(len(data)), nil
 }
