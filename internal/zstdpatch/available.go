@@ -41,49 +41,42 @@ func newErrZstdBinaryMissing(reason string) error {
 // callers invoke Available at most once per top-level operation, so
 // process-wide caching isn't worth the concurrency hazard.
 func Available(ctx context.Context) (ok bool, reason string) {
-	return availableForTesting(ctx, exec.LookPath, runZstdVersion)
+	ok, _, reason = availableDetailForTesting(ctx, exec.LookPath, runZstdVersion)
+	return ok, reason
 }
 
 func AvailableDetail(ctx context.Context) (ok bool, detail string) {
-	path, err := exec.LookPath("zstd")
-	if err != nil {
-		return false, "zstd not on $PATH"
-	}
-	banner, err := runZstdVersion(ctx, path)
-	if err != nil {
-		return false, fmt.Sprintf("zstd --version failed: %v", err)
-	}
-	_, _, matched, err := parseZstdVersion(banner)
-	if err != nil {
-		return false, fmt.Sprintf("zstd --version parse failed: %v", err)
-	}
-	return true, fmt.Sprintf("%s via %s", matched, path)
+	ok, detail, _ = availableDetailForTesting(ctx, exec.LookPath, runZstdVersion)
+	return ok, detail
 }
 
-func availableForTesting(
+func availableDetailForTesting(
 	ctx context.Context,
 	lookup func(string) (string, error),
 	version func(context.Context, string) (string, error),
-) (ok bool, reason string) {
+) (ok bool, detail, reason string) {
 	path, err := lookup("zstd")
 	if err != nil {
 		log().Debug("zstd not on $PATH")
-		return false, "zstd not on $PATH"
+		return false, "zstd not on $PATH", "zstd not on $PATH"
 	}
 	banner, err := version(ctx, path)
 	if err != nil {
-		return false, fmt.Sprintf("zstd --version failed: %v", err)
+		r := fmt.Sprintf("zstd --version failed: %v", err)
+		return false, r, r
 	}
 	major, minor, matched, err := parseZstdVersion(banner)
 	if err != nil {
-		return false, fmt.Sprintf("zstd --version parse failed: %v", err)
+		r := fmt.Sprintf("zstd --version parse failed: %v", err)
+		return false, r, r
 	}
 	if major < 1 || (major == 1 && minor < 5) {
 		log().Debug("zstd version too old", "version", matched)
-		return false, fmt.Sprintf("zstd %s too old; need ≥1.5", matched)
+		r := fmt.Sprintf("zstd %s too old; need ≥1.5", matched)
+		return false, r, r
 	}
 	log().Debug("zstd available", "path", path, "version", matched)
-	return true, ""
+	return true, fmt.Sprintf("%s via %s", matched, path), ""
 }
 
 func runZstdVersion(ctx context.Context, path string) (string, error) {
