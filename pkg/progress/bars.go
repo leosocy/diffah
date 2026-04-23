@@ -10,10 +10,24 @@ import (
 	"github.com/vbauerster/mpb/v8/decor"
 )
 
+// NewBars returns a multi-bar reporter backed by mpb. If w is not a TTY,
+// mpb would swallow its output (cursor escapes are unsafe on a pipe/file),
+// so NewBars degrades to the line reporter — users that explicitly passed
+// --progress=bars into a non-TTY sink still see layer progress, just
+// without animation.
 func NewBars(w io.Writer) Reporter {
 	if w == nil {
 		return NewDiscard()
 	}
+	if !IsTTY(w) {
+		return NewLine(w)
+	}
+	return newBarsUnchecked(w)
+}
+
+// newBarsUnchecked constructs a bars reporter without a TTY check. Used by
+// NewAuto, which has already consulted IsTTY + NO_COLOR + CI before calling.
+func newBarsUnchecked(w io.Writer) Reporter {
 	p := mpb.New(
 		mpb.WithOutput(w),
 		mpb.WithRefreshRate(100*time.Millisecond),
