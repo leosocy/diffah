@@ -1,6 +1,10 @@
 package progress
 
-import "github.com/opencontainers/go-digest"
+import (
+	"io"
+
+	"github.com/opencontainers/go-digest"
+)
 
 type Reporter interface {
 	Phase(name string)
@@ -12,4 +16,8 @@ type Layer interface {
 	Written(n int64)
 	Done()
 	Fail(err error)
+}
+
+type SlogWriterProvider interface {
+	SlogWriter() io.Writer
 }

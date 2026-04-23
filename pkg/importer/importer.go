@@ -35,8 +35,9 @@ type Options struct {
 	OutputFormat     string
 	AllowConvert     bool
 	ProgressReporter progress.Reporter
-	Progress         io.Writer
-	Probe            func(context.Context) (bool, string)
+	// Deprecated: use ProgressReporter. Will be removed in v0.4.
+	Progress io.Writer
+	Probe    func(context.Context) (bool, string)
 }
 
 func (o *Options) reporter() progress.Reporter {

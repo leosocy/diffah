@@ -110,9 +110,9 @@ func statusLabel(status, detail string) string {
 		return "ok"
 	case statusWarn:
 		if detail != "" {
-			return "warn (" + detail + ")"
+			return statusWarn + " (" + detail + ")"
 		}
-		return "warn"
+		return statusWarn
 	case statusFail:
 		if detail != "" {
 			return "fail (" + detail + ")"

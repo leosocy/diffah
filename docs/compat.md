@@ -18,13 +18,6 @@ new env-level fallback being added). Exit code 0 for "success" never
 changes; we will not migrate a currently-2 error into a 3 without a
 major-version bump.
 
-**CLI edge case:** `cmd.Execute` remaps unclassified `CategoryInternal`
-errors to `CategoryUser` (exit 2) with the hint "run 'diffah --help' for
-usage", because an unclassified error from the CLI edge is almost always a
-user-input problem rather than a diffah bug. Exit code 1 is reserved for
-genuine internal bugs but is not currently produced by the CLI path;
-programmatic callers using `errs.Classify` directly may observe it.
-
 ## Sidecar schema version
 
 Sidecar field `version` (currently `v1`) is authoritative. Import-side
@@ -74,10 +67,10 @@ Every JSON response is a top-level envelope:
 {"schema_version": 1, "data": {...}}
 ```
 
-Error responses use the same envelope with the error payload under `data`:
+Error responses use a distinct envelope with the error payload under `error`:
 
 ```json
-{"schema_version": 1, "data": {"category": "...", "message": "...", "next_action": "..."}}
+{"schema_version": 1, "error": {"category": "...", "message": "...", "next_action": "..."}}
 ```
 
 Rules:

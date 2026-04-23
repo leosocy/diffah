@@ -7,23 +7,21 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"strings"
 )
 
-// Classify inspects err and returns its Category and an optional hint
-// describing a remediation step. If err is nil it returns
-// (CategoryInternal, ""). Errors that implement Categorized use their own
-// category; otherwise the function falls back to heuristics based on
-// standard-library error types (context, net, url, fs).
 func Classify(err error) (Category, string) {
 	if err == nil {
 		return CategoryInternal, ""
 	}
 	var cat Categorized
 	if errors.As(err, &cat) {
-		if adv, ok := cat.(Advised); ok {
-			return cat.Category(), adv.NextAction()
+		var adv Advised
+		hint := ""
+		if errors.As(err, &adv) {
+			hint = adv.NextAction()
 		}
-		return cat.Category(), ""
+		return cat.Category(), hint
 	}
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return CategoryEnvironment, "operation was cancelled or timed out"
@@ -45,5 +43,18 @@ func Classify(err error) (Category, string) {
 	if errors.Is(err, os.ErrPermission) || errors.Is(err, os.ErrNotExist) {
 		return CategoryEnvironment, "filesystem error"
 	}
+	if isCobraUserError(err) {
+		return CategoryUser, "run 'diffah --help' for usage"
+	}
 	return CategoryInternal, ""
+}
+
+func isCobraUserError(err error) bool {
+	msg := err.Error()
+	return strings.Contains(msg, "unknown command") ||
+		strings.Contains(msg, "unknown flag") ||
+		strings.Contains(msg, "unknown shorthand") ||
+		strings.Contains(msg, "required flag") ||
+		strings.Contains(msg, "flag needs an argument") ||
+		strings.Contains(msg, "bad flag syntax")
 }

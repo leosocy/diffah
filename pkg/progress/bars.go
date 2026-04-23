@@ -18,11 +18,12 @@ func NewBars(w io.Writer) Reporter {
 		mpb.WithOutput(w),
 		mpb.WithRefreshRate(100*time.Millisecond),
 	)
-	return &barsReporter{p: p}
+	return &barsReporter{p: p, underlying: w}
 }
 
 type barsReporter struct {
-	p *mpb.Progress
+	p          *mpb.Progress
+	underlying io.Writer
 }
 
 func (r *barsReporter) Phase(name string) {
@@ -49,6 +50,23 @@ func (r *barsReporter) StartLayer(d digest.Digest, total int64, enc string) Laye
 
 func (r *barsReporter) Finish() {
 	r.p.Wait()
+}
+
+func (r *barsReporter) SlogWriter() io.Writer {
+	return &slogWriter{p: r.p, fallback: r.underlying}
+}
+
+type slogWriter struct {
+	p        *mpb.Progress
+	fallback io.Writer
+}
+
+func (sw *slogWriter) Write(b []byte) (int, error) {
+	n, err := sw.p.Write(b)
+	if err != nil {
+		return sw.fallback.Write(b)
+	}
+	return n, nil
 }
 
 type barsLayer struct {

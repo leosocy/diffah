@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -40,24 +41,13 @@ func Execute(stderr io.Writer) int {
 		return 0
 	}
 	cat, hint := errs.Classify(err)
-	if cat == errs.CategoryInternal {
-		cat = errs.CategoryUser
-		hint = "run 'diffah --help' for usage"
-	}
 	renderError(stderr, cat, err, hint, outputFormatFlag())
 	return cat.ExitCode()
 }
 
 func renderError(w io.Writer, cat errs.Category, err error, hint, format string) {
 	if format == outputJSON {
-		errData := map[string]any{
-			"category": cat.String(),
-			"message":  err.Error(),
-		}
-		if hint != "" {
-			errData["next_action"] = hint
-		}
-		_ = writeJSON(w, errData)
+		_ = writeJSONError(w, cat.String(), err.Error(), hint)
 		return
 	}
 	fmt.Fprintf(w, "diffah: %s: %s\n", cat, err.Error())
@@ -92,14 +82,45 @@ func newProgressReporter(w io.Writer) progress.Reporter {
 	case "off":
 		return progress.NewDiscard()
 	case "bars":
-		return progress.NewBars(w)
+		r := progress.NewBars(w)
+		rewireSlogToBars(r, w)
+		return r
 	case "lines":
 		return progress.NewLine(w)
 	case "", "auto":
-		return progress.NewAuto(w)
+		r := progress.NewAuto(w)
+		rewireSlogToBars(r, w)
+		return r
 	default:
-		return progress.NewAuto(w)
+		r := progress.NewAuto(w)
+		rewireSlogToBars(r, w)
+		return r
 	}
+}
+
+func rewireSlogToBars(r progress.Reporter, _ io.Writer) {
+	sw, ok := r.(progress.SlogWriterProvider)
+	if !ok {
+		return
+	}
+	slogWriter := sw.SlogWriter()
+	opts := &slog.HandlerOptions{Level: parseLevel(currentLogLevel())}
+	h := pickHandler(slogWriter, currentLogFormat(), opts, false)
+	slog.SetDefault(slog.New(h))
+}
+
+func currentLogLevel() string {
+	if verbose {
+		return "debug"
+	}
+	if quiet {
+		return "warn"
+	}
+	return logLevel
+}
+
+func currentLogFormat() string {
+	return logFormat
 }
 
 func init() {

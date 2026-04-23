@@ -93,6 +93,7 @@ func TestRenderError_JSONFormat(t *testing.T) {
 	var parsed map[string]any
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &parsed))
 	require.Equal(t, float64(1), parsed["schema_version"])
-	data := parsed["data"].(map[string]any)
-	require.Equal(t, "user", data["category"])
+	errData := parsed["error"].(map[string]any)
+	require.Equal(t, "user", errData["category"])
+	require.Equal(t, "the supplied baseline has the wrong manifest digest", errData["next_action"])
 }

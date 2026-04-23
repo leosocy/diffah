@@ -20,7 +20,8 @@ type Options struct {
 	CreatedAt   time.Time
 
 	ProgressReporter progress.Reporter
-	Progress         io.Writer
+	// Deprecated: use ProgressReporter. Will be removed in v0.4.
+	Progress io.Writer
 
 	Probe Probe
 
