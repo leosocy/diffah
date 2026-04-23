@@ -1,5 +1,33 @@
 # Changelog
 
+## [Unreleased] — CLI redesign (skopeo-inspired)
+
+- **Removed:** `diffah export` and `diffah import`. Old invocations now
+  error with a migration hint pointing at the new verbs.
+- **Removed:** `--pair NAME=BASELINE,TARGET` and `--baseline NAME=PATH`
+  composite flags.
+- **Added:** `diffah diff BASELINE-IMAGE TARGET-IMAGE DELTA-OUT` — single
+  image delta.
+- **Added:** `diffah apply DELTA-IN BASELINE-IMAGE TARGET-OUT` — single
+  image reconstruction.
+- **Added:** `diffah bundle BUNDLE-SPEC DELTA-OUT` — multi-image bundle
+  driven by a JSON spec file (positional, not a flag).
+- **Added:** `diffah unbundle DELTA-IN BASELINE-SPEC OUTPUT-DIR` —
+  multi-image reconstruction driven by a JSON baseline spec.
+- **Changed:** image references on `*-IMAGE` positionals now require a
+  transport prefix (`docker-archive:` or `oci-archive:`). Bare paths
+  error with a "Did you mean" hint.
+- **Renamed:** global `--output text|json` → `--format text|json` (short
+  `-o`) to eliminate collision with positional OUTPUT / subcommand
+  `--image-format`.
+- **Renamed:** subcommand `--output-format docker-archive|oci-archive|dir`
+  → `--image-format` (scoped to `apply` / `unbundle`).
+- **Added:** short flags `-q` (`--quiet`), `-v` (`--verbose`), `-n`
+  (`--dry-run`).
+- **Added:** Arguments section in `--help` output with per-arg purpose
+  and accepted-transport list; error messages include usage line,
+  copy-paste-ready example, and a `Run '<cmd> --help'` pointer.
+
 ## [Unreleased] — Multi-image bundle support
 
 ### Breaking changes
