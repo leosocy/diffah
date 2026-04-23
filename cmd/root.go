@@ -87,7 +87,7 @@ func rewireSlogToBars(r progress.Reporter, tty bool) {
 	}
 	slogWriter := sw.SlogWriter()
 	opts := &slog.HandlerOptions{Level: parseLevel(currentLogLevel())}
-	h := pickHandler(slogWriter, currentLogFormat(), opts, tty)
+	h := pickHandler(slogWriter, logFormat, opts, tty)
 	slog.SetDefault(slog.New(h))
 }
 
@@ -99,10 +99,6 @@ func currentLogLevel() string {
 		return "warn"
 	}
 	return logLevel
-}
-
-func currentLogFormat() string {
-	return logFormat
 }
 
 func init() {
