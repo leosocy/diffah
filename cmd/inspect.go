@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -85,7 +86,7 @@ func printBundleSidecar(w io.Writer, path string, s *diff.Sidecar, requiresZstd,
 	fmt.Fprintf(w, "tool: %s\n", s.Tool)
 	fmt.Fprintf(w, "tool_version: %s\n", s.ToolVersion)
 	fmt.Fprintf(w, "platform: %s\n", s.Platform)
-	fmt.Fprintf(w, "created_at: %s\n", s.CreatedAt.Format("2006-01-02T15:04:05Z07:00"))
+	fmt.Fprintf(w, "created_at: %s\n", s.CreatedAt.Format(time.RFC3339))
 	fmt.Fprintf(w, "images: %d\n", len(s.Images))
 	fmt.Fprintf(w, "blobs: %d (full: %d, patch: %d)\n", len(s.Blobs), bs.fullCount, bs.patchCount)
 	if bs.patchCount > 0 && bs.patchOrigSize > 0 {
@@ -155,7 +156,7 @@ func inspectJSON(path string, s *diff.Sidecar, requiresZstd, zstdAvailable bool)
 		"tool":                s.Tool,
 		"tool_version":        s.ToolVersion,
 		"platform":            s.Platform,
-		"created_at":          s.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		"created_at":          s.CreatedAt.Format(time.RFC3339),
 		"images":              images,
 		"blobs":               blobs,
 		"total_archive_bytes": bs.totalArchiveSize,
