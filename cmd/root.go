@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 
 	"github.com/spf13/cobra"
 
@@ -12,7 +13,12 @@ import (
 
 var version = "dev"
 
-var logLevel string
+var (
+	logLevel  string
+	logFormat string
+	quiet     bool
+	verbose   bool
+)
 
 var rootCmd = &cobra.Command{
 	Use:   "diffah",
@@ -86,6 +92,22 @@ func outputFormatFlag() string {
 }
 
 func init() {
-	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", "info",
-		"log level: debug|info|warn|error")
+	pf := rootCmd.PersistentFlags()
+	pf.StringVar(&logLevel, "log-level", "info", "log level: debug|info|warn|error (env: DIFFAH_LOG_LEVEL)")
+	pf.StringVar(&logFormat, "log-format", "auto", "log format: auto|text|json (env: DIFFAH_LOG_FORMAT)")
+	pf.BoolVar(&quiet, "quiet", false, "suppress info logs and progress bars (level=warn)")
+	pf.BoolVar(&verbose, "verbose", false, "enable debug logs (level=debug)")
+
+	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, _ []string) error {
+		lvl := logLevel
+		if v := os.Getenv("DIFFAH_LOG_LEVEL"); v != "" && !cmd.Flags().Changed("log-level") {
+			lvl = v
+		}
+		logFmt := logFormat
+		if v := os.Getenv("DIFFAH_LOG_FORMAT"); v != "" && !cmd.Flags().Changed("log-format") {
+			logFmt = v
+		}
+		installLogger(cmd.ErrOrStderr(), lvl, logFmt, quiet, verbose)
+		return nil
+	}
 }
