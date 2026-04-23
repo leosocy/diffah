@@ -11,7 +11,7 @@ func NewAuto(w io.Writer) Reporter {
 	if w == nil {
 		return NewDiscard()
 	}
-	return newAutoFor(w, isTTYFd(w), !noColor(), os.Getenv("CI") == "true")
+	return newAutoFor(w, IsTTY(w), !noColor(), os.Getenv("CI") == "true")
 }
 
 func newAutoFor(w io.Writer, tty, color, ci bool) Reporter {
@@ -21,7 +21,8 @@ func newAutoFor(w io.Writer, tty, color, ci bool) Reporter {
 	return NewLine(w)
 }
 
-func isTTYFd(w io.Writer) bool {
+// IsTTY reports whether w is an *os.File pointing at a terminal or cygwin pty.
+func IsTTY(w io.Writer) bool {
 	f, ok := w.(*os.File)
 	if !ok {
 		return false

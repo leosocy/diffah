@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/mattn/go-isatty"
+	"github.com/leosocy/diffah/pkg/progress"
 )
 
 func pickHandler(w io.Writer, format string, opts *slog.HandlerOptions, tty bool) slog.Handler {
@@ -38,14 +38,6 @@ func parseLevel(s string) slog.Level {
 	return slog.LevelInfo
 }
 
-func isTTY(w io.Writer) bool {
-	f, ok := w.(*os.File)
-	if !ok {
-		return false
-	}
-	return isatty.IsTerminal(f.Fd()) || isatty.IsCygwinTerminal(f.Fd())
-}
-
 func installLogger(stderr io.Writer, levelFlag, formatFlag string, quiet, verbose bool) *slog.Logger {
 	level := parseLevel(levelFlag)
 	if verbose {
@@ -55,7 +47,7 @@ func installLogger(stderr io.Writer, levelFlag, formatFlag string, quiet, verbos
 		level = slog.LevelWarn
 	}
 	opts := &slog.HandlerOptions{Level: level}
-	tty := isTTY(stderr)
+	tty := progress.IsTTY(stderr)
 	h := pickHandler(stderr, formatFlag, opts, tty)
 	logger := slog.New(h)
 	slog.SetDefault(logger)
