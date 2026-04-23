@@ -41,7 +41,7 @@ func resolveOutputFormat(userFmt, sourceMime string, allowConvert bool) (string,
 			OutputFormat: userFmt,
 		}
 	default:
-		return "", fmt.Errorf("unknown --output-format %q", userFmt)
+		return "", &diff.ErrUnknownImageFormat{Got: userFmt}
 	}
 }
 

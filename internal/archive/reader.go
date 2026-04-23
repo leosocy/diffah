@@ -57,7 +57,7 @@ func Extract(archivePath, dest string) ([]byte, error) {
 	}
 
 	if sidecar == nil {
-		return nil, fmt.Errorf("archive %s missing %s", archivePath, diff.SidecarFilename)
+		return nil, &diff.ErrNotADiffahArchive{Path: archivePath}
 	}
 	log().Debug("extracted archive", "path", archivePath, "dest", dest)
 	return sidecar, nil
@@ -113,7 +113,7 @@ func ReadSidecar(archivePath string) ([]byte, error) {
 	for {
 		hdr, err := tr.Next()
 		if errors.Is(err, io.EOF) {
-			return nil, fmt.Errorf("archive %s missing %s", archivePath, diff.SidecarFilename)
+			return nil, &diff.ErrNotADiffahArchive{Path: archivePath}
 		}
 		if err != nil {
 			return nil, fmt.Errorf("read tar: %w", err)

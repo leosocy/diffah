@@ -313,6 +313,6 @@ func buildOutputRef(path, format string) (types.ImageReference, error) {
 		}
 		return directory.NewReference(path)
 	default:
-		return nil, fmt.Errorf("unknown --output-format %q", format)
+		return nil, &diff.ErrUnknownImageFormat{Got: format}
 	}
 }
