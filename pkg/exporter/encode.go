@@ -27,14 +27,18 @@ func encodeShipped(
 				continue
 			}
 			layer := rep.StartLayer(s.Digest, s.Size, string(s.Encoding))
-			layerBytes, err := readBlobBytes(ctx, p.TargetRef, s.Digest)
+			// The OCI-archive transport transparently decompresses tar+gzip
+			// layers on GetBlob, so the streamed byte count can exceed the
+			// manifest-declared s.Size. Cap progress reports to s.Size so the
+			// bar stops at 100 % instead of overshooting.
+			layerBytes, err := streamBlobBytes(ctx, p.TargetRef, s.Digest,
+				cappedWriter(s.Size, layer.Written))
 			if err != nil {
 				layer.Fail(err)
 				return fmt.Errorf("read shipped %s: %w", s.Digest, err)
 			}
 			if pool.refCount(s.Digest) > 1 || mode == modeOff {
 				pool.addIfAbsent(s.Digest, layerBytes, fullBlobEntry(s))
-				layer.Written(s.Size)
 				layer.Done()
 				continue
 			}
@@ -43,16 +47,30 @@ func encodeShipped(
 				log().Warn("patch encode failed, falling back to full",
 					"pair", p.Name, "digest", s.Digest, "err", err)
 				pool.addIfAbsent(s.Digest, layerBytes, fullBlobEntry(s))
-				layer.Written(s.Size)
 				layer.Done()
 				continue
 			}
 			pool.addIfAbsent(s.Digest, payload, blobEntryFromPlanner(entry))
-			layer.Written(entry.ArchiveSize)
 			layer.Done()
 		}
 	}
 	return nil
+}
+
+// cappedWriter returns an onChunk callback that forwards up to total bytes to
+// sink, clamping chunks that would cross the cap and dropping anything after.
+func cappedWriter(total int64, sink func(int64)) func(int64) {
+	remaining := total
+	return func(n int64) {
+		if remaining <= 0 {
+			return
+		}
+		if n > remaining {
+			n = remaining
+		}
+		sink(n)
+		remaining -= n
+	}
 }
 
 func blobEntryFromPlanner(entry diff.BlobRef) diff.BlobEntry {
