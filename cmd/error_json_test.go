@@ -14,7 +14,7 @@ import (
 
 func TestRenderError_JSON_UserCategory(t *testing.T) {
 	var buf bytes.Buffer
-	RenderError(&buf, &diff.ErrMultiImageNeedsNamedBaselines{N: 3}, "json")
+	classifyAndExit(&buf, &diff.ErrMultiImageNeedsNamedBaselines{N: 3}, "json")
 
 	var env jsonErrorEnvelope
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &env))
@@ -26,7 +26,7 @@ func TestRenderError_JSON_UserCategory(t *testing.T) {
 
 func TestRenderError_JSON_EnvironmentCategory(t *testing.T) {
 	var buf bytes.Buffer
-	RenderError(&buf, zstdpatch.ErrZstdBinaryMissing, "json")
+	classifyAndExit(&buf, zstdpatch.ErrZstdBinaryMissing, "json")
 
 	var env jsonErrorEnvelope
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &env))
@@ -36,7 +36,7 @@ func TestRenderError_JSON_EnvironmentCategory(t *testing.T) {
 
 func TestRenderError_JSON_ContentCategory(t *testing.T) {
 	var buf bytes.Buffer
-	RenderError(&buf, &diff.ErrDigestMismatch{Where: "blob", Want: "sha256:aa", Got: "sha256:bb"}, "json")
+	classifyAndExit(&buf, &diff.ErrDigestMismatch{Where: "blob", Want: "sha256:aa", Got: "sha256:bb"}, "json")
 
 	var env jsonErrorEnvelope
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &env))
@@ -45,7 +45,7 @@ func TestRenderError_JSON_ContentCategory(t *testing.T) {
 
 func TestRenderError_JSON_InternalCategory(t *testing.T) {
 	var buf bytes.Buffer
-	RenderError(&buf, errors.New("mystery"), "json")
+	classifyAndExit(&buf, errors.New("mystery"), "json")
 
 	var env jsonErrorEnvelope
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &env))
@@ -54,7 +54,7 @@ func TestRenderError_JSON_InternalCategory(t *testing.T) {
 
 func TestRenderError_JSON_TextFallback(t *testing.T) {
 	var buf bytes.Buffer
-	RenderError(&buf, &diff.ErrBaselineMismatch{Name: "x"}, "text")
+	classifyAndExit(&buf, &diff.ErrBaselineMismatch{Name: "x"}, "text")
 
 	out := buf.String()
 	require.Contains(t, out, "diffah: user:")
@@ -63,6 +63,6 @@ func TestRenderError_JSON_TextFallback(t *testing.T) {
 
 func TestRenderError_NilError(t *testing.T) {
 	var buf bytes.Buffer
-	RenderError(&buf, nil, "json")
+	classifyAndExit(&buf, nil, "json")
 	require.Empty(t, buf.String(), "nil error should produce no output")
 }

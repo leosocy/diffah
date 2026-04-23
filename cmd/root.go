@@ -36,12 +36,15 @@ full target image from any baseline source on the consuming side.`,
 }
 
 func Execute(stderr io.Writer) int {
-	err := rootCmd.Execute()
+	return classifyAndExit(stderr, rootCmd.Execute(), outputFormat)
+}
+
+func classifyAndExit(w io.Writer, err error, format string) int {
 	if err == nil {
 		return 0
 	}
 	cat, hint := errs.Classify(err)
-	renderError(stderr, cat, err, hint, outputFormatFlag())
+	renderError(w, cat, err, hint, format)
 	return cat.ExitCode()
 }
 
@@ -55,24 +58,6 @@ func renderError(w io.Writer, cat errs.Category, err error, hint, format string)
 		fmt.Fprintf(w, "  hint: %s\n", hint)
 	}
 }
-
-func ClassifyExitCode(err error) int {
-	if err == nil {
-		return 0
-	}
-	cat, _ := errs.Classify(err)
-	return cat.ExitCode()
-}
-
-func RenderError(w io.Writer, err error, format string) {
-	if err == nil {
-		return
-	}
-	cat, hint := errs.Classify(err)
-	renderError(w, cat, err, hint, format)
-}
-
-func outputFormatFlag() string { return outputFormat }
 
 func newProgressReporter(w io.Writer) progress.Reporter {
 	if quiet {

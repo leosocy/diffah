@@ -66,36 +66,38 @@ func TestExecute_SilentOnSuccess(t *testing.T) {
 		"no error path should write to the stderr sink")
 }
 
-func TestClassifyExitCode_UserError(t *testing.T) {
-	got := ClassifyExitCode(&diff.ErrBaselineMismatch{Name: "x"})
-	require.Equal(t, 2, got)
+func TestClassifyAndExit_UserError(t *testing.T) {
+	var buf bytes.Buffer
+	require.Equal(t, 2, classifyAndExit(&buf, &diff.ErrBaselineMismatch{Name: "x"}, "text"))
 }
 
-func TestClassifyExitCode_ContentError(t *testing.T) {
-	got := ClassifyExitCode(&diff.ErrDigestMismatch{Where: "blob", Want: "sha256:aa", Got: "sha256:bb"})
+func TestClassifyAndExit_ContentError(t *testing.T) {
+	var buf bytes.Buffer
+	got := classifyAndExit(&buf, &diff.ErrDigestMismatch{Where: "blob", Want: "sha256:aa", Got: "sha256:bb"}, "text")
 	require.Equal(t, 4, got)
 }
 
-func TestClassifyExitCode_NilError(t *testing.T) {
-	got := ClassifyExitCode(nil)
-	require.Equal(t, 0, got)
-}
-
-func TestClassifyExitCode_UnknownError(t *testing.T) {
-	got := ClassifyExitCode(errors.New("mysterious"))
-	require.Equal(t, 1, got)
-}
-
-func TestRenderError_TextFormat(t *testing.T) {
+func TestClassifyAndExit_NilError(t *testing.T) {
 	var buf bytes.Buffer
-	RenderError(&buf, &diff.ErrBaselineMismatch{Name: "x"}, "text")
+	require.Equal(t, 0, classifyAndExit(&buf, nil, "text"))
+	require.Empty(t, buf.String())
+}
+
+func TestClassifyAndExit_UnknownError(t *testing.T) {
+	var buf bytes.Buffer
+	require.Equal(t, 1, classifyAndExit(&buf, errors.New("mysterious"), "text"))
+}
+
+func TestClassifyAndExit_TextFormat(t *testing.T) {
+	var buf bytes.Buffer
+	classifyAndExit(&buf, &diff.ErrBaselineMismatch{Name: "x"}, "text")
 	require.Contains(t, buf.String(), "diffah: user:")
 	require.Contains(t, buf.String(), "hint:")
 }
 
-func TestRenderError_JSONFormat(t *testing.T) {
+func TestClassifyAndExit_JSONFormat(t *testing.T) {
 	var buf bytes.Buffer
-	RenderError(&buf, &diff.ErrBaselineMismatch{Name: "x"}, "json")
+	classifyAndExit(&buf, &diff.ErrBaselineMismatch{Name: "x"}, "json")
 	var parsed map[string]any
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &parsed))
 	require.Equal(t, float64(1), parsed["schema_version"])
