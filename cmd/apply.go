@@ -110,8 +110,11 @@ func runApply(cmd *cobra.Command, args []string) error {
 }
 
 // findSingleImageArtifact returns the path of the single image artifact
-// written into the scratch directory by importer.Import. Tolerates archive
-// (default.tar) and dir (default/) forms.
+// written into the scratch directory by importer.Import. The importer writes
+// per-image under its map key, which is hard-coded to "default" for
+// single-image apply, so only "default" (dir form) or "default.tar" (archive
+// form) are valid matches — match exactly rather than any ".tar" to avoid
+// silently picking up stray artifacts.
 func findSingleImageArtifact(dir string) (string, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -119,8 +122,7 @@ func findSingleImageArtifact(dir string) (string, error) {
 	}
 	for _, e := range entries {
 		name := e.Name()
-		if name == "default" || name == "default.tar" ||
-			filepath.Ext(name) == ".tar" {
+		if name == "default" || name == "default.tar" {
 			return filepath.Join(dir, name), nil
 		}
 	}
