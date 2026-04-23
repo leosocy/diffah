@@ -38,5 +38,5 @@ func TestInspectCommand_WithFixtures(t *testing.T) {
 	require.Contains(t, s, "images: 1")
 	require.Contains(t, s, "intra-layer patches required:")
 	require.Contains(t, s, "zstd available:")
-	require.Contains(t, s, "--- image: ")
+	require.Contains(t, s, "--- image: default ---")
 }
