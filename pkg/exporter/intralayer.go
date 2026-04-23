@@ -66,67 +66,79 @@ func NewPlanner(
 // Run returns the BlobRef entries to drop into the sidecar's shipped blobs and
 // the on-disk payload map. The payload under each digest is the bytes the
 // exporter should persist at `<deltaDir>/<digest.Encoded()>` before packing.
+//
+// Run loads each shipped target via readBlob before delegating to PlanShipped.
+// Encoder paths that already have target bytes in hand should call PlanShipped
+// directly — that way a single Planner instance fingerprints the baseline set
+// once across the whole pair instead of once per shipped layer.
 func (p *Planner) Run(
 	ctx context.Context, shipped []diff.BlobRef,
 ) ([]diff.BlobRef, map[digest.Digest][]byte, error) {
+	// Prime the baseline fingerprint cache unconditionally so callers that
+	// inspect baselineFP after an empty-shipped Run (existing contract) still
+	// see it populated.
 	p.ensureBaselineFP(ctx)
-	fp := p.fingerprint
-	if fp == nil {
-		fp = DefaultFingerprinter{}
-	}
 	entries := make([]diff.BlobRef, 0, len(shipped))
 	payloads := make(map[digest.Digest][]byte, len(shipped))
-
 	for _, l := range shipped {
 		target, err := p.readBlob(l.Digest)
 		if err != nil {
 			return nil, nil, fmt.Errorf("read target blob %s: %w", l.Digest, err)
 		}
-
-		// Target fingerprint failure is non-fatal; pickSimilar degrades to
-		// pickClosest when the first argument is nil.
-		targetFP, _ := fp.Fingerprint(ctx, l.MediaType, target)
-
-		bestRef, ok := p.pickSimilar(targetFP, l.Size)
-		if !ok {
-			// No baseline layers to diff against → always full.
-			entries = append(entries, fullEntry(l))
-			payloads[l.Digest] = target
-			continue
-		}
-
-		refBytes, err := p.readBlob(bestRef.Digest)
+		entry, payload, err := p.PlanShipped(ctx, l, target)
 		if err != nil {
-			return nil, nil, fmt.Errorf(
-				"read baseline reference %s: %w", bestRef.Digest, err)
+			return nil, nil, err
 		}
-
-		patch, err := zstdpatch.Encode(ctx, refBytes, target)
-		if err != nil {
-			return nil, nil, fmt.Errorf("encode patch %s: %w", l.Digest, err)
-		}
-		fullZst, err := zstdpatch.EncodeFull(target)
-		if err != nil {
-			return nil, nil, fmt.Errorf("encode full %s: %w", l.Digest, err)
-		}
-
-		if len(patch) < len(fullZst) && int64(len(patch)) < l.Size {
-			entries = append(entries, diff.BlobRef{
-				Digest:          l.Digest,
-				Size:            l.Size,
-				MediaType:       l.MediaType,
-				Encoding:        diff.EncodingPatch,
-				Codec:           CodecZstdPatch,
-				PatchFromDigest: bestRef.Digest,
-				ArchiveSize:     int64(len(patch)),
-			})
-			payloads[l.Digest] = patch
-			continue
-		}
-		entries = append(entries, fullEntry(l))
-		payloads[l.Digest] = target
+		entries = append(entries, entry)
+		payloads[l.Digest] = payload
 	}
 	return entries, payloads, nil
+}
+
+// PlanShipped decides the encoding (full vs patch) for a single shipped layer
+// whose target bytes are already in memory. The Planner's baseline fingerprint
+// cache is shared across calls, so an encoder loop can reuse one Planner per
+// pair and pay the baseline-fingerprinting cost only once.
+func (p *Planner) PlanShipped(
+	ctx context.Context, s diff.BlobRef, target []byte,
+) (diff.BlobRef, []byte, error) {
+	p.ensureBaselineFP(ctx)
+	fp := p.fingerprint
+	if fp == nil {
+		fp = DefaultFingerprinter{}
+	}
+	// Target fingerprint failure is non-fatal; pickSimilar degrades to
+	// pickClosest when the first argument is nil.
+	targetFP, _ := fp.Fingerprint(ctx, s.MediaType, target)
+	bestRef, ok := p.pickSimilar(targetFP, s.Size)
+	if !ok {
+		return fullEntry(s), target, nil
+	}
+	refBytes, err := p.readBlob(bestRef.Digest)
+	if err != nil {
+		return diff.BlobRef{}, nil, fmt.Errorf(
+			"read baseline reference %s: %w", bestRef.Digest, err)
+	}
+	patch, err := zstdpatch.Encode(ctx, refBytes, target)
+	if err != nil {
+		return diff.BlobRef{}, nil, fmt.Errorf("encode patch %s: %w", s.Digest, err)
+	}
+	fullZst, err := zstdpatch.EncodeFull(target)
+	if err != nil {
+		return diff.BlobRef{}, nil, fmt.Errorf("encode full %s: %w", s.Digest, err)
+	}
+	if len(patch) < len(fullZst) && int64(len(patch)) < s.Size {
+		return diff.BlobRef{
+			Digest:          s.Digest,
+			Size:            s.Size,
+			MediaType:       s.MediaType,
+			Encoding:        diff.EncodingPatch,
+			Codec:           CodecZstdPatch,
+			PatchFromDigest: bestRef.Digest,
+			ArchiveSize:     int64(len(patch)),
+		}, patch, nil
+	}
+	return fullEntry(s), target, nil
 }
 
 // pickClosest returns the baseline layer whose size is closest to want,
