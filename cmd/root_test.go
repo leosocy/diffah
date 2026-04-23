@@ -20,6 +20,7 @@ func TestRootCommand_HasExpectedSubcommands(t *testing.T) {
 	require.True(t, names["import"], "import subcommand missing")
 	require.True(t, names["inspect"], "inspect subcommand missing")
 	require.True(t, names["version"], "version subcommand missing")
+	require.True(t, names["doctor"], "doctor subcommand missing")
 }
 
 func TestRootCommand_HelpListsSubcommands(t *testing.T) {
