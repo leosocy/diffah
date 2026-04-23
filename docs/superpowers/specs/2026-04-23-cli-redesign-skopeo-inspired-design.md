@@ -87,30 +87,34 @@ transport:path
 
 ### Supported transports (this iteration)
 
+The current library (`internal/imageio.OpenArchiveRef`) only handles tar archives for `*-IMAGE` input positionals. That limits input-side support to:
+
 | Transport         | Syntax                     | What it points to                               |
 |-------------------|----------------------------|-------------------------------------------------|
 | `docker-archive`  | `docker-archive:PATH`      | Tar produced by `docker save`                   |
 | `oci-archive`     | `oci-archive:PATH`         | Tar produced by `skopeo copy ... oci-archive:…` |
-| `oci`             | `oci:PATH[:TAG]`           | OCI layout directory                            |
-| `dir`             | `dir:PATH`                 | `skopeo copy ... dir:…` raw blob directory      |
+
+Output format for `apply` / `unbundle` is still chosen via `--image-format docker-archive|oci-archive|dir`; `dir` there means "write the reconstructed image as a directory". It does not mean "read a directory as a baseline" — that input transport is reserved below.
 
 ### Reserved for future phases (CLI rejects with a pointer)
 
-| Transport        | Status                                                |
-|------------------|-------------------------------------------------------|
-| `docker://`      | Reserved for registry-native transport (Phase 2).     |
-| `docker-daemon:` | Reserved for local docker daemon transport (Phase 2). |
+| Transport        | Status                                                        |
+|------------------|---------------------------------------------------------------|
+| `oci:`           | Reserved for OCI layout directory input (library extension).  |
+| `dir:`           | Reserved for raw blob directory input (library extension).    |
+| `docker://`      | Reserved for registry-native transport (Phase 2).             |
+| `docker-daemon:` | Reserved for local docker daemon transport (Phase 2).         |
 
 If a user supplies a reserved transport, the CLI produces:
 
 ```
 Error: transport 'docker://' is reserved but not yet implemented.
+
 Supported transports in this version:
-  docker-archive:PATH
-  oci-archive:PATH
-  oci:PATH[:TAG]
-  dir:PATH
-Tracking: see CHANGELOG / roadmap for registry support timeline.
+  docker-archive:PATH     # Docker tar archive (docker save)
+  oci-archive:PATH        # OCI tar archive (skopeo copy ... oci-archive:...)
+
+Tracking: see CHANGELOG / roadmap for expanded transport support.
 ```
 
 ### Strictness
@@ -278,15 +282,13 @@ Error: missing transport prefix for BASELINE-IMAGE: "/tmp/old.tar"
 Image references require a transport prefix. Supported transports:
   docker-archive:PATH     # Docker tar archive (docker save)
   oci-archive:PATH        # OCI tar archive (skopeo copy ... oci-archive:...)
-  oci:PATH[:TAG]          # OCI layout directory
-  dir:PATH                # Directory with raw blobs
 
 Did you mean:  docker-archive:/tmp/old.tar
 
 Run 'diffah diff --help' for examples.
 ```
 
-The "Did you mean" suggestion picks `docker-archive:` if the path looks like a file (filename ends with `.tar` / `.tgz` / `.tar.gz`); otherwise the hint lists both `oci:` and `dir:`. Pure lexical heuristic; no filesystem stat.
+The "Did you mean" suggestion is a pure lexical heuristic: if the path ends in `.tar` / `.tgz` / `.tar.gz` the hint is `docker-archive:<path>`; otherwise the hint omits the line and the user sees only the supported-transport list. No filesystem stat.
 
 ### 6.5 Unknown flag (cobra built-in, enabled)
 
@@ -314,7 +316,7 @@ When `-o json` is active, errors render as structured JSON (existing behavior pr
     "category": "user",
     "code": "missing_transport",
     "message": "missing transport prefix for BASELINE-IMAGE: \"/tmp/old.tar\"",
-    "supported_transports": ["docker-archive", "oci-archive", "oci", "dir"],
+    "supported_transports": ["docker-archive", "oci-archive"],
     "hint": "docker-archive:/tmp/old.tar"
   }
 }
