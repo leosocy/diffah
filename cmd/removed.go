@@ -49,9 +49,6 @@ type removedReplacement struct {
 }
 
 func removedErr(old string, replacements []removedReplacement) error {
-	// Align the verb column so the argument lists line up; align the args
-	// column so the "# note" trailers line up. Computed dynamically instead
-	// of baked-in spacing, which was previously inconsistent across rows.
 	var verbWidth, argsWidth int
 	for _, r := range replacements {
 		if len(r.verb) > verbWidth {

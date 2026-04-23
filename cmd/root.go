@@ -14,7 +14,10 @@ import (
 
 var version = "dev"
 
-const outputJSON = "json"
+const (
+	outputText = "text"
+	outputJSON = "json"
+)
 
 var (
 	logLevel     string
@@ -108,12 +111,12 @@ func init() {
 	pf.BoolVarP(&quiet, "quiet", "q", false, "suppress info logs and progress bars (level=warn)")
 	pf.BoolVarP(&verbose, "verbose", "v", false, "enable debug logs (level=debug)")
 	pf.StringVar(&progressMode, "progress", "auto", "progress output: auto|bars|lines|off")
-	pf.StringVarP(&outputFormat, "format", "o", "text",
+	pf.StringVarP(&outputFormat, "format", "o", outputText,
 		"rendering format: text|json (applies to inspect/dry-run/doctor and error output)")
 
 	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, _ []string) error {
 		switch outputFormat {
-		case "text", outputJSON:
+		case outputText, outputJSON:
 		default:
 			return &cliErr{
 				cat:  errs.CategoryUser,

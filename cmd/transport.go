@@ -66,12 +66,16 @@ func (e *cliErr) Error() string           { return e.msg }
 func (e *cliErr) Category() errs.Category { return e.cat }
 func (e *cliErr) NextAction() string      { return e.hint }
 
+func writeSupportedTransports(sb *strings.Builder) {
+	sb.WriteString("  docker-archive:PATH     # Docker tar archive (docker save)\n")
+	sb.WriteString("  oci-archive:PATH        # OCI tar archive (skopeo copy ... oci-archive:...)\n")
+}
+
 func newMissingTransportErr(argName, raw string) error {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "missing transport prefix for %s: %q\n\n", argName, raw)
 	sb.WriteString("Image references require a transport prefix. Supported transports:\n")
-	sb.WriteString("  docker-archive:PATH     # Docker tar archive (docker save)\n")
-	sb.WriteString("  oci-archive:PATH        # OCI tar archive (skopeo copy ... oci-archive:...)\n")
+	writeSupportedTransports(&sb)
 	hint := didYouMean(raw)
 	if hint != "" {
 		fmt.Fprintf(&sb, "\nDid you mean:  %s\n", hint)
@@ -83,9 +87,8 @@ func newReservedTransportErr(argName, prefix string) error {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "transport %q (in %s) is reserved but not yet implemented.\n\n", prefix, argName)
 	sb.WriteString("Supported transports in this version:\n")
-	sb.WriteString("  docker-archive:PATH     # Docker tar archive (docker save)\n")
-	sb.WriteString("  oci-archive:PATH        # OCI tar archive (skopeo copy ... oci-archive:...)\n\n")
-	sb.WriteString("Tracking: see CHANGELOG / roadmap for expanded transport support.\n")
+	writeSupportedTransports(&sb)
+	sb.WriteString("\nTracking: see CHANGELOG / roadmap for expanded transport support.\n")
 	return &cliErr{
 		cat:  errs.CategoryUser,
 		msg:  sb.String(),
@@ -96,8 +99,7 @@ func newReservedTransportErr(argName, prefix string) error {
 func newUnsupportedTransportErr(argName, prefix string) error {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "transport %q for %s is not supported. Supported transports:\n", prefix, argName)
-	sb.WriteString("  docker-archive:PATH     # Docker tar archive (docker save)\n")
-	sb.WriteString("  oci-archive:PATH        # OCI tar archive (skopeo copy ... oci-archive:...)\n")
+	writeSupportedTransports(&sb)
 	return &cliErr{
 		cat: errs.CategoryUser,
 		msg: sb.String(),
@@ -108,8 +110,7 @@ func newEmptyTransportPathErr(argName, prefix, raw string) error {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "transport %q for %s has empty path: %q\n\n", prefix, argName, raw)
 	sb.WriteString("Image references require both a transport prefix and a path. Supported transports:\n")
-	sb.WriteString("  docker-archive:PATH     # Docker tar archive (docker save)\n")
-	sb.WriteString("  oci-archive:PATH        # OCI tar archive (skopeo copy ... oci-archive:...)\n")
+	writeSupportedTransports(&sb)
 	return &cliErr{
 		cat:  errs.CategoryUser,
 		msg:  sb.String(),
