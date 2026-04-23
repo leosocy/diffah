@@ -51,8 +51,26 @@ func TestUnbundleCommand_BundleRoundTrip(t *testing.T) {
 	cmd.Dir = root
 	out, err = cmd.CombinedOutput()
 	require.NoError(t, err, string(out))
+	require.Contains(t, string(out), "wrote images to "+restored)
 
-	entries, err := os.ReadDir(restored)
+	// Artifact discovery: "app" (dir form) or "app.tar" (archive form).
+	var appPath string
+	for _, name := range []string{"app", "app.tar"} {
+		candidate := filepath.Join(restored, name)
+		if _, statErr := os.Stat(candidate); statErr == nil {
+			appPath = candidate
+			break
+		}
+	}
+	require.NotEmpty(t, appPath, "expected reconstructed 'app' artifact under %s", restored)
+
+	info, err := os.Stat(appPath)
 	require.NoError(t, err)
-	require.NotEmpty(t, entries, "expected at least one reconstructed image")
+	if info.IsDir() {
+		inner, err := os.ReadDir(appPath)
+		require.NoError(t, err)
+		require.NotEmpty(t, inner, "expected 'app' directory to have contents")
+	} else {
+		require.Greater(t, info.Size(), int64(0))
+	}
 }
