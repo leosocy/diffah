@@ -29,6 +29,6 @@
     "tool_version": "<V>",
     "total_archive_bytes": 2919,
     "version": "v1",
-    "zstd_available": true
+    "zstd_available": "<zstd>"
   }
 }

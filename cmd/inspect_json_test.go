@@ -192,6 +192,7 @@ func TestInspectJSON_Snapshot(t *testing.T) {
 func normalizeJSON(s string) string {
 	s = replaceFieldValue(s, "created_at", "<T>")
 	s = replaceFieldValue(s, "tool_version", "<V>")
+	s = replaceBoolField(s, "zstd_available", "<zstd>")
 	return s
 }
 
@@ -212,5 +213,26 @@ func replaceFieldValue(s, field, placeholder string) string {
 		if !strings.Contains(result[start+len(placeholder):], needle) {
 			return result
 		}
+	}
+}
+
+func replaceBoolField(s, field, placeholder string) string {
+	needle := `"` + field + `": `
+	var b strings.Builder
+	rest := s
+	for {
+		i := strings.Index(rest, needle)
+		if i < 0 {
+			b.WriteString(rest)
+			return b.String()
+		}
+		valueStart := i + len(needle)
+		valueEnd := valueStart
+		for valueEnd < len(rest) && rest[valueEnd] != ',' && rest[valueEnd] != '\n' && rest[valueEnd] != '}' {
+			valueEnd++
+		}
+		b.WriteString(rest[:valueStart])
+		b.WriteString(`"` + placeholder + `"`)
+		rest = rest[valueEnd:]
 	}
 }
