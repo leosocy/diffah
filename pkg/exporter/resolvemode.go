@@ -28,6 +28,7 @@ func resolveMode(
 		if ok {
 			return modeAuto, nil
 		}
+		log().Warn("intra-layer auto: zstd unavailable, disabling for this run", "reason", reason)
 		if warn != nil {
 			fmt.Fprintf(warn, "diffah: %s; disabling intra-layer for this run\n", reason)
 		}

@@ -51,6 +51,7 @@ func availableForTesting(
 ) (ok bool, reason string) {
 	path, err := lookup("zstd")
 	if err != nil {
+		log().Debug("zstd not on $PATH")
 		return false, "zstd not on $PATH"
 	}
 	banner, err := version(ctx, path)
@@ -62,8 +63,10 @@ func availableForTesting(
 		return false, fmt.Sprintf("zstd --version parse failed: %v", err)
 	}
 	if major < 1 || (major == 1 && minor < 5) {
+		log().Debug("zstd version too old", "version", matched)
 		return false, fmt.Sprintf("zstd %s too old; need ≥1.5", matched)
 	}
+	log().Debug("zstd available", "path", path, "version", matched)
 	return true, ""
 }
 

@@ -70,6 +70,7 @@ func buildBundle(ctx context.Context, opts *Options) (*builtBundle, error) {
 	if opts.CreatedAt.IsZero() {
 		opts.CreatedAt = time.Now().UTC()
 	}
+	log().InfoContext(ctx, "planning pairs", "count", len(opts.Pairs))
 	if opts.Progress != nil {
 		fmt.Fprintf(opts.Progress, "planning %d pairs...\n", len(opts.Pairs))
 	}
@@ -90,6 +91,7 @@ func buildBundle(ctx context.Context, opts *Options) (*builtBundle, error) {
 			pool.countShipped(s.Digest)
 		}
 	}
+	log().InfoContext(ctx, "planned pairs", "count", len(plans))
 	if opts.Progress != nil {
 		fmt.Fprintf(opts.Progress, "planned %d pairs\n", len(plans))
 	}
@@ -97,6 +99,7 @@ func buildBundle(ctx context.Context, opts *Options) (*builtBundle, error) {
 	if err := encodeShipped(ctx, pool, plans, effectiveMode, opts.fingerprinter, opts.Progress); err != nil {
 		return nil, fmt.Errorf("encode shipped layers: %w", err)
 	}
+	log().InfoContext(ctx, "encoded blobs", "count", len(pool.entries))
 	if opts.Progress != nil {
 		fmt.Fprintf(opts.Progress, "encoded %d blobs\n", len(pool.entries))
 	}
@@ -112,11 +115,12 @@ func Export(ctx context.Context, opts Options) error {
 	if err := writeBundleArchive(opts.OutputPath, sidecar, bb.pool); err != nil {
 		return fmt.Errorf("write archive: %w", err)
 	}
+	var archiveSize int64
+	for _, e := range sidecar.Blobs {
+		archiveSize += e.ArchiveSize
+	}
+	log().InfoContext(ctx, "exported bundle", "path", opts.OutputPath, "archive_bytes", archiveSize)
 	if opts.Progress != nil {
-		var archiveSize int64
-		for _, e := range sidecar.Blobs {
-			archiveSize += e.ArchiveSize
-		}
 		fmt.Fprintf(opts.Progress, "wrote %s (%d bytes)\n", opts.OutputPath, archiveSize)
 	}
 	return nil

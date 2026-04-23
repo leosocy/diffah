@@ -88,6 +88,7 @@ func Import(ctx context.Context, opts Options) error {
 	for _, img := range bundle.sidecar.Images {
 		rb, ok := resolvedByName[img.Name]
 		if !ok {
+			log().WarnContext(ctx, "skipped image: no baseline provided", "image", img.Name)
 			fmt.Fprintf(progress, "%s: skipped (no baseline provided)\n", img.Name)
 			skipped = append(skipped, img.Name)
 			continue
@@ -98,6 +99,8 @@ func Import(ctx context.Context, opts Options) error {
 		}
 		imported++
 	}
+	log().InfoContext(ctx, "import complete",
+		"imported", imported, "total", len(bundle.sidecar.Images), "skipped", skipped)
 	fmt.Fprintf(progress, "imported %d of %d images; skipped: %v\n",
 		imported, len(bundle.sidecar.Images), skipped)
 	return nil

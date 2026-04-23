@@ -27,5 +27,6 @@ func ReadDirManifest(dir string) ([]byte, string, error) {
 	if probe.MediaType == "" {
 		return nil, "", fmt.Errorf("manifest %s has empty mediaType", path)
 	}
+	log().Debug("read dir manifest", "path", path, "media_type", probe.MediaType)
 	return raw, probe.MediaType, nil
 }
