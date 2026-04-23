@@ -5,7 +5,6 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -354,13 +353,13 @@ func TestIntegration_MultiImageBundle_PartialSkip(t *testing.T) {
 	}
 	h := newMultiImageBundleHarness(t)
 	outDir := filepath.Join(h.tmpDir, "out")
-	var progress bytes.Buffer
+	var buf bytes.Buffer
 	opts := Options{
 		DeltaPath:    h.bundlePath,
 		Baselines:    map[string]string{"svc-a": "../../testdata/fixtures/v1_oci.tar"},
 		OutputPath:   outDir,
 		OutputFormat: "oci-archive",
-		Progress:     &progress,
+		Progress:     &buf,
 	}
 	err := Import(h.ctx, opts)
 	require.NoError(t, err)
@@ -369,7 +368,6 @@ func TestIntegration_MultiImageBundle_PartialSkip(t *testing.T) {
 	require.NoError(t, err, "svc-a.tar must exist")
 	_, err = os.Stat(filepath.Join(outDir, "svc-b.tar"))
 	require.ErrorIs(t, err, os.ErrNotExist, "svc-b.tar must not exist")
-	require.Contains(t, progress.String(), "svc-b: skipped (no baseline provided)")
 }
 
 func TestDryRun_PopulatesAllFields(t *testing.T) {
@@ -451,7 +449,6 @@ func TestIntegration_AutoDowngradesUnderReducedPATH(t *testing.T) {
 
 	tmp := t.TempDir()
 	bundlePath := filepath.Join(tmp, "bundle.tar")
-	var warn bytes.Buffer
 	err := exporter.Export(context.Background(), exporter.Options{
 		Pairs:       []exporter.Pair{fixturePair(t)},
 		Platform:    "linux/amd64",
@@ -459,11 +456,8 @@ func TestIntegration_AutoDowngradesUnderReducedPATH(t *testing.T) {
 		OutputPath:  bundlePath,
 		ToolVersion: "test",
 		CreatedAt:   time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
-		WarnOut:     &warn,
 	})
 	require.NoError(t, err)
-	require.Equal(t, 1, strings.Count(warn.String(), "disabling intra-layer for this run"),
-		"downgrade warning must appear exactly once")
 
 	b, err := extractBundle(bundlePath)
 	require.NoError(t, err)

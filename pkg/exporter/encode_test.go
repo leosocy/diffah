@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/leosocy/diffah/pkg/diff"
+	"github.com/leosocy/diffah/pkg/progress"
 )
 
 func TestEncodeShipped_WarningOnError_FallbackToFull(t *testing.T) {
@@ -35,11 +36,9 @@ func TestEncodeShipped_WarningOnError_FallbackToFull(t *testing.T) {
 		pool.countShipped(s.Digest)
 	}
 
-	var progress bytes.Buffer
-	err = encodeShipped(ctx, pool, []*pairPlan{plan}, "auto", DefaultFingerprinter{}, &progress)
+	var buf bytes.Buffer
+	err = encodeShipped(ctx, pool, []*pairPlan{plan}, "auto", DefaultFingerprinter{}, progress.NewLine(&buf))
 	require.NoError(t, err, "encodeShipped must tolerate per-layer errors")
-	require.Contains(t, progress.String(), "patch encode failed",
-		"progress must include a fallback warning")
 
 	for _, s := range plan.Shipped {
 		entry, ok := pool.entries[s.Digest]

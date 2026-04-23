@@ -3,16 +3,16 @@ package exporter
 import (
 	"context"
 	"fmt"
-	"io"
 
 	"github.com/opencontainers/go-digest"
 
 	"github.com/leosocy/diffah/pkg/diff"
+	"github.com/leosocy/diffah/pkg/progress"
 )
 
 func encodeShipped(
 	ctx context.Context, pool *blobPool, pairs []*pairPlan,
-	mode string, fp Fingerprinter, progress io.Writer,
+	mode string, fp Fingerprinter, _ progress.Reporter,
 ) error {
 	for _, p := range pairs {
 		for _, s := range p.Shipped {
@@ -31,11 +31,6 @@ func encodeShipped(
 			if err != nil {
 				log().Warn("patch encode failed, falling back to full",
 					"pair", p.Name, "digest", s.Digest, "err", err)
-				if progress != nil {
-					fmt.Fprintf(progress,
-						"warning: %s: patch encode failed for %s (%v), falling back to full\n",
-						p.Name, s.Digest, err)
-				}
 				pool.addIfAbsent(s.Digest, layerBytes, fullBlobEntry(s))
 				continue
 			}

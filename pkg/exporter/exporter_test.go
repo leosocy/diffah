@@ -1,7 +1,6 @@
 package exporter_test
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -88,7 +87,6 @@ func TestExport_RequiredMode_FailsWhenProbeMissing(t *testing.T) {
 
 func TestExport_AutoMode_DowngradesSilentlyWhenProbeMissing(t *testing.T) {
 	tmp := t.TempDir()
-	var warn bytes.Buffer
 	opts := exporter.Options{
 		Pairs:       []exporter.Pair{{Name: "a", BaselinePath: "../../testdata/fixtures/v1_oci.tar", TargetPath: "../../testdata/fixtures/v2_oci.tar"}},
 		Platform:    "linux/amd64",
@@ -96,11 +94,9 @@ func TestExport_AutoMode_DowngradesSilentlyWhenProbeMissing(t *testing.T) {
 		OutputPath:  filepath.Join(tmp, "bundle.tar"),
 		ToolVersion: "test",
 		Probe:       func(context.Context) (bool, string) { return false, "zstd not on $PATH" },
-		WarnOut:     &warn,
 	}
 	err := exporter.Export(context.Background(), opts)
 	require.NoError(t, err)
-	require.Contains(t, warn.String(), "disabling intra-layer for this run")
 	requireAllFullEncoding(t, opts.OutputPath)
 }
 

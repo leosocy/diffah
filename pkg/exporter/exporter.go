@@ -4,10 +4,10 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"time"
 
 	"github.com/leosocy/diffah/internal/zstdpatch"
+	"github.com/leosocy/diffah/pkg/progress"
 )
 
 type Options struct {
@@ -18,12 +18,20 @@ type Options struct {
 	ToolVersion string
 	IntraLayer  string
 	CreatedAt   time.Time
-	Progress    io.Writer
 
-	Probe   Probe
-	WarnOut io.Writer
+	ProgressReporter progress.Reporter
+	Progress         io.Writer
+
+	Probe Probe
 
 	fingerprinter Fingerprinter
+}
+
+func (o *Options) reporter() progress.Reporter {
+	if o.ProgressReporter != nil {
+		return o.ProgressReporter
+	}
+	return progress.FromWriter(o.Progress)
 }
 
 func (o *Options) defaultedProbe() Probe {
@@ -31,13 +39,6 @@ func (o *Options) defaultedProbe() Probe {
 		return o.Probe
 	}
 	return zstdpatch.Available
-}
-
-func (o *Options) defaultedWarnOut() io.Writer {
-	if o.WarnOut != nil {
-		return o.WarnOut
-	}
-	return os.Stderr
 }
 
 type DryRunStats struct {
@@ -63,7 +64,7 @@ func buildBundle(ctx context.Context, opts *Options) (*builtBundle, error) {
 		return nil, err
 	}
 	effectiveMode, err := resolveMode(
-		ctx, opts.IntraLayer, opts.defaultedProbe(), opts.defaultedWarnOut())
+		ctx, opts.IntraLayer, opts.defaultedProbe())
 	if err != nil {
 		return nil, err
 	}
@@ -71,9 +72,7 @@ func buildBundle(ctx context.Context, opts *Options) (*builtBundle, error) {
 		opts.CreatedAt = time.Now().UTC()
 	}
 	log().InfoContext(ctx, "planning pairs", "count", len(opts.Pairs))
-	if opts.Progress != nil {
-		fmt.Fprintf(opts.Progress, "planning %d pairs...\n", len(opts.Pairs))
-	}
+	opts.reporter().Phase("planning")
 
 	plans := make([]*pairPlan, 0, len(opts.Pairs))
 	pool := newBlobPool()
@@ -92,21 +91,17 @@ func buildBundle(ctx context.Context, opts *Options) (*builtBundle, error) {
 		}
 	}
 	log().InfoContext(ctx, "planned pairs", "count", len(plans))
-	if opts.Progress != nil {
-		fmt.Fprintf(opts.Progress, "planned %d pairs\n", len(plans))
-	}
 
-	if err := encodeShipped(ctx, pool, plans, effectiveMode, opts.fingerprinter, opts.Progress); err != nil {
+	if err := encodeShipped(ctx, pool, plans, effectiveMode, opts.fingerprinter, opts.reporter()); err != nil {
 		return nil, fmt.Errorf("encode shipped layers: %w", err)
 	}
 	log().InfoContext(ctx, "encoded blobs", "count", len(pool.entries))
-	if opts.Progress != nil {
-		fmt.Fprintf(opts.Progress, "encoded %d blobs\n", len(pool.entries))
-	}
+	opts.reporter().Phase("encoded")
 	return &builtBundle{plans: plans, pool: pool}, nil
 }
 
 func Export(ctx context.Context, opts Options) error {
+	defer opts.reporter().Finish()
 	bb, err := buildBundle(ctx, &opts)
 	if err != nil {
 		return err
@@ -120,9 +115,7 @@ func Export(ctx context.Context, opts Options) error {
 		archiveSize += e.ArchiveSize
 	}
 	log().InfoContext(ctx, "exported bundle", "path", opts.OutputPath, "archive_bytes", archiveSize)
-	if opts.Progress != nil {
-		fmt.Fprintf(opts.Progress, "wrote %s (%d bytes)\n", opts.OutputPath, archiveSize)
-	}
+	opts.reporter().Phase("done")
 	return nil
 }
 

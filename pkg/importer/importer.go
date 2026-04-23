@@ -18,6 +18,7 @@ import (
 
 	"github.com/leosocy/diffah/internal/zstdpatch"
 	"github.com/leosocy/diffah/pkg/diff"
+	"github.com/leosocy/diffah/pkg/progress"
 )
 
 const (
@@ -27,14 +28,22 @@ const (
 )
 
 type Options struct {
-	DeltaPath    string
-	Baselines    map[string]string
-	Strict       bool
-	OutputPath   string
-	OutputFormat string
-	AllowConvert bool
-	Progress     io.Writer
-	Probe        func(context.Context) (bool, string)
+	DeltaPath        string
+	Baselines        map[string]string
+	Strict           bool
+	OutputPath       string
+	OutputFormat     string
+	AllowConvert     bool
+	ProgressReporter progress.Reporter
+	Progress         io.Writer
+	Probe            func(context.Context) (bool, string)
+}
+
+func (o *Options) reporter() progress.Reporter {
+	if o.ProgressReporter != nil {
+		return o.ProgressReporter
+	}
+	return progress.FromWriter(o.Progress)
 }
 
 func (o *Options) probeOrDefault() func(context.Context) (bool, string) {
@@ -45,6 +54,7 @@ func (o *Options) probeOrDefault() func(context.Context) (bool, string) {
 }
 
 func Import(ctx context.Context, opts Options) error {
+	defer opts.reporter().Finish()
 	bundle, err := extractBundle(opts.DeltaPath)
 	if err != nil {
 		return err
@@ -73,10 +83,8 @@ func Import(ctx context.Context, opts Options) error {
 		return fmt.Errorf("mkdir output %s: %w", opts.OutputPath, err)
 	}
 
-	progress := opts.Progress
-	if progress == nil {
-		progress = io.Discard
-	}
+	rep := opts.reporter()
+	rep.Phase("extracting")
 
 	resolvedByName := make(map[string]resolvedBaseline, len(resolved))
 	for _, r := range resolved {
@@ -89,7 +97,6 @@ func Import(ctx context.Context, opts Options) error {
 		rb, ok := resolvedByName[img.Name]
 		if !ok {
 			log().WarnContext(ctx, "skipped image: no baseline provided", "image", img.Name)
-			fmt.Fprintf(progress, "%s: skipped (no baseline provided)\n", img.Name)
 			skipped = append(skipped, img.Name)
 			continue
 		}
@@ -101,8 +108,7 @@ func Import(ctx context.Context, opts Options) error {
 	}
 	log().InfoContext(ctx, "import complete",
 		"imported", imported, "total", len(bundle.sidecar.Images), "skipped", skipped)
-	fmt.Fprintf(progress, "imported %d of %d images; skipped: %v\n",
-		imported, len(bundle.sidecar.Images), skipped)
+	rep.Phase("done")
 	return nil
 }
 
