@@ -35,6 +35,12 @@ func runInspect(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		var p1 *diff.ErrPhase1Archive
 		if errors.As(err, &p1) {
+			if outputFormat == outputJSON {
+				return writeJSON(cmd.OutOrStdout(), map[string]any{
+					"feature":         "phase1",
+					"recommended_fix": "re-export with current diffah",
+				})
+			}
 			fmt.Fprintln(cmd.OutOrStdout(), "This archive uses the Phase 1 (single-image) schema.")
 			fmt.Fprintln(cmd.OutOrStdout(), "Re-export with the current diffah to use the bundle format.")
 			return nil
@@ -43,6 +49,9 @@ func runInspect(cmd *cobra.Command, args []string) error {
 	}
 	requiresZstd := s.RequiresZstd()
 	zstdAvailable, _ := zstdpatch.Available(cmd.Context())
+	if outputFormat == outputJSON {
+		return writeJSON(cmd.OutOrStdout(), inspectJSON(args[0], s, requiresZstd, zstdAvailable))
+	}
 	return printBundleSidecar(cmd.OutOrStdout(), args[0], s, requiresZstd, zstdAvailable)
 }
 
@@ -108,4 +117,58 @@ func yesNo(b bool) string {
 		return "yes"
 	}
 	return "no"
+}
+
+func inspectJSON(path string, s *diff.Sidecar, requiresZstd, zstdAvailable bool) any {
+	bs := collectBundleStats(s)
+	images := make([]map[string]any, 0, len(s.Images))
+	for _, img := range s.Images {
+		entry := map[string]any{
+			"name": img.Name,
+			"target": map[string]any{
+				"manifest_digest": img.Target.ManifestDigest.String(),
+				"media_type":      img.Target.MediaType,
+			},
+			"baseline": map[string]any{
+				"manifest_digest": img.Baseline.ManifestDigest.String(),
+				"media_type":      img.Baseline.MediaType,
+			},
+		}
+		if img.Baseline.SourceHint != "" {
+			entry["baseline"].(map[string]any)["source_hint"] = img.Baseline.SourceHint
+		}
+		images = append(images, entry)
+	}
+	blobs := map[string]any{
+		"total":       len(s.Blobs),
+		"full_count":  bs.fullCount,
+		"patch_count": bs.patchCount,
+	}
+	if bs.patchCount > 0 {
+		blobs["full_bytes"] = bs.totalArchiveSize - bs.patchArchiveSize
+		blobs["patch_bytes"] = bs.patchArchiveSize
+	}
+	result := map[string]any{
+		"archive":             path,
+		"version":             s.Version,
+		"feature":             s.Feature,
+		"tool":                s.Tool,
+		"tool_version":        s.ToolVersion,
+		"platform":            s.Platform,
+		"created_at":          s.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		"images":              images,
+		"blobs":               blobs,
+		"total_archive_bytes": bs.totalArchiveSize,
+		"requires_zstd":       requiresZstd,
+		"zstd_available":      zstdAvailable,
+	}
+	if bs.patchCount > 0 && bs.patchOrigSize > 0 {
+		savings := bs.patchOrigSize - bs.patchArchiveSize
+		savingsPct := float64(savings) / float64(bs.patchOrigSize) * 100
+		result["patch_savings"] = map[string]any{
+			"bytes": savings,
+			"ratio": savingsPct / 100,
+		}
+	}
+	return result
 }

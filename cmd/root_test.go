@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -88,6 +89,9 @@ func TestRenderError_TextFormat(t *testing.T) {
 func TestRenderError_JSONFormat(t *testing.T) {
 	var buf bytes.Buffer
 	RenderError(&buf, &diff.ErrBaselineMismatch{Name: "x"}, "json")
-	require.Contains(t, buf.String(), `"category":"user"`)
-	require.Contains(t, buf.String(), `"schema_version":1`)
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &parsed))
+	require.Equal(t, float64(1), parsed["schema_version"])
+	data := parsed["data"].(map[string]any)
+	require.Equal(t, "user", data["category"])
 }

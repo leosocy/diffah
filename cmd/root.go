@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -14,12 +13,15 @@ import (
 
 var version = "dev"
 
+const outputJSON = "json"
+
 var (
 	logLevel     string
 	logFormat    string
 	quiet        bool
 	verbose      bool
 	progressMode string
+	outputFormat string
 )
 
 var rootCmd = &cobra.Command{
@@ -47,21 +49,15 @@ func Execute(stderr io.Writer) int {
 }
 
 func renderError(w io.Writer, cat errs.Category, err error, hint, format string) {
-	if format == "json" {
-		payload := struct {
-			SchemaVersion int `json:"schema_version"`
-			Error         struct {
-				Category   string `json:"category"`
-				Message    string `json:"message"`
-				NextAction string `json:"next_action,omitempty"`
-			} `json:"error"`
-		}{SchemaVersion: 1}
-		payload.Error.Category = cat.String()
-		payload.Error.Message = err.Error()
-		payload.Error.NextAction = hint
-		enc := json.NewEncoder(w)
-		enc.SetEscapeHTML(false)
-		_ = enc.Encode(payload)
+	if format == outputJSON {
+		errData := map[string]any{
+			"category": cat.String(),
+			"message":  err.Error(),
+		}
+		if hint != "" {
+			errData["next_action"] = hint
+		}
+		_ = writeJSON(w, errData)
 		return
 	}
 	fmt.Fprintf(w, "diffah: %s: %s\n", cat, err.Error())
@@ -86,12 +82,7 @@ func RenderError(w io.Writer, err error, format string) {
 	renderError(w, cat, err, hint, format)
 }
 
-func outputFormatFlag() string {
-	if f := rootCmd.PersistentFlags().Lookup("output"); f != nil {
-		return f.Value.String()
-	}
-	return "text"
-}
+func outputFormatFlag() string { return outputFormat }
 
 func newProgressReporter(w io.Writer) progress.Reporter {
 	if quiet {
@@ -118,6 +109,8 @@ func init() {
 	pf.BoolVar(&quiet, "quiet", false, "suppress info logs and progress bars (level=warn)")
 	pf.BoolVar(&verbose, "verbose", false, "enable debug logs (level=debug)")
 	pf.StringVar(&progressMode, "progress", "auto", "progress output: auto|bars|lines|off")
+	pf.StringVar(&outputFormat, "output", "text",
+		"output format: text|json (applies to inspect/dry-run/doctor and error rendering)")
 
 	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, _ []string) error {
 		lvl := logLevel
