@@ -1,15 +1,15 @@
-// Package cmd contains the cobra command tree for the diffah CLI.
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 
 	"github.com/spf13/cobra"
+
+	"github.com/leosocy/diffah/pkg/diff/errs"
 )
 
-// version is set at build time via -ldflags. It defaults to "dev" for
-// developer builds.
 var version = "dev"
 
 var logLevel string
@@ -24,15 +24,70 @@ full target image from any baseline source on the consuming side.`,
 	SilenceErrors: true,
 }
 
-// Execute runs the root command. On error it writes a "diffah: <msg>"
-// line to stderr so operators see why a non-zero exit happened;
-// SilenceErrors keeps cobra itself quiet so the message is not duplicated.
-func Execute(stderr io.Writer) error {
+func Execute(stderr io.Writer) int {
 	err := rootCmd.Execute()
-	if err != nil {
-		fmt.Fprintln(stderr, "diffah:", err)
+	if err == nil {
+		return 0
 	}
-	return err
+	cat, _ := errs.Classify(err)
+	if cat == errs.CategoryInternal {
+		err = &userErr{cause: err}
+	}
+	exit := ClassifyExitCode(err)
+	RenderError(stderr, err, outputFormatFlag())
+	return exit
+}
+
+type userErr struct {
+	cause error
+}
+
+func (e *userErr) Error() string           { return e.cause.Error() }
+func (e *userErr) Unwrap() error           { return e.cause }
+func (e *userErr) Category() errs.Category { return errs.CategoryUser }
+func (e *userErr) NextAction() string      { return "run 'diffah --help' for usage" }
+
+func ClassifyExitCode(err error) int {
+	if err == nil {
+		return 0
+	}
+	cat, _ := errs.Classify(err)
+	return cat.ExitCode()
+}
+
+func RenderError(w io.Writer, err error, format string) {
+	if err == nil {
+		return
+	}
+	cat, hint := errs.Classify(err)
+	if format == "json" {
+		payload := struct {
+			SchemaVersion int `json:"schema_version"`
+			Error         struct {
+				Category   string `json:"category"`
+				Message    string `json:"message"`
+				NextAction string `json:"next_action,omitempty"`
+			} `json:"error"`
+		}{SchemaVersion: 1}
+		payload.Error.Category = cat.String()
+		payload.Error.Message = err.Error()
+		payload.Error.NextAction = hint
+		enc := json.NewEncoder(w)
+		enc.SetEscapeHTML(false)
+		_ = enc.Encode(payload)
+		return
+	}
+	fmt.Fprintf(w, "diffah: %s: %s\n", cat, err.Error())
+	if hint != "" {
+		fmt.Fprintf(w, "  hint: %s\n", hint)
+	}
+}
+
+func outputFormatFlag() string {
+	if f := rootCmd.PersistentFlags().Lookup("output"); f != nil {
+		return f.Value.String()
+	}
+	return "text"
 }
 
 func init() {

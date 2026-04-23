@@ -9,9 +9,28 @@ import (
 	"regexp"
 	"strconv"
 	"time"
+
+	"github.com/leosocy/diffah/pkg/diff/errs"
 )
 
-var ErrZstdBinaryMissing = errors.New("zstd binary required but unavailable")
+var ErrZstdBinaryMissing = &zstdErr{
+	msg:    "zstd binary required but unavailable",
+	action: "install zstd 1.5+ (brew install zstd / apt install zstd)",
+}
+
+var ErrZstdEncodeFailure = &zstdErr{
+	msg:    "zstd encode failed",
+	action: "re-run with --log-level=debug for zstd stderr capture",
+}
+
+type zstdErr struct {
+	msg    string
+	action string
+}
+
+func (e *zstdErr) Error() string           { return e.msg }
+func (e *zstdErr) Category() errs.Category { return errs.CategoryEnvironment }
+func (e *zstdErr) NextAction() string      { return e.action }
 
 func newErrZstdBinaryMissing(reason string) error {
 	return fmt.Errorf("%w: %s", ErrZstdBinaryMissing, reason)
