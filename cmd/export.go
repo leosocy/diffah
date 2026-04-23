@@ -59,12 +59,13 @@ func runExport(cmd *cobra.Command, args []string) error {
 	}
 
 	opts := exporter.Options{
-		Pairs:       pairs,
-		Platform:    exportFlags.platform,
-		Compress:    exportFlags.compress,
-		IntraLayer:  exportFlags.intraLayer,
-		OutputPath:  args[0],
-		ToolVersion: version,
+		Pairs:            pairs,
+		Platform:         exportFlags.platform,
+		Compress:         exportFlags.compress,
+		IntraLayer:       exportFlags.intraLayer,
+		OutputPath:       args[0],
+		ToolVersion:      version,
+		ProgressReporter: newProgressReporter(cmd.ErrOrStderr()),
 	}
 
 	ctx := context.Background()

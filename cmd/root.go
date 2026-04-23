@@ -9,15 +9,17 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/leosocy/diffah/pkg/diff/errs"
+	"github.com/leosocy/diffah/pkg/progress"
 )
 
 var version = "dev"
 
 var (
-	logLevel  string
-	logFormat string
-	quiet     bool
-	verbose   bool
+	logLevel     string
+	logFormat    string
+	quiet        bool
+	verbose      bool
+	progressMode string
 )
 
 var rootCmd = &cobra.Command{
@@ -91,12 +93,31 @@ func outputFormatFlag() string {
 	return "text"
 }
 
+func newProgressReporter(w io.Writer) progress.Reporter {
+	if quiet {
+		return progress.NewDiscard()
+	}
+	switch progressMode {
+	case "off":
+		return progress.NewDiscard()
+	case "bars":
+		return progress.NewBars(w)
+	case "lines":
+		return progress.NewLine(w)
+	case "", "auto":
+		return progress.NewAuto(w)
+	default:
+		return progress.NewAuto(w)
+	}
+}
+
 func init() {
 	pf := rootCmd.PersistentFlags()
 	pf.StringVar(&logLevel, "log-level", "info", "log level: debug|info|warn|error (env: DIFFAH_LOG_LEVEL)")
 	pf.StringVar(&logFormat, "log-format", "auto", "log format: auto|text|json (env: DIFFAH_LOG_FORMAT)")
 	pf.BoolVar(&quiet, "quiet", false, "suppress info logs and progress bars (level=warn)")
 	pf.BoolVar(&verbose, "verbose", false, "enable debug logs (level=debug)")
+	pf.StringVar(&progressMode, "progress", "auto", "progress output: auto|bars|lines|off")
 
 	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, _ []string) error {
 		lvl := logLevel

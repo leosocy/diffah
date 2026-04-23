@@ -159,6 +159,9 @@ func TestReporter_Interface(_ *testing.T) {
 	implementations := []progress.Reporter{
 		progress.NewDiscard(),
 		progress.NewLine(&bytes.Buffer{}),
+		progress.NewBars(&bytes.Buffer{}),
+		progress.NewAuto(&bytes.Buffer{}),
+		progress.NewAuto(nil),
 		progress.FromWriter(&bytes.Buffer{}),
 		progress.FromWriter(nil),
 	}
