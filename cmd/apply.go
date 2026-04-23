@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/leosocy/diffah/pkg/diff/errs"
 	"github.com/leosocy/diffah/pkg/importer"
 )
 
@@ -59,6 +60,18 @@ func runApply(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	targetOut := args[2]
+
+	// TARGET-OUT is the final artifact path. Treat an existing regular file
+	// as overwritable (consistent with 'diff'), but refuse to cross-type
+	// clobber a directory: that is almost always a user typo and os.Rename
+	// would fail late with a confusing internal error.
+	if info, err := os.Stat(targetOut); err == nil && info.IsDir() {
+		return &cliErr{
+			cat:  errs.CategoryUser,
+			msg:  fmt.Sprintf("TARGET-OUT %q already exists as a directory; refusing to overwrite", targetOut),
+			hint: "remove the directory or pick a different TARGET-OUT path",
+		}
+	}
 
 	// Importer writes per-image under OutputPath which must be a directory.
 	// For single-image apply, stage a scratch dir alongside TARGET-OUT and

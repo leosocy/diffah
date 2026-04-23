@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -34,4 +36,16 @@ func TestApplyCommand_RejectsBaselineMissingTransport(t *testing.T) {
 		"delta.tar", "/tmp/old.tar", "/tmp/out.tar")
 	require.Equal(t, 2, code)
 	require.Contains(t, stderr.String(), "missing transport prefix for BASELINE-IMAGE")
+}
+
+func TestApplyCommand_RejectsTargetOutIsDirectory(t *testing.T) {
+	existingDir := filepath.Join(t.TempDir(), "clash")
+	require.NoError(t, os.MkdirAll(existingDir, 0o755))
+
+	var stderr bytes.Buffer
+	code := Run(nil, &stderr, "apply",
+		"delta.tar", "docker-archive:/tmp/old.tar", existingDir)
+	require.Equal(t, 2, code)
+	require.Contains(t, stderr.String(), "already exists as a directory")
+	require.Contains(t, stderr.String(), "refusing to overwrite")
 }

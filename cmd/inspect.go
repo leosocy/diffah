@@ -36,15 +36,20 @@ func runInspect(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		var p1 *diff.ErrPhase1Archive
 		if errors.As(err, &p1) {
+			// Emit the informational message to stdout so operators can read
+			// it in either rendering mode, then return the typed error so the
+			// exit code reflects the "unsupported schema" condition
+			// (content/4 per docs/compat.md) instead of silently passing.
 			if outputFormat == outputJSON {
-				return writeJSON(cmd.OutOrStdout(), map[string]any{
+				_ = writeJSON(cmd.OutOrStdout(), map[string]any{
 					"feature":         "phase1",
 					"recommended_fix": "re-export with current diffah",
 				})
+			} else {
+				fmt.Fprintln(cmd.OutOrStdout(), "This archive uses the Phase 1 (single-image) schema.")
+				fmt.Fprintln(cmd.OutOrStdout(), "Re-export with the current diffah to use the bundle format.")
 			}
-			fmt.Fprintln(cmd.OutOrStdout(), "This archive uses the Phase 1 (single-image) schema.")
-			fmt.Fprintln(cmd.OutOrStdout(), "Re-export with the current diffah to use the bundle format.")
-			return nil
+			return p1
 		}
 		return err
 	}
