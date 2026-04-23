@@ -127,6 +127,7 @@ func withLoggerDefaults(t *testing.T, level, format string) {
 }
 
 func TestRewireSlogToBars_AutoFormatHonorsTTY(t *testing.T) {
+	t.Setenv("CI", "")
 	withLoggerDefaults(t, "info", "auto")
 
 	var buf bytes.Buffer

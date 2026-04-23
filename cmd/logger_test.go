@@ -31,6 +31,7 @@ func TestPickHandler_ExplicitText(t *testing.T) {
 }
 
 func TestPickHandler_AutoOnTTY_IsText(t *testing.T) {
+	t.Setenv("CI", "")
 	var buf bytes.Buffer
 	h := pickHandler(&buf, "auto", &slog.HandlerOptions{Level: slog.LevelInfo}, true)
 	logger := slog.New(h)
