@@ -126,6 +126,43 @@ func withLoggerDefaults(t *testing.T, level, format string) {
 	logLevel, logFormat = level, format
 }
 
+func TestGlobalFormat_ShortFlagO_SetsJSON(t *testing.T) {
+	var stdout bytes.Buffer
+	code := Run(&stdout, nil, "-o", "json", "doctor")
+	require.Equal(t, 0, code)
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal(stdout.Bytes(), &parsed))
+	require.Equal(t, float64(1), parsed["schema_version"])
+}
+
+func TestGlobalFormat_LongFlagFormat_SetsJSON(t *testing.T) {
+	var stdout bytes.Buffer
+	code := Run(&stdout, nil, "--format", "json", "doctor")
+	require.Equal(t, 0, code)
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal(stdout.Bytes(), &parsed))
+	require.Equal(t, float64(1), parsed["schema_version"])
+}
+
+func TestGlobalOutput_RemovedEmitsUnknownFlag(t *testing.T) {
+	var stderr bytes.Buffer
+	code := Run(nil, &stderr, "--output", "json", "version")
+	require.NotEqual(t, 0, code)
+	require.Contains(t, stderr.String(), "unknown flag")
+}
+
+func TestQuietShortFlag(t *testing.T) {
+	var stdout bytes.Buffer
+	code := Run(&stdout, nil, "-q", "version")
+	require.Equal(t, 0, code)
+}
+
+func TestVerboseShortFlag(t *testing.T) {
+	var stdout bytes.Buffer
+	code := Run(&stdout, nil, "-v", "version")
+	require.Equal(t, 0, code)
+}
+
 func TestRewireSlogToBars_AutoFormatHonorsTTY(t *testing.T) {
 	t.Setenv("CI", "")
 	withLoggerDefaults(t, "info", "auto")

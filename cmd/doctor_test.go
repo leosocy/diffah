@@ -13,7 +13,7 @@ import (
 
 func TestDoctor_JSONShape(t *testing.T) {
 	var stdout bytes.Buffer
-	rc := cmd.Run(&stdout, nil, "doctor", "--output", "json")
+	rc := cmd.Run(&stdout, nil, "doctor", "--format", "json")
 
 	var env struct {
 		SchemaVersion int `json:"schema_version"`

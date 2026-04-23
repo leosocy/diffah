@@ -15,11 +15,11 @@ import (
 )
 
 var (
-	binaryPath  string
-	binaryDir   string
-	buildOnce   sync.Once
-	buildErr    error
-	buildTags   = "containers_image_openpgp exclude_graphdriver_btrfs exclude_graphdriver_devicemapper"
+	binaryPath string
+	binaryDir  string
+	buildOnce  sync.Once
+	buildErr   error
+	buildTags  = "containers_image_openpgp exclude_graphdriver_btrfs exclude_graphdriver_devicemapper"
 )
 
 func TestMain(m *testing.M) {

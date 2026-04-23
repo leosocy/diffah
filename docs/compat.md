@@ -59,7 +59,7 @@ Progress output (bars on TTY, lines on non-TTY) is for **humans, not
 machines**. It has no stability guarantee. Machine consumers must use
 `--log-format=json` + structured slog events instead.
 
-## JSON data output (`--output json`)
+## JSON data output (`--format json` / `-o json`)
 
 Every JSON response is a top-level envelope:
 
