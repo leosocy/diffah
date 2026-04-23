@@ -56,5 +56,6 @@ func isCobraUserError(err error) bool {
 		strings.Contains(msg, "unknown shorthand") ||
 		strings.Contains(msg, "required flag") ||
 		strings.Contains(msg, "flag needs an argument") ||
-		strings.Contains(msg, "bad flag syntax")
+		strings.Contains(msg, "bad flag syntax") ||
+		strings.Contains(msg, "arg(s)")
 }

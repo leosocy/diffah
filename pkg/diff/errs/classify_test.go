@@ -136,3 +136,26 @@ func TestClassify_OsErrNotExist_IsEnvironment(t *testing.T) {
 		t.Errorf("expected non-empty hint for os.ErrNotExist")
 	}
 }
+
+func TestClassify_CobraErrors_AreUser(t *testing.T) {
+	cases := map[string]string{
+		"unknown command":         "unknown command \"foo\" for \"diffah\"",
+		"unknown flag":            "unknown flag: --bogus",
+		"unknown shorthand":       "unknown shorthand flag: 'x' in -x",
+		"required flag":           "required flag(s) \"pair\" not set",
+		"flag needs an argument":  "flag needs an argument: --pair",
+		"bad flag syntax":          "bad flag syntax: --",
+		"accepts exact arg count": "accepts 1 arg(s), received 0",
+		"accepts at least":        "requires at least 1 arg(s), only received 0",
+		"accepts at most":         "accepts at most 2 arg(s), received 3",
+		"accepts range":           "accepts between 1 and 2 arg(s), received 3",
+	}
+	for name, msg := range cases {
+		t.Run(name, func(t *testing.T) {
+			cat, _ := errs.Classify(errors.New(msg))
+			if cat != errs.CategoryUser {
+				t.Errorf("cat = %s, want user (msg=%q)", cat, msg)
+			}
+		})
+	}
+}
