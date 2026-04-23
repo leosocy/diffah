@@ -108,22 +108,26 @@ func TestClassifyAndExit_JSONFormat(t *testing.T) {
 
 type fakeSlogReporter struct{ buf *bytes.Buffer }
 
-func (fakeSlogReporter) Phase(string)                                  {}
+func (fakeSlogReporter) Phase(string) {}
 func (fakeSlogReporter) StartLayer(digest.Digest, int64, string) progress.Layer {
 	return nil
 }
 func (fakeSlogReporter) Finish()                 {}
 func (r fakeSlogReporter) SlogWriter() io.Writer { return r.buf }
 
-func TestRewireSlogToBars_AutoFormatHonorsTTY(t *testing.T) {
+func withLoggerDefaults(t *testing.T, level, format string) {
+	t.Helper()
 	prev := slog.Default()
 	prevLevel, prevFormat := logLevel, logFormat
 	t.Cleanup(func() {
 		slog.SetDefault(prev)
 		logLevel, logFormat = prevLevel, prevFormat
 	})
-	logLevel = "info"
-	logFormat = "auto"
+	logLevel, logFormat = level, format
+}
+
+func TestRewireSlogToBars_AutoFormatHonorsTTY(t *testing.T) {
+	withLoggerDefaults(t, "info", "auto")
 
 	var buf bytes.Buffer
 	rewireSlogToBars(fakeSlogReporter{buf: &buf}, true)
@@ -138,14 +142,7 @@ func TestRewireSlogToBars_AutoFormatHonorsTTY(t *testing.T) {
 }
 
 func TestRewireSlogToBars_AutoFormatNonTTYPicksJSON(t *testing.T) {
-	prev := slog.Default()
-	prevLevel, prevFormat := logLevel, logFormat
-	t.Cleanup(func() {
-		slog.SetDefault(prev)
-		logLevel, logFormat = prevLevel, prevFormat
-	})
-	logLevel = "info"
-	logFormat = "auto"
+	withLoggerDefaults(t, "info", "auto")
 
 	var buf bytes.Buffer
 	rewireSlogToBars(fakeSlogReporter{buf: &buf}, false)

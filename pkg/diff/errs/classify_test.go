@@ -144,7 +144,7 @@ func TestClassify_CobraErrors_AreUser(t *testing.T) {
 		"unknown shorthand":       "unknown shorthand flag: 'x' in -x",
 		"required flag":           "required flag(s) \"pair\" not set",
 		"flag needs an argument":  "flag needs an argument: --pair",
-		"bad flag syntax":          "bad flag syntax: --",
+		"bad flag syntax":         "bad flag syntax: --",
 		"accepts exact arg count": "accepts 1 arg(s), received 0",
 		"accepts at least":        "requires at least 1 arg(s), only received 0",
 		"accepts at most":         "accepts at most 2 arg(s), received 3",
