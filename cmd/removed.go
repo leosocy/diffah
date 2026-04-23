@@ -22,7 +22,7 @@ func newRemovedExport() *cobra.Command {
 		RunE: func(*cobra.Command, []string) error {
 			return removedErr("export", []removedReplacement{
 				{verb: "diff", args: "BASELINE-IMAGE TARGET-IMAGE DELTA-OUT", note: "single-image delta"},
-				{verb: "bundle", args: "BUNDLE-SPEC    DELTA-OUT", note: "multi-image bundle via spec file"},
+				{verb: "bundle", args: "BUNDLE-SPEC DELTA-OUT", note: "multi-image bundle via spec file"},
 			})
 		},
 	}
@@ -36,7 +36,7 @@ func newRemovedImport() *cobra.Command {
 		RunE: func(*cobra.Command, []string) error {
 			return removedErr("import", []removedReplacement{
 				{verb: "apply", args: "DELTA-IN BASELINE-IMAGE TARGET-OUT", note: "single-image apply"},
-				{verb: "unbundle", args: "DELTA-IN BASELINE-SPEC  OUTPUT-DIR", note: "multi-image unbundle via spec file"},
+				{verb: "unbundle", args: "DELTA-IN BASELINE-SPEC OUTPUT-DIR", note: "multi-image unbundle via spec file"},
 			})
 		},
 	}
@@ -49,11 +49,23 @@ type removedReplacement struct {
 }
 
 func removedErr(old string, replacements []removedReplacement) error {
+	// Align the verb column so the argument lists line up; align the args
+	// column so the "# note" trailers line up. Computed dynamically instead
+	// of baked-in spacing, which was previously inconsistent across rows.
+	var verbWidth, argsWidth int
+	for _, r := range replacements {
+		if len(r.verb) > verbWidth {
+			verbWidth = len(r.verb)
+		}
+		if len(r.args) > argsWidth {
+			argsWidth = len(r.args)
+		}
+	}
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "unknown command '%s'. This command was removed in the CLI redesign.\n\n", old)
 	sb.WriteString("Did you mean one of:\n")
 	for _, r := range replacements {
-		fmt.Fprintf(&sb, "  diffah %s %s    # %s\n", r.verb, r.args, r.note)
+		fmt.Fprintf(&sb, "  diffah %-*s %-*s  # %s\n", verbWidth, r.verb, argsWidth, r.args, r.note)
 	}
 	sb.WriteString("\nRun 'diffah --help' for the full command list.")
 	return &cliErr{cat: errs.CategoryUser, msg: sb.String(), hint: "run 'diffah --help' for the full command list"}

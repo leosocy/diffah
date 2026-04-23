@@ -112,6 +112,15 @@ func init() {
 		"rendering format: text|json (applies to inspect/dry-run/doctor and error output)")
 
 	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, _ []string) error {
+		switch outputFormat {
+		case "text", outputJSON:
+		default:
+			return &cliErr{
+				cat:  errs.CategoryUser,
+				msg:  fmt.Sprintf("invalid --format %q (valid: text, json)", outputFormat),
+				hint: "pass --format text or --format json",
+			}
+		}
 		lvl := logLevel
 		if v := os.Getenv("DIFFAH_LOG_LEVEL"); v != "" && !cmd.Flags().Changed("log-level") {
 			lvl = v

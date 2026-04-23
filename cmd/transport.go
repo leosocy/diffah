@@ -40,10 +40,7 @@ func ParseImageRef(argName, raw string) (ImageRef, error) {
 		return ImageRef{}, newUnsupportedTransportErr(argName, prefix)
 	}
 	if rest == "" {
-		return ImageRef{}, &cliErr{
-			cat: errs.CategoryUser,
-			msg: fmt.Sprintf("transport %q for %s has empty path: %q", prefix, argName, raw),
-		}
+		return ImageRef{}, newEmptyTransportPathErr(argName, prefix, raw)
 	}
 	return ImageRef{Transport: prefix, Path: rest}, nil
 }
@@ -104,6 +101,19 @@ func newUnsupportedTransportErr(argName, prefix string) error {
 	return &cliErr{
 		cat: errs.CategoryUser,
 		msg: sb.String(),
+	}
+}
+
+func newEmptyTransportPathErr(argName, prefix, raw string) error {
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "transport %q for %s has empty path: %q\n\n", prefix, argName, raw)
+	sb.WriteString("Image references require both a transport prefix and a path. Supported transports:\n")
+	sb.WriteString("  docker-archive:PATH     # Docker tar archive (docker save)\n")
+	sb.WriteString("  oci-archive:PATH        # OCI tar archive (skopeo copy ... oci-archive:...)\n")
+	return &cliErr{
+		cat:  errs.CategoryUser,
+		msg:  sb.String(),
+		hint: "append the filesystem path after the transport prefix",
 	}
 }
 

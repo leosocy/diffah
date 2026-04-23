@@ -155,6 +155,14 @@ func TestGlobalOutput_RemovedEmitsUnknownFlag(t *testing.T) {
 	require.Contains(t, stderr.String(), "unknown flag")
 }
 
+func TestGlobalFormat_RejectsUnknownValue(t *testing.T) {
+	var stderr bytes.Buffer
+	code := Run(nil, &stderr, "--format", "yaml", "version")
+	require.Equal(t, 2, code)
+	require.Contains(t, stderr.String(), `invalid --format "yaml"`)
+	require.Contains(t, stderr.String(), "valid: text, json")
+}
+
 func TestQuietShortFlag(t *testing.T) {
 	var stdout bytes.Buffer
 	code := Run(&stdout, nil, "-q", "version")
