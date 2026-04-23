@@ -78,34 +78,31 @@ func newProgressReporter(w io.Writer) progress.Reporter {
 	if quiet {
 		return progress.NewDiscard()
 	}
+	tty := progress.IsTTY(w)
 	switch progressMode {
 	case "off":
 		return progress.NewDiscard()
-	case "bars":
-		r := progress.NewBars(w)
-		rewireSlogToBars(r, w)
-		return r
 	case "lines":
 		return progress.NewLine(w)
-	case "", "auto":
-		r := progress.NewAuto(w)
-		rewireSlogToBars(r, w)
+	case "bars":
+		r := progress.NewBars(w)
+		rewireSlogToBars(r, tty)
 		return r
 	default:
 		r := progress.NewAuto(w)
-		rewireSlogToBars(r, w)
+		rewireSlogToBars(r, tty)
 		return r
 	}
 }
 
-func rewireSlogToBars(r progress.Reporter, _ io.Writer) {
+func rewireSlogToBars(r progress.Reporter, tty bool) {
 	sw, ok := r.(progress.SlogWriterProvider)
 	if !ok {
 		return
 	}
 	slogWriter := sw.SlogWriter()
 	opts := &slog.HandlerOptions{Level: parseLevel(currentLogLevel())}
-	h := pickHandler(slogWriter, currentLogFormat(), opts, false)
+	h := pickHandler(slogWriter, currentLogFormat(), opts, tty)
 	slog.SetDefault(slog.New(h))
 }
 

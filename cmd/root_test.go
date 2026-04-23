@@ -4,11 +4,17 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
+	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/opencontainers/go-digest"
+
 	"github.com/leosocy/diffah/pkg/diff"
+	"github.com/leosocy/diffah/pkg/progress"
 )
 
 func TestRootCommand_HasExpectedSubcommands(t *testing.T) {
@@ -96,4 +102,54 @@ func TestRenderError_JSONFormat(t *testing.T) {
 	errData := parsed["error"].(map[string]any)
 	require.Equal(t, "user", errData["category"])
 	require.Equal(t, "the supplied baseline has the wrong manifest digest", errData["next_action"])
+}
+
+type fakeSlogReporter struct{ buf *bytes.Buffer }
+
+func (fakeSlogReporter) Phase(string)                                  {}
+func (fakeSlogReporter) StartLayer(digest.Digest, int64, string) progress.Layer {
+	return nil
+}
+func (fakeSlogReporter) Finish()                 {}
+func (r fakeSlogReporter) SlogWriter() io.Writer { return r.buf }
+
+func TestRewireSlogToBars_AutoFormatHonorsTTY(t *testing.T) {
+	prev := slog.Default()
+	prevLevel, prevFormat := logLevel, logFormat
+	t.Cleanup(func() {
+		slog.SetDefault(prev)
+		logLevel, logFormat = prevLevel, prevFormat
+	})
+	logLevel = "info"
+	logFormat = "auto"
+
+	var buf bytes.Buffer
+	rewireSlogToBars(fakeSlogReporter{buf: &buf}, true)
+	slog.Default().Info("hello", "k", "v")
+
+	if strings.Contains(buf.String(), `"msg":"hello"`) {
+		t.Errorf("auto+TTY expected text handler, got JSON: %q", buf.String())
+	}
+	if !strings.Contains(buf.String(), "hello") {
+		t.Errorf("expected hello in output, got %q", buf.String())
+	}
+}
+
+func TestRewireSlogToBars_AutoFormatNonTTYPicksJSON(t *testing.T) {
+	prev := slog.Default()
+	prevLevel, prevFormat := logLevel, logFormat
+	t.Cleanup(func() {
+		slog.SetDefault(prev)
+		logLevel, logFormat = prevLevel, prevFormat
+	})
+	logLevel = "info"
+	logFormat = "auto"
+
+	var buf bytes.Buffer
+	rewireSlogToBars(fakeSlogReporter{buf: &buf}, false)
+	slog.Default().Info("hello")
+
+	if !strings.Contains(buf.String(), `"msg":"hello"`) {
+		t.Errorf("auto+non-TTY expected JSON handler, got %q", buf.String())
+	}
 }
