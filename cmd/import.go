@@ -17,7 +17,7 @@ var importFlags = struct {
 	baselines    []string
 	baselineSpec string
 	strict       bool
-	outputFormat string
+	imageFormat  string
 	allowConvert bool
 	dryRun       bool
 }{}
@@ -44,7 +44,7 @@ func newImportCommand() *cobra.Command {
 	f.StringArrayVar(&importFlags.baselines, "baseline", nil, "named baseline NAME=PATH (repeatable)")
 	f.StringVar(&importFlags.baselineSpec, "baseline-spec", "", "path to baseline spec JSON")
 	f.BoolVar(&importFlags.strict, "strict", false, "require all baselines")
-	f.StringVar(&importFlags.outputFormat, "output-format", "", "output format (oci-archive|docker-archive|dir)")
+	f.StringVar(&importFlags.imageFormat, "output-format", "", "output image format (oci-archive|docker-archive|dir)")
 	f.BoolVar(&importFlags.allowConvert, "allow-convert", false, "allow format conversion")
 	f.BoolVar(&importFlags.dryRun, "dry-run", false, "show stats without writing")
 	return c
@@ -65,7 +65,7 @@ func runImport(cmd *cobra.Command, args []string) error {
 		Baselines:        baselines,
 		Strict:           importFlags.strict,
 		OutputPath:       args[1],
-		OutputFormat:     importFlags.outputFormat,
+		OutputFormat:     importFlags.imageFormat,
 		AllowConvert:     importFlags.allowConvert,
 		ProgressReporter: newProgressReporter(cmd.ErrOrStderr()),
 	}
