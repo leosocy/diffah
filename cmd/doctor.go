@@ -37,13 +37,13 @@ type zstdCheck struct{}
 func (zstdCheck) Name() string { return "zstd" }
 
 func (zstdCheck) Run(ctx context.Context) CheckResult {
-	ok, reason := zstdpatch.Available(ctx)
+	ok, detail := zstdpatch.AvailableDetail(ctx)
 	if ok {
-		return CheckResult{Status: statusOK, Detail: "available"}
+		return CheckResult{Status: statusOK, Detail: detail}
 	}
 	return CheckResult{
 		Status: statusFail,
-		Detail: reason,
+		Detail: detail,
 		Hint:   "install zstd 1.5+ (brew install zstd / apt install zstd)",
 	}
 }

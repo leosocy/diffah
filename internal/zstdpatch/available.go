@@ -44,6 +44,22 @@ func Available(ctx context.Context) (ok bool, reason string) {
 	return availableForTesting(ctx, exec.LookPath, runZstdVersion)
 }
 
+func AvailableDetail(ctx context.Context) (ok bool, detail string) {
+	path, err := exec.LookPath("zstd")
+	if err != nil {
+		return false, "zstd not on $PATH"
+	}
+	banner, err := runZstdVersion(ctx, path)
+	if err != nil {
+		return false, fmt.Sprintf("zstd --version failed: %v", err)
+	}
+	_, _, matched, err := parseZstdVersion(banner)
+	if err != nil {
+		return false, fmt.Sprintf("zstd --version parse failed: %v", err)
+	}
+	return true, fmt.Sprintf("%s via %s", matched, path)
+}
+
 func availableForTesting(
 	ctx context.Context,
 	lookup func(string) (string, error),
