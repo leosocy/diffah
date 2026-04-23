@@ -59,12 +59,13 @@ func runExport(cmd *cobra.Command, args []string) error {
 	}
 
 	opts := exporter.Options{
-		Pairs:       pairs,
-		Platform:    exportFlags.platform,
-		Compress:    exportFlags.compress,
-		IntraLayer:  exportFlags.intraLayer,
-		OutputPath:  args[0],
-		ToolVersion: version,
+		Pairs:            pairs,
+		Platform:         exportFlags.platform,
+		Compress:         exportFlags.compress,
+		IntraLayer:       exportFlags.intraLayer,
+		OutputPath:       args[0],
+		ToolVersion:      version,
+		ProgressReporter: newProgressReporter(cmd.ErrOrStderr()),
 	}
 
 	ctx := context.Background()
@@ -72,6 +73,9 @@ func runExport(cmd *cobra.Command, args []string) error {
 		stats, err := exporter.DryRun(ctx, opts)
 		if err != nil {
 			return err
+		}
+		if outputFormat == outputJSON {
+			return writeJSON(cmd.OutOrStdout(), exportDryRunJSON(stats))
 		}
 		fmt.Fprintf(cmd.OutOrStdout(),
 			"delta would ship %d blobs across %d images (%d bytes archive)\n",
@@ -139,4 +143,21 @@ func parsePairFlag(raw string) (exporter.Pair, error) {
 		BaselinePath: parts[0],
 		TargetPath:   parts[1],
 	}, nil
+}
+
+func exportDryRunJSON(stats exporter.DryRunStats) any {
+	images := make([]map[string]any, 0, len(stats.PerImage))
+	for _, img := range stats.PerImage {
+		images = append(images, map[string]any{
+			"name":          img.Name,
+			"shipped_blobs": img.ShippedBlobs,
+			"archive_bytes": img.ArchiveSize,
+		})
+	}
+	return map[string]any{
+		"total_blobs":   stats.TotalBlobs,
+		"total_images":  stats.TotalImages,
+		"archive_bytes": stats.ArchiveSize,
+		"images":        images,
+	}
 }

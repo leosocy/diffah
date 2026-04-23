@@ -3,7 +3,6 @@ package exporter
 import (
 	"context"
 	"fmt"
-	"io"
 
 	"github.com/leosocy/diffah/internal/zstdpatch"
 )
@@ -17,7 +16,7 @@ const (
 type Probe func(context.Context) (ok bool, reason string)
 
 func resolveMode(
-	ctx context.Context, userMode string, probe Probe, warn io.Writer,
+	ctx context.Context, userMode string, probe Probe,
 ) (effective string, err error) {
 	if userMode == "" {
 		userMode = modeAuto
@@ -28,9 +27,7 @@ func resolveMode(
 		if ok {
 			return modeAuto, nil
 		}
-		if warn != nil {
-			fmt.Fprintf(warn, "diffah: %s; disabling intra-layer for this run\n", reason)
-		}
+		log().Warn("intra-layer auto: zstd unavailable, disabling for this run", "reason", reason)
 		return modeOff, nil
 	case modeOff:
 		return modeOff, nil

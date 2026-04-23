@@ -59,6 +59,7 @@ func Extract(archivePath, dest string) ([]byte, error) {
 	if sidecar == nil {
 		return nil, fmt.Errorf("archive %s missing %s", archivePath, diff.SidecarFilename)
 	}
+	log().Debug("extracted archive", "path", archivePath, "dest", dest)
 	return sidecar, nil
 }
 

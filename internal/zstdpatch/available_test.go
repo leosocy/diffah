@@ -63,7 +63,7 @@ func TestAvailable_Table(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			ok, reason := availableForTesting(context.Background(), tc.lookup, tc.version)
+			ok, _, reason := availableDetailForTesting(context.Background(), tc.lookup, tc.version)
 			require.Equal(t, tc.wantOK, ok, "reason=%q", reason)
 			if tc.reasonHint != "" {
 				require.Contains(t, reason, tc.reasonHint)
@@ -74,7 +74,7 @@ func TestAvailable_Table(t *testing.T) {
 
 func TestAvailable_RealPath(t *testing.T) {
 	t.Setenv("PATH", "")
-	ok, reason := availableForTesting(context.Background(), exec.LookPath, runZstdVersion)
+	ok, _, reason := availableDetailForTesting(context.Background(), exec.LookPath, runZstdVersion)
 	require.False(t, ok)
 	require.Contains(t, reason, "$PATH")
 }

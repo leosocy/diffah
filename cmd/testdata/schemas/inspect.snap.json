@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "data": {
+    "archive": "../testdata/fixtures/v5_bundle.tar",
+    "blobs": {
+      "full_count": 3,
+      "patch_count": 0,
+      "total": 3
+    },
+    "created_at": "<T>",
+    "feature": "bundle",
+    "images": [
+      {
+        "baseline": {
+          "manifest_digest": "sha256:e1e79e6858384e39151817d4f88818346c441f69d4852e41f5437b347128726a",
+          "media_type": "application/vnd.oci.image.manifest.v1+json",
+          "source_hint": "svc-a-baseline"
+        },
+        "name": "svc-a",
+        "target": {
+          "manifest_digest": "sha256:0488d7cdd5e6c730cf45521ce6647fe48f968bd470744f0b9835146f36f1febb",
+          "media_type": "application/vnd.oci.image.manifest.v1+json"
+        }
+      }
+    ],
+    "platform": "linux/amd64",
+    "requires_zstd": false,
+    "tool": "diffah",
+    "tool_version": "<V>",
+    "total_archive_bytes": 2919,
+    "version": "v1",
+    "zstd_available": "<zstd>"
+  }
+}

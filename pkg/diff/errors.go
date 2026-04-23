@@ -3,7 +3,11 @@
 // and on stable container-spec types (digest, BlobInfo).
 package diff
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/leosocy/diffah/pkg/diff/errs"
+)
 
 // ErrManifestListUnselected is returned when the caller passes a manifest
 // list but does not specify --platform to select an instance.
@@ -185,3 +189,114 @@ type ErrDuplicateBundleName struct{ Name string }
 func (e *ErrDuplicateBundleName) Error() string {
 	return fmt.Sprintf("duplicate bundle image name %q", e.Name)
 }
+
+func (*ErrManifestListUnselected) Category() errs.Category { return errs.CategoryUser }
+func (*ErrManifestListUnselected) NextAction() string {
+	return "pass --platform os/arch[/variant] to select a manifest-list instance"
+}
+
+func (*ErrSidecarSchema) Category() errs.Category { return errs.CategoryContent }
+func (*ErrSidecarSchema) NextAction() string {
+	return "archive may be corrupt or from an unsupported version"
+}
+
+func (*ErrBaselineMissingBlob) Category() errs.Category { return errs.CategoryUser }
+func (*ErrBaselineMissingBlob) NextAction() string {
+	return "verify the --baseline value matches the baseline the delta was built against"
+}
+
+func (*ErrIncompatibleOutputFormat) Category() errs.Category { return errs.CategoryUser }
+func (*ErrIncompatibleOutputFormat) NextAction() string {
+	return "pass --allow-convert to accept digest drift, or pick a compatible --output-format"
+}
+
+func (e *ErrSourceManifestUnreadable) Category() errs.Category {
+	if e == nil || e.Cause == nil {
+		return errs.CategoryEnvironment
+	}
+	if cat, _ := errs.Classify(e.Cause); cat != errs.CategoryInternal {
+		return cat
+	}
+	return errs.CategoryEnvironment
+}
+
+func (*ErrDigestMismatch) Category() errs.Category             { return errs.CategoryContent }
+func (*ErrIntraLayerAssemblyMismatch) Category() errs.Category { return errs.CategoryContent }
+
+func (*ErrBaselineBlobDigestMismatch) Category() errs.Category { return errs.CategoryContent }
+func (*ErrShippedBlobDigestMismatch) Category() errs.Category  { return errs.CategoryContent }
+
+func (*ErrBaselineMissingPatchRef) Category() errs.Category { return errs.CategoryUser }
+func (*ErrBaselineMissingPatchRef) NextAction() string {
+	return "the named baseline lacks the layer this patch was built against"
+}
+
+func (*ErrIntraLayerUnsupported) Category() errs.Category { return errs.CategoryUser }
+func (*ErrIntraLayerUnsupported) NextAction() string {
+	return "retry with --intra-layer=off or provide a baseline with readable blob bytes"
+}
+
+func (*ErrPhase1Archive) Category() errs.Category { return errs.CategoryContent }
+func (*ErrPhase1Archive) NextAction() string {
+	return "re-export the archive with the current diffah"
+}
+
+func (*ErrUnknownBundleVersion) Category() errs.Category { return errs.CategoryContent }
+func (*ErrUnknownBundleVersion) NextAction() string {
+	return "upgrade diffah to a version that supports this archive"
+}
+
+func (*ErrInvalidBundleFormat) Category() errs.Category { return errs.CategoryContent }
+
+func (*ErrMultiImageNeedsNamedBaselines) Category() errs.Category { return errs.CategoryUser }
+func (*ErrMultiImageNeedsNamedBaselines) NextAction() string {
+	return "pass --baseline NAME=PATH (repeatable) or --baseline-spec FILE"
+}
+
+func (*ErrBaselineNameUnknown) Category() errs.Category { return errs.CategoryUser }
+func (*ErrBaselineNameUnknown) NextAction() string {
+	return "check `diffah inspect` for the names this bundle expects"
+}
+
+func (*ErrBaselineMismatch) Category() errs.Category { return errs.CategoryUser }
+func (*ErrBaselineMismatch) NextAction() string {
+	return "the supplied baseline has the wrong manifest digest"
+}
+
+func (*ErrBaselineMissing) Category() errs.Category { return errs.CategoryUser }
+func (*ErrBaselineMissing) NextAction() string {
+	return "provide --baseline NAME=PATH for each missing image or drop --strict"
+}
+
+func (*ErrInvalidBundleSpec) Category() errs.Category { return errs.CategoryUser }
+func (*ErrInvalidBundleSpec) NextAction() string {
+	return "check bundle spec JSON syntax and field names"
+}
+
+func (*ErrDuplicateBundleName) Category() errs.Category { return errs.CategoryUser }
+func (*ErrDuplicateBundleName) NextAction() string {
+	return "each image name in a bundle must be unique"
+}
+
+var (
+	_ errs.Categorized = (*ErrManifestListUnselected)(nil)
+	_ errs.Categorized = (*ErrSidecarSchema)(nil)
+	_ errs.Categorized = (*ErrBaselineMissingBlob)(nil)
+	_ errs.Categorized = (*ErrIncompatibleOutputFormat)(nil)
+	_ errs.Categorized = (*ErrSourceManifestUnreadable)(nil)
+	_ errs.Categorized = (*ErrDigestMismatch)(nil)
+	_ errs.Categorized = (*ErrIntraLayerAssemblyMismatch)(nil)
+	_ errs.Categorized = (*ErrBaselineBlobDigestMismatch)(nil)
+	_ errs.Categorized = (*ErrShippedBlobDigestMismatch)(nil)
+	_ errs.Categorized = (*ErrBaselineMissingPatchRef)(nil)
+	_ errs.Categorized = (*ErrIntraLayerUnsupported)(nil)
+	_ errs.Categorized = (*ErrPhase1Archive)(nil)
+	_ errs.Categorized = (*ErrUnknownBundleVersion)(nil)
+	_ errs.Categorized = (*ErrInvalidBundleFormat)(nil)
+	_ errs.Categorized = (*ErrMultiImageNeedsNamedBaselines)(nil)
+	_ errs.Categorized = (*ErrBaselineNameUnknown)(nil)
+	_ errs.Categorized = (*ErrBaselineMismatch)(nil)
+	_ errs.Categorized = (*ErrBaselineMissing)(nil)
+	_ errs.Categorized = (*ErrInvalidBundleSpec)(nil)
+	_ errs.Categorized = (*ErrDuplicateBundleName)(nil)
+)

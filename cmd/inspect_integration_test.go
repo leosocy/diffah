@@ -15,11 +15,10 @@ import (
 // intra-layer patches required, zstd available, and the per-image section.
 func TestInspectCommand_WithFixtures(t *testing.T) {
 	root := findRepoRoot(t)
+	bin := integrationBinary(t)
 	bundlePath := filepath.Join(t.TempDir(), "bundle.tar")
 
-	// Export a small bundle first.
-	exportCmd := exec.Command(
-		"go", "run", "-tags", "containers_image_openpgp exclude_graphdriver_btrfs exclude_graphdriver_devicemapper", ".",
+	exportCmd := exec.Command(bin,
 		"export",
 		"--pair", "app="+filepath.Join(root, "testdata/fixtures/v1_oci.tar")+","+filepath.Join(root, "testdata/fixtures/v2_oci.tar"),
 		bundlePath,
@@ -28,11 +27,7 @@ func TestInspectCommand_WithFixtures(t *testing.T) {
 	exportOut, err := exportCmd.CombinedOutput()
 	require.NoError(t, err, "export output: %s", exportOut)
 
-	// Now inspect it.
-	inspectCmd := exec.Command(
-		"go", "run", "-tags", "containers_image_openpgp exclude_graphdriver_btrfs exclude_graphdriver_devicemapper", ".",
-		"inspect", bundlePath,
-	)
+	inspectCmd := exec.Command(bin, "inspect", bundlePath)
 	inspectCmd.Dir = root
 	out, err := inspectCmd.CombinedOutput()
 	require.NoError(t, err, "inspect output: %s", out)

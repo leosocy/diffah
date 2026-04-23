@@ -36,9 +36,11 @@ func SniffArchiveFormat(path string) (string, error) {
 		}
 		name := strings.TrimPrefix(hdr.Name, "./")
 		if name == "oci-layout" {
+			log().Debug("sniffed archive format", "path", path, "format", FormatOCIArchive)
 			return FormatOCIArchive, nil
 		}
 		if name == "manifest.json" {
+			log().Debug("sniffed archive format", "path", path, "format", FormatDockerArchive)
 			return FormatDockerArchive, nil
 		}
 	}

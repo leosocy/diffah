@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/leosocy/diffah/pkg/diff/errs"
 )
 
 func TestBundleErrorMessages(t *testing.T) {
@@ -51,4 +53,39 @@ func TestErrShippedBlobDigestMismatch_Message(t *testing.T) {
 	require.Contains(t, e.Error(), "shipped blob")
 	require.Contains(t, e.Error(), "sha256:aa")
 	require.Contains(t, e.Error(), "sha256:bb")
+}
+
+func TestEveryErrorType_IsCategorized(t *testing.T) {
+	instances := []any{
+		&ErrManifestListUnselected{},
+		&ErrSidecarSchema{},
+		&ErrBaselineMissingBlob{},
+		&ErrIncompatibleOutputFormat{},
+		&ErrSourceManifestUnreadable{},
+		&ErrDigestMismatch{},
+		&ErrIntraLayerAssemblyMismatch{},
+		&ErrBaselineBlobDigestMismatch{},
+		&ErrShippedBlobDigestMismatch{},
+		&ErrBaselineMissingPatchRef{},
+		&ErrIntraLayerUnsupported{},
+		&ErrPhase1Archive{},
+		&ErrUnknownBundleVersion{},
+		&ErrInvalidBundleFormat{},
+		&ErrMultiImageNeedsNamedBaselines{},
+		&ErrBaselineNameUnknown{},
+		&ErrBaselineMismatch{},
+		&ErrBaselineMissing{},
+		&ErrInvalidBundleSpec{},
+		&ErrDuplicateBundleName{},
+	}
+	for _, v := range instances {
+		cz, ok := v.(errs.Categorized)
+		if !ok {
+			t.Errorf("%T does not implement errs.Categorized", v)
+			continue
+		}
+		if cz.Category() == errs.CategoryInternal {
+			t.Errorf("%T has Category=internal (must be user/env/content)", v)
+		}
+	}
 }

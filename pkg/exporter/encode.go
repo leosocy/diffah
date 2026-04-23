@@ -3,41 +3,49 @@ package exporter
 import (
 	"context"
 	"fmt"
-	"io"
 
 	"github.com/opencontainers/go-digest"
 
 	"github.com/leosocy/diffah/pkg/diff"
+	"github.com/leosocy/diffah/pkg/progress"
 )
 
 func encodeShipped(
 	ctx context.Context, pool *blobPool, pairs []*pairPlan,
-	mode string, fp Fingerprinter, progress io.Writer,
+	mode string, fp Fingerprinter, rep progress.Reporter,
 ) error {
+	if rep == nil {
+		rep = progress.NewDiscard()
+	}
 	for _, p := range pairs {
 		for _, s := range p.Shipped {
 			if pool.has(s.Digest) {
 				continue
 			}
+			layer := rep.StartLayer(s.Digest, s.Size, string(s.Encoding))
 			layerBytes, err := readBlobBytes(ctx, p.TargetRef, s.Digest)
 			if err != nil {
+				layer.Fail(err)
 				return fmt.Errorf("read shipped %s: %w", s.Digest, err)
 			}
 			if pool.refCount(s.Digest) > 1 || mode == modeOff {
 				pool.addIfAbsent(s.Digest, layerBytes, fullBlobEntry(s))
+				layer.Written(s.Size)
+				layer.Done()
 				continue
 			}
 			payload, entry, err := encodeSingleShipped(ctx, p, s, layerBytes, fp)
 			if err != nil {
-				if progress != nil {
-					fmt.Fprintf(progress,
-						"warning: %s: patch encode failed for %s (%v), falling back to full\n",
-						p.Name, s.Digest, err)
-				}
+				log().Warn("patch encode failed, falling back to full",
+					"pair", p.Name, "digest", s.Digest, "err", err)
 				pool.addIfAbsent(s.Digest, layerBytes, fullBlobEntry(s))
+				layer.Written(s.Size)
+				layer.Done()
 				continue
 			}
 			pool.addIfAbsent(s.Digest, payload, entry)
+			layer.Written(entry.ArchiveSize)
+			layer.Done()
 		}
 	}
 	return nil

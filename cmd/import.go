@@ -17,7 +17,7 @@ var importFlags = struct {
 	baselines    []string
 	baselineSpec string
 	strict       bool
-	outputFormat string
+	imageFormat  string
 	allowConvert bool
 	dryRun       bool
 }{}
@@ -44,7 +44,7 @@ func newImportCommand() *cobra.Command {
 	f.StringArrayVar(&importFlags.baselines, "baseline", nil, "named baseline NAME=PATH (repeatable)")
 	f.StringVar(&importFlags.baselineSpec, "baseline-spec", "", "path to baseline spec JSON")
 	f.BoolVar(&importFlags.strict, "strict", false, "require all baselines")
-	f.StringVar(&importFlags.outputFormat, "output-format", "", "output format (oci-archive|docker-archive|dir)")
+	f.StringVar(&importFlags.imageFormat, "output-format", "", "output image format (oci-archive|docker-archive|dir)")
 	f.BoolVar(&importFlags.allowConvert, "allow-convert", false, "allow format conversion")
 	f.BoolVar(&importFlags.dryRun, "dry-run", false, "show stats without writing")
 	return c
@@ -61,12 +61,13 @@ func runImport(cmd *cobra.Command, args []string) error {
 	}
 
 	opts := importer.Options{
-		DeltaPath:    args[0],
-		Baselines:    baselines,
-		Strict:       importFlags.strict,
-		OutputPath:   args[1],
-		OutputFormat: importFlags.outputFormat,
-		AllowConvert: importFlags.allowConvert,
+		DeltaPath:        args[0],
+		Baselines:        baselines,
+		Strict:           importFlags.strict,
+		OutputPath:       args[1],
+		OutputFormat:     importFlags.imageFormat,
+		AllowConvert:     importFlags.allowConvert,
+		ProgressReporter: newProgressReporter(cmd.ErrOrStderr()),
 	}
 	ctx := context.Background()
 
@@ -74,6 +75,9 @@ func runImport(cmd *cobra.Command, args []string) error {
 		report, err := importer.DryRun(ctx, opts)
 		if err != nil {
 			return err
+		}
+		if outputFormat == outputJSON {
+			return writeJSON(cmd.OutOrStdout(), importDryRunJSON(report))
 		}
 		return renderDryRunReport(cmd.OutOrStdout(), report)
 	}
@@ -145,4 +149,44 @@ func parseBaselineFlag(raw string) (string, string, error) {
 		return "", "", fmt.Errorf("invalid --baseline %q: expected NAME=PATH", raw)
 	}
 	return name, path, nil
+}
+
+func importDryRunJSON(r importer.DryRunReport) any {
+	images := make([]map[string]any, 0, len(r.Images))
+	for _, img := range r.Images {
+		entry := map[string]any{
+			"name":                     img.Name,
+			"baseline_manifest_digest": img.BaselineManifestDigest.String(),
+			"target_manifest_digest":   img.TargetManifestDigest.String(),
+			"baseline_provided":        img.BaselineProvided,
+			"would_import":             img.WouldImport,
+			"layer_count":              img.LayerCount,
+			"archive_layer_count":      img.ArchiveLayerCount,
+			"baseline_layer_count":     img.BaselineLayerCount,
+			"patch_layer_count":        img.PatchLayerCount,
+		}
+		if img.SkipReason != "" {
+			entry["skip_reason"] = img.SkipReason
+		}
+		images = append(images, entry)
+	}
+	result := map[string]any{
+		"feature":      r.Feature,
+		"version":      r.Version,
+		"tool":         r.Tool,
+		"tool_version": r.ToolVersion,
+		"created_at":   r.CreatedAt.UTC().Format(time.RFC3339),
+		"platform":     r.Platform,
+		"images":       images,
+		"blobs": map[string]any{
+			"full_count":  r.Blobs.FullCount,
+			"patch_count": r.Blobs.PatchCount,
+			"full_bytes":  r.Blobs.FullBytes,
+			"patch_bytes": r.Blobs.PatchBytes,
+		},
+		"archive_bytes":  r.ArchiveBytes,
+		"requires_zstd":  r.RequiresZstd,
+		"zstd_available": r.ZstdAvailable,
+	}
+	return result
 }

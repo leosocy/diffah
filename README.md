@@ -199,6 +199,11 @@ contracts, and the testing strategy.
 
 [spec]: docs/superpowers/specs/2026-04-20-diffah-design.md
 
+## Compatibility
+
+Exit codes, sidecar schema evolution rules, and log/progress output
+stability guarantees are documented in [docs/compat.md](docs/compat.md).
+
 ## License
 
 Apache-2.0 — see [LICENSE](LICENSE).

@@ -11,35 +11,19 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// findRepoRoot climbs up from the current working dir until it finds a
-// go.mod. cmd-level integration tests need to run `go run .` from the
-// repo root so that the binary includes all packages.
-func findRepoRoot(t *testing.T) string {
-	t.Helper()
-	cwd, err := os.Getwd()
-	require.NoError(t, err)
-	for dir := cwd; dir != "/"; dir = filepath.Dir(dir) {
-		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			return dir
-		}
-	}
-	t.Fatal("could not locate repo root")
-	return ""
-}
-
 func TestExportCommand_WithFixtures(t *testing.T) {
 	root := findRepoRoot(t)
+	bin := integrationBinary(t)
 	out := filepath.Join(t.TempDir(), "delta.tar")
 
-	cmd := exec.Command(
-		"go", "run", "-tags", "containers_image_openpgp exclude_graphdriver_btrfs exclude_graphdriver_devicemapper", ".",
+	cmd := exec.Command(bin,
 		"export",
 		"--pair", "app="+filepath.Join(root, "testdata/fixtures/v1_oci.tar")+","+filepath.Join(root, "testdata/fixtures/v2_oci.tar"),
 		out,
 	)
 	cmd.Dir = root
 	output, err := cmd.CombinedOutput()
-	require.NoError(t, err, "go run output: %s", string(output))
+	require.NoError(t, err, "diffah output: %s", string(output))
 
 	info, err := os.Stat(out)
 	require.NoError(t, err)
@@ -48,10 +32,10 @@ func TestExportCommand_WithFixtures(t *testing.T) {
 
 func TestExportCommand_DryRun(t *testing.T) {
 	root := findRepoRoot(t)
+	bin := integrationBinary(t)
 	out := filepath.Join(t.TempDir(), "delta.tar")
 
-	cmd := exec.Command(
-		"go", "run", "-tags", "containers_image_openpgp exclude_graphdriver_btrfs exclude_graphdriver_devicemapper", ".",
+	cmd := exec.Command(bin,
 		"export",
 		"--pair", "app="+filepath.Join(root, "testdata/fixtures/v1_oci.tar")+","+filepath.Join(root, "testdata/fixtures/v2_oci.tar"),
 		"--dry-run",
@@ -59,24 +43,24 @@ func TestExportCommand_DryRun(t *testing.T) {
 	)
 	cmd.Dir = root
 	output, err := cmd.CombinedOutput()
-	require.NoError(t, err, "go run output: %s", string(output))
+	require.NoError(t, err, "diffah output: %s", string(output))
 
-	// Output file must NOT exist.
 	_, err = os.Stat(out)
 	require.True(t, os.IsNotExist(err))
 	require.Contains(t, string(output), "blobs")
 }
 
 func TestExport_RejectsUnknownIntraLayerValue(t *testing.T) {
-	repoRoot := findRepoRoot(t)
-	cmd := exec.Command(
-		"go", "run", "-tags", "containers_image_openpgp exclude_graphdriver_btrfs exclude_graphdriver_devicemapper", ".",
+	root := findRepoRoot(t)
+	bin := integrationBinary(t)
+
+	cmd := exec.Command(bin,
 		"export",
-		"--pair", "a="+filepath.Join(repoRoot, "testdata/fixtures/v1_oci.tar")+","+filepath.Join(repoRoot, "testdata/fixtures/v2_oci.tar"),
+		"--pair", "a="+filepath.Join(root, "testdata/fixtures/v1_oci.tar")+","+filepath.Join(root, "testdata/fixtures/v2_oci.tar"),
 		"--intra-layer", "aggressive",
 		filepath.Join(t.TempDir(), "out.tar"),
 	)
-	cmd.Dir = repoRoot
+	cmd.Dir = root
 	out, err := cmd.CombinedOutput()
 	t.Logf("output: %s", out)
 	require.Error(t, err)

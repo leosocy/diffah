@@ -168,5 +168,8 @@ func ParseSidecar(raw []byte) (*Sidecar, error) {
 	if err := s.validate(); err != nil {
 		return nil, err
 	}
+	log().Debug("parsed sidecar",
+		"version", s.Version, "feature", s.Feature,
+		"images", len(s.Images), "blobs", len(s.Blobs))
 	return &s, nil
 }
