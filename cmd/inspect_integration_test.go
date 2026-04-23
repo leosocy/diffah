@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestInspectCommand_WithFixtures builds a real bundle via `diffah export`
+// TestInspectCommand_WithFixtures builds a real delta via `diffah diff`
 // and runs `diffah inspect` against it, asserting the new surfaces:
 // intra-layer patches required, zstd available, and the per-image section.
 func TestInspectCommand_WithFixtures(t *testing.T) {
@@ -18,14 +18,15 @@ func TestInspectCommand_WithFixtures(t *testing.T) {
 	bin := integrationBinary(t)
 	bundlePath := filepath.Join(t.TempDir(), "bundle.tar")
 
-	exportCmd := exec.Command(bin,
-		"export",
-		"--pair", "app="+filepath.Join(root, "testdata/fixtures/v1_oci.tar")+","+filepath.Join(root, "testdata/fixtures/v2_oci.tar"),
+	diffCmd := exec.Command(bin,
+		"diff",
+		"oci-archive:"+filepath.Join(root, "testdata/fixtures/v1_oci.tar"),
+		"oci-archive:"+filepath.Join(root, "testdata/fixtures/v2_oci.tar"),
 		bundlePath,
 	)
-	exportCmd.Dir = root
-	exportOut, err := exportCmd.CombinedOutput()
-	require.NoError(t, err, "export output: %s", exportOut)
+	diffCmd.Dir = root
+	diffOut, err := diffCmd.CombinedOutput()
+	require.NoError(t, err, "diff output: %s", diffOut)
 
 	inspectCmd := exec.Command(bin, "inspect", bundlePath)
 	inspectCmd.Dir = root
@@ -37,5 +38,5 @@ func TestInspectCommand_WithFixtures(t *testing.T) {
 	require.Contains(t, s, "images: 1")
 	require.Contains(t, s, "intra-layer patches required:")
 	require.Contains(t, s, "zstd available:")
-	require.Contains(t, s, "--- image: app ---")
+	require.Contains(t, s, "--- image: ")
 }

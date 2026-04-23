@@ -12,12 +12,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestExit_UserError_MissingRequiredFlag(t *testing.T) {
+func TestExit_UserError_MissingRequiredArgs(t *testing.T) {
 	bin := integrationBinary(t)
-	_, stderr, exit := runDiffahBin(t, bin, "export")
-	require.Equal(t, 2, exit, "expected exit 2 (user) for missing required flag; stderr=%q", stderr)
-	require.True(t, strings.Contains(stderr, "user:") || strings.Contains(stderr, "required"),
-		"expected user-category or 'required' in stderr; got %q", stderr)
+	_, stderr, exit := runDiffahBin(t, bin, "diff")
+	require.Equal(t, 2, exit, "expected exit 2 (user) for missing required args; stderr=%q", stderr)
+	require.True(t, strings.Contains(stderr, "user:") || strings.Contains(stderr, "requires"),
+		"expected user-category or 'requires' in stderr; got %q", stderr)
 }
 
 func TestExit_UserError_UnknownSubcommand(t *testing.T) {

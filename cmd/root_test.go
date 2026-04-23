@@ -22,8 +22,10 @@ func TestRootCommand_HasExpectedSubcommands(t *testing.T) {
 	for _, c := range rootCmd.Commands() {
 		names[c.Name()] = true
 	}
-	require.True(t, names["export"], "export subcommand missing")
-	require.True(t, names["import"], "import subcommand missing")
+	require.True(t, names["diff"], "diff subcommand missing")
+	require.True(t, names["apply"], "apply subcommand missing")
+	require.True(t, names["bundle"], "bundle subcommand missing")
+	require.True(t, names["unbundle"], "unbundle subcommand missing")
 	require.True(t, names["inspect"], "inspect subcommand missing")
 	require.True(t, names["version"], "version subcommand missing")
 	require.True(t, names["doctor"], "doctor subcommand missing")
@@ -37,8 +39,10 @@ func TestRootCommand_HelpListsSubcommands(t *testing.T) {
 	require.NoError(t, rootCmd.Execute())
 
 	out := buf.String()
-	require.Contains(t, out, "export")
-	require.Contains(t, out, "import")
+	require.Contains(t, out, "diff")
+	require.Contains(t, out, "apply")
+	require.Contains(t, out, "bundle")
+	require.Contains(t, out, "unbundle")
 	require.Contains(t, out, "inspect")
 }
 

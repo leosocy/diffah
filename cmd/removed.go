@@ -9,6 +9,11 @@ import (
 	"github.com/leosocy/diffah/pkg/diff/errs"
 )
 
+func init() {
+	rootCmd.AddCommand(newRemovedExport())
+	rootCmd.AddCommand(newRemovedImport())
+}
+
 func newRemovedExport() *cobra.Command {
 	return &cobra.Command{
 		Use:                "export",
