@@ -87,7 +87,7 @@ func runDoctor(cmd *cobra.Command, _ []string) error {
 	}
 
 	if anyFailed(results) {
-		return doctorErr{}
+		return errDoctorChecksFailed
 	}
 	return nil
 }
@@ -135,8 +135,10 @@ func anyFailed(rs []CheckResult) bool {
 	return false
 }
 
-type doctorErr struct{}
+type doctorChecksFailed struct{}
 
-func (doctorErr) Error() string           { return "one or more checks failed" }
-func (doctorErr) Category() errs.Category { return errs.CategoryEnvironment }
-func (doctorErr) NextAction() string      { return "see failing check for its specific hint" }
+func (doctorChecksFailed) Error() string           { return "one or more checks failed" }
+func (doctorChecksFailed) Category() errs.Category { return errs.CategoryEnvironment }
+func (doctorChecksFailed) NextAction() string      { return "see failing check for its specific hint" }
+
+var errDoctorChecksFailed error = doctorChecksFailed{}

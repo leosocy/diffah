@@ -10,11 +10,11 @@ import (
 	"github.com/leosocy/diffah/pkg/diff/errs"
 )
 
-func TestDoctorErr_CategoryAndHint(t *testing.T) {
-	var err doctorErr
-	require.Equal(t, errs.CategoryEnvironment, err.Category())
-	require.Equal(t, "see failing check for its specific hint", err.NextAction())
-	require.Equal(t, "one or more checks failed", err.Error())
+func TestDoctorChecksFailed_ClassifiesAsEnvironment(t *testing.T) {
+	cat, hint := errs.Classify(errDoctorChecksFailed)
+	require.Equal(t, errs.CategoryEnvironment, cat)
+	require.Equal(t, "see failing check for its specific hint", hint)
+	require.Equal(t, "one or more checks failed", errDoctorChecksFailed.Error())
 }
 
 func TestStatusLabel(t *testing.T) {
