@@ -74,8 +74,8 @@ type recordingLayer struct {
 }
 
 func (l *recordingLayer) Written(n int64) { l.writes = append(l.writes, n) }
-func (l *recordingLayer) Done()            { l.done = true }
-func (l *recordingLayer) Fail(error)        { l.failed = true }
+func (l *recordingLayer) Done()           { l.done = true }
+func (l *recordingLayer) Fail(error)      { l.failed = true }
 
 func TestEncodeShipped_StreamsWrittenDuringRead(t *testing.T) {
 	if testing.Short() {
@@ -114,7 +114,6 @@ func TestEncodeShipped_StreamsWrittenDuringRead(t *testing.T) {
 			"layer %s: sum of Written chunks (%d) must equal declared total (%d)",
 			layer.digest, total, layer.total)
 	}
-
 }
 
 func TestEncodeShipped_WarningOnError_FallbackToFull(t *testing.T) {
