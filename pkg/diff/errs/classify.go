@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"net"
 	"net/url"
+	"os"
 )
 
 // Classify inspects err and returns its Category and an optional hint
@@ -19,8 +20,7 @@ func Classify(err error) (Category, string) {
 	}
 	var cat Categorized
 	if errors.As(err, &cat) {
-		var adv Advised
-		if errors.As(err, &adv) {
+		if adv, ok := cat.(Advised); ok {
 			return cat.Category(), adv.NextAction()
 		}
 		return cat.Category(), ""
@@ -28,19 +28,22 @@ func Classify(err error) (Category, string) {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return CategoryEnvironment, "operation was cancelled or timed out"
 	}
-	var netErr *net.OpError
-	if errors.As(err, &netErr) {
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) {
 		return CategoryEnvironment,
 			"network error talking to registry; check connectivity and --authfile"
 	}
-	var urlErr *url.Error
-	if errors.As(err, &urlErr) {
+	var netErr *net.OpError
+	if errors.As(err, &netErr) {
 		return CategoryEnvironment,
 			"network error talking to registry; check connectivity and --authfile"
 	}
 	var pathErr *fs.PathError
 	if errors.As(err, &pathErr) {
 		return CategoryEnvironment, "filesystem error: " + pathErr.Path
+	}
+	if errors.Is(err, os.ErrPermission) || errors.Is(err, os.ErrNotExist) {
+		return CategoryEnvironment, "filesystem error"
 	}
 	return CategoryInternal, ""
 }

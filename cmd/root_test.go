@@ -5,8 +5,9 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/leosocy/diffah/pkg/diff"
 	"github.com/stretchr/testify/require"
+
+	"github.com/leosocy/diffah/pkg/diff"
 )
 
 func TestRootCommand_HasExpectedSubcommands(t *testing.T) {

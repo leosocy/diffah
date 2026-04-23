@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"net"
 	"net/url"
+	"os"
 	"testing"
 
 	"github.com/leosocy/diffah/pkg/diff/errs"
@@ -104,5 +105,34 @@ func TestClassify_UnknownError_DefaultsInternal(t *testing.T) {
 	cat, _ := errs.Classify(errors.New("mysterious"))
 	if cat != errs.CategoryInternal {
 		t.Errorf("cat = %s, want internal", cat)
+	}
+}
+
+func TestClassify_WrappedNetError_IsEnvironment(t *testing.T) {
+	netErr := &net.OpError{Op: "dial", Err: errors.New("connection refused")}
+	wrapped := fmt.Errorf("fetch manifest: %w", netErr)
+	cat, _ := errs.Classify(wrapped)
+	if cat != errs.CategoryEnvironment {
+		t.Errorf("cat = %s, want environment", cat)
+	}
+}
+
+func TestClassify_OsErrPermission_IsEnvironment(t *testing.T) {
+	cat, hint := errs.Classify(os.ErrPermission)
+	if cat != errs.CategoryEnvironment {
+		t.Errorf("cat = %s, want environment", cat)
+	}
+	if hint == "" {
+		t.Errorf("expected non-empty hint for os.ErrPermission")
+	}
+}
+
+func TestClassify_OsErrNotExist_IsEnvironment(t *testing.T) {
+	cat, hint := errs.Classify(os.ErrNotExist)
+	if cat != errs.CategoryEnvironment {
+		t.Errorf("cat = %s, want environment", cat)
+	}
+	if hint == "" {
+		t.Errorf("expected non-empty hint for os.ErrNotExist")
 	}
 }

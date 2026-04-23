@@ -29,37 +29,16 @@ func Execute(stderr io.Writer) int {
 	if err == nil {
 		return 0
 	}
-	cat, _ := errs.Classify(err)
+	cat, hint := errs.Classify(err)
 	if cat == errs.CategoryInternal {
-		err = &userErr{cause: err}
+		cat = errs.CategoryUser
+		hint = "run 'diffah --help' for usage"
 	}
-	exit := ClassifyExitCode(err)
-	RenderError(stderr, err, outputFormatFlag())
-	return exit
-}
-
-type userErr struct {
-	cause error
-}
-
-func (e *userErr) Error() string           { return e.cause.Error() }
-func (e *userErr) Unwrap() error           { return e.cause }
-func (e *userErr) Category() errs.Category { return errs.CategoryUser }
-func (e *userErr) NextAction() string      { return "run 'diffah --help' for usage" }
-
-func ClassifyExitCode(err error) int {
-	if err == nil {
-		return 0
-	}
-	cat, _ := errs.Classify(err)
+	renderError(stderr, cat, err, hint, outputFormatFlag())
 	return cat.ExitCode()
 }
 
-func RenderError(w io.Writer, err error, format string) {
-	if err == nil {
-		return
-	}
-	cat, hint := errs.Classify(err)
+func renderError(w io.Writer, cat errs.Category, err error, hint, format string) {
 	if format == "json" {
 		payload := struct {
 			SchemaVersion int `json:"schema_version"`
@@ -81,6 +60,22 @@ func RenderError(w io.Writer, err error, format string) {
 	if hint != "" {
 		fmt.Fprintf(w, "  hint: %s\n", hint)
 	}
+}
+
+func ClassifyExitCode(err error) int {
+	if err == nil {
+		return 0
+	}
+	cat, _ := errs.Classify(err)
+	return cat.ExitCode()
+}
+
+func RenderError(w io.Writer, err error, format string) {
+	if err == nil {
+		return
+	}
+	cat, hint := errs.Classify(err)
+	renderError(w, cat, err, hint, format)
 }
 
 func outputFormatFlag() string {

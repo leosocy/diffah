@@ -4,8 +4,9 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/leosocy/diffah/pkg/diff/errs"
 	"github.com/stretchr/testify/require"
+
+	"github.com/leosocy/diffah/pkg/diff/errs"
 )
 
 func TestBundleErrorMessages(t *testing.T) {

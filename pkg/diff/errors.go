@@ -269,7 +269,14 @@ func (*ErrBaselineMissing) NextAction() string {
 }
 
 func (*ErrInvalidBundleSpec) Category() errs.Category { return errs.CategoryUser }
+func (*ErrInvalidBundleSpec) NextAction() string {
+	return "check bundle spec JSON syntax and field names"
+}
+
 func (*ErrDuplicateBundleName) Category() errs.Category { return errs.CategoryUser }
+func (*ErrDuplicateBundleName) NextAction() string {
+	return "each image name in a bundle must be unique"
+}
 
 var (
 	_ errs.Categorized = (*ErrManifestListUnselected)(nil)
