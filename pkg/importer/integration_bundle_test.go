@@ -437,6 +437,19 @@ func fixtureImageName(_ *testing.T) string {
 	return "svc-a"
 }
 
+// fixturePair returns the canonical v1_oci → v2_oci pair used by integration
+// tests in this package. Originally defined in importer_test.go, moved here
+// after that file's shared-state helpers were removed; kept in test scope to
+// avoid library-side coupling.
+func fixturePair(t *testing.T) exporter.Pair {
+	t.Helper()
+	return exporter.Pair{
+		Name:         "svc-a",
+		BaselinePath: "../../testdata/fixtures/v1_oci.tar",
+		TargetPath:   "../../testdata/fixtures/v2_oci.tar",
+	}
+}
+
 func fixtureBaselinePath(t *testing.T) string {
 	return fixturePair(t).BaselinePath
 }
