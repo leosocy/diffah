@@ -9,7 +9,7 @@ codes, the sidecar schema, structured log output, and progress output.
 |------|--------------|------|
 | 0    | success      | operation completed |
 | 1    | internal     | bug, panic, or an unclassified error |
-| 2    | user         | bad flag, missing input, conflicting options, malformed `--baseline` or `--pair`, wrong baseline supplied |
+| 2    | user         | bad flag, missing/extra positional arguments, missing transport prefix on image reference, malformed bundle or baseline spec file, wrong baseline supplied, invocation of a removed verb (`export`, `import`) |
 | 3    | environment  | missing zstd, network failure, filesystem permission, registry auth |
 | 4    | content      | sidecar schema mismatch, digest mismatch, archive corruption, unsupported schema version |
 

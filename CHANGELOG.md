@@ -18,8 +18,8 @@
   transport prefix (`docker-archive:` or `oci-archive:`). Bare paths
   error with a "Did you mean" hint.
 - **Renamed:** global `--output text|json` → `--format text|json` (short
-  `-o`) to eliminate collision with positional OUTPUT / subcommand
-  `--image-format`.
+  `-o`) to eliminate collision with the old subcommand `--output-format`
+  and with the positional OUTPUT slot.
 - **Renamed:** subcommand `--output-format docker-archive|oci-archive|dir`
   → `--image-format` (scoped to `apply` / `unbundle`).
 - **Added:** short flags `-q` (`--quiet`), `-v` (`--verbose`), `-n`
