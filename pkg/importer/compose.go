@@ -275,8 +275,8 @@ func enforceOutputCompat(dest types.ImageReference, src types.ImageSource, allow
 		if mime != mimeOCIManifest {
 			return &diff.ErrIncompatibleOutputFormat{SourceMime: mime, OutputFormat: dest.Transport().Name()}
 		}
-	// dir: always permitted — dir transport copies blobs byte-for-byte regardless of manifest media type.
-	// docker:// and other registry transports — upstream copy.Image handles manifest conversion.
+		// dir: always permitted — dir transport copies blobs byte-for-byte regardless of manifest media type.
+		// docker:// and other registry transports — upstream copy.Image handles manifest conversion.
 	}
 	return nil
 }

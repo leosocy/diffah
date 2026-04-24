@@ -46,10 +46,10 @@ func TestImporter_PullsBaselineAnonymously(t *testing.T) {
 
 	outPath := "oci-archive:" + filepath.Join(tmp, "restored.tar")
 	err := importer.Import(ctx, importer.Options{
-		DeltaPath: deltaPath,
-		Baselines: map[string]string{"default": registryDockerURL(t, srv, "app/v1")},
-		Outputs:   map[string]string{"default": outPath},
-		Strict:    true,
+		DeltaPath:    deltaPath,
+		Baselines:    map[string]string{"default": registryDockerURL(t, srv, "app/v1")},
+		Outputs:      map[string]string{"default": outPath},
+		Strict:       true,
 		AllowConvert: true,
 		SystemContext: &types.SystemContext{
 			DockerInsecureSkipTLSVerify: types.OptionalBoolTrue,
@@ -86,10 +86,10 @@ func TestImporter_PullsBaselineWithBasicAuth(t *testing.T) {
 
 	outPath := "oci-archive:" + filepath.Join(tmp, "restored.tar")
 	err := importer.Import(ctx, importer.Options{
-		DeltaPath: deltaPath,
-		Baselines: map[string]string{"default": registryDockerURL(t, srv, "app/v1")},
-		Outputs:   map[string]string{"default": outPath},
-		Strict:    true,
+		DeltaPath:    deltaPath,
+		Baselines:    map[string]string{"default": registryDockerURL(t, srv, "app/v1")},
+		Outputs:      map[string]string{"default": outPath},
+		Strict:       true,
 		AllowConvert: true,
 		SystemContext: &types.SystemContext{
 			DockerInsecureSkipTLSVerify: types.OptionalBoolTrue,
@@ -123,10 +123,10 @@ func TestImporter_PushesOutputToRegistry(t *testing.T) {
 
 	targetRef := registryDockerURL(t, srv, "app/v2")
 	err := importer.Import(ctx, importer.Options{
-		DeltaPath: deltaPath,
-		Baselines: map[string]string{"default": registryDockerURL(t, srv, "app/v1")},
-		Outputs:   map[string]string{"default": targetRef},
-		Strict:    true,
+		DeltaPath:    deltaPath,
+		Baselines:    map[string]string{"default": registryDockerURL(t, srv, "app/v1")},
+		Outputs:      map[string]string{"default": targetRef},
+		Strict:       true,
 		AllowConvert: true,
 		SystemContext: &types.SystemContext{
 			DockerInsecureSkipTLSVerify: types.OptionalBoolTrue,
@@ -166,11 +166,11 @@ func TestImporter_LazyBaselineFetch_OnlyReferencedBlobsPulled(t *testing.T) {
 
 	outPath := "oci-archive:" + filepath.Join(tmp, "restored.tar")
 	require.NoError(t, importer.Import(ctx, importer.Options{
-		DeltaPath:    deltaPath,
-		Baselines:    map[string]string{"default": registryDockerURL(t, srv, "app/v1")},
-		Outputs:      map[string]string{"default": outPath},
-		Strict:       true,
-		AllowConvert: true,
+		DeltaPath:     deltaPath,
+		Baselines:     map[string]string{"default": registryDockerURL(t, srv, "app/v1")},
+		Outputs:       map[string]string{"default": outPath},
+		Strict:        true,
+		AllowConvert:  true,
 		SystemContext: &types.SystemContext{DockerInsecureSkipTLSVerify: types.OptionalBoolTrue},
 	}))
 
@@ -235,12 +235,12 @@ func TestImporter_RetriesOn503(t *testing.T) {
 
 	outPath := "oci-archive:" + filepath.Join(tmp, "restored.tar")
 	require.NoError(t, importer.Import(ctx, importer.Options{
-		DeltaPath:    deltaPath,
-		Baselines:    map[string]string{"default": registryDockerURL(t, srv, "app/v1")},
-		Outputs:      map[string]string{"default": outPath},
-		Strict:       true,
-		AllowConvert: true,
-		RetryTimes:   3,
+		DeltaPath:     deltaPath,
+		Baselines:     map[string]string{"default": registryDockerURL(t, srv, "app/v1")},
+		Outputs:       map[string]string{"default": outPath},
+		Strict:        true,
+		AllowConvert:  true,
+		RetryTimes:    3,
 		SystemContext: &types.SystemContext{DockerInsecureSkipTLSVerify: types.OptionalBoolTrue},
 	}))
 }
@@ -271,12 +271,12 @@ func TestImporter_NoRetryWhenRetryTimesIsZero(t *testing.T) {
 
 	outPath := "oci-archive:" + filepath.Join(tmp, "restored.tar")
 	err := importer.Import(ctx, importer.Options{
-		DeltaPath:    deltaPath,
-		Baselines:    map[string]string{"default": registryDockerURL(t, srv, "app/v1")},
-		Outputs:      map[string]string{"default": outPath},
-		Strict:       true,
-		AllowConvert: true,
-		RetryTimes:   0,
+		DeltaPath:     deltaPath,
+		Baselines:     map[string]string{"default": registryDockerURL(t, srv, "app/v1")},
+		Outputs:       map[string]string{"default": outPath},
+		Strict:        true,
+		AllowConvert:  true,
+		RetryTimes:    0,
 		SystemContext: &types.SystemContext{DockerInsecureSkipTLSVerify: types.OptionalBoolTrue},
 	})
 	require.Error(t, err)

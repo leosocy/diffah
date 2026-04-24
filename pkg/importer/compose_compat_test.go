@@ -24,9 +24,9 @@ func (t fakeTransport) Name() string                                        { re
 func (fakeTransport) ParseReference(_ string) (types.ImageReference, error) { return nil, nil }
 func (fakeTransport) ValidatePolicyConfigurationScope(_ string) error       { return nil }
 
-func (r fakeDestRef) Transport() types.ImageTransport { return fakeTransport{name: r.name} }
-func (fakeDestRef) StringWithinTransport() string   { return "" }
-func (fakeDestRef) DockerReference() reference.Named { return nil }
+func (r fakeDestRef) Transport() types.ImageTransport { return fakeTransport(r) }
+func (fakeDestRef) StringWithinTransport() string     { return "" }
+func (fakeDestRef) DockerReference() reference.Named  { return nil }
 func (fakeDestRef) PolicyConfigurationIdentity() string {
 	return ""
 }

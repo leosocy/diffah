@@ -61,10 +61,10 @@ func retryable(err error) bool {
 	}
 	msg := strings.ToLower(err.Error())
 	for _, needle := range []string{
-		"too many requests",    // 429
-		"service unavailable",  // 503
-		"bad gateway",          // 502
-		"gateway timeout",      // 504
+		"too many requests",     // 429
+		"service unavailable",   // 503
+		"bad gateway",           // 502
+		"gateway timeout",       // 504
 		"internal server error", // 500
 		"eof",
 		"connection reset",
@@ -79,8 +79,5 @@ func retryable(err error) bool {
 		return true
 	}
 	var netErr *net.OpError
-	if errors.As(err, &netErr) {
-		return true
-	}
-	return false
+	return errors.As(err, &netErr)
 }

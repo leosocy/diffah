@@ -63,7 +63,7 @@ func generateTLSMaterial(t *testing.T, cfg *config) tls.Certificate {
 	// subdirs with *.crt / *.cert / *.key files. We write a single
 	// registry.crt so a flat --cert-dir works.
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "registry.crt"), certPEM, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "registry.crt"), certPEM, 0o600); err != nil {
 		t.Fatalf("write registry.crt: %v", err)
 	}
 	cfg.caPEM = certPEM

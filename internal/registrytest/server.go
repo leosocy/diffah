@@ -73,7 +73,10 @@ func New(t *testing.T, opts ...Option) *Server {
 	if cfg.tls {
 		cert := generateTLSMaterial(t, cfg)
 		ts := httptest.NewUnstartedServer(h)
-		ts.TLS = &tls.Config{Certificates: []tls.Certificate{cert}}
+		ts.TLS = &tls.Config{
+			Certificates: []tls.Certificate{cert},
+			MinVersion:   tls.VersionTLS12,
+		}
 		ts.StartTLS()
 		s.httptest = ts
 	} else {

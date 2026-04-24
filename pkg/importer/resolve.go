@@ -43,42 +43,13 @@ func resolveBaselines(
 		if !ok {
 			continue
 		}
-		ref, err := imageio.ParseReference(raw)
+		rb, err := openOneBaseline(ctx, img, raw, sysctx, retryTimes, retryDelay)
 		if err != nil {
 			cleanup()
-			return nil, fmt.Errorf("parse baseline reference %q for %q: %w", raw, img.Name, err)
-		}
-		src, err := withRetry(ctx, retryTimes, retryDelay, func(ctx context.Context) (types.ImageSource, error) {
-			return ref.NewImageSource(ctx, sysctx)
-		})
-		if err != nil {
-			cleanup()
-			return nil, fmt.Errorf("open baseline source for %q: %w",
-				img.Name, diff.ClassifyRegistryErr(err, raw))
-		}
-
-		manifestBytes, err := withRetry(ctx, retryTimes, retryDelay, func(ctx context.Context) ([]byte, error) {
-			b, _, e := src.GetManifest(ctx, nil)
-			return b, e
-		})
-		if err != nil {
-			_ = src.Close()
-			cleanup()
-			return nil, fmt.Errorf("read baseline manifest for %q: %w",
-				img.Name, diff.ClassifyRegistryErr(err, raw))
-		}
-		got := digest.FromBytes(manifestBytes)
-		if got != img.Baseline.ManifestDigest {
-			_ = src.Close()
-			cleanup()
-			return nil, &diff.ErrBaselineMismatch{
-				Name: img.Name, Expected: string(img.Baseline.ManifestDigest), Got: string(got),
-			}
+			return nil, err
 		}
 		resolved[img.Name] = struct{}{}
-		result = append(result, resolvedBaseline{
-			Name: img.Name, Ref: ref, Src: src, Manifest: got,
-		})
+		result = append(result, rb)
 	}
 
 	if strict {
@@ -100,6 +71,48 @@ func resolveBaselines(
 	}
 
 	return result, nil
+}
+
+// openOneBaseline parses raw, opens the ImageSource, verifies its manifest
+// digest against the sidecar's expectation, and returns the held-open
+// resolvedBaseline. Registry errors are classified before they propagate so
+// exit-code categorisation sees the typed error through the %w chain.
+func openOneBaseline(
+	ctx context.Context,
+	img diff.ImageEntry,
+	raw string,
+	sysctx *types.SystemContext,
+	retryTimes int,
+	retryDelay time.Duration,
+) (resolvedBaseline, error) {
+	ref, err := imageio.ParseReference(raw)
+	if err != nil {
+		return resolvedBaseline{}, fmt.Errorf("parse baseline reference %q for %q: %w", raw, img.Name, err)
+	}
+	src, err := withRetry(ctx, retryTimes, retryDelay, func(ctx context.Context) (types.ImageSource, error) {
+		return ref.NewImageSource(ctx, sysctx)
+	})
+	if err != nil {
+		return resolvedBaseline{}, fmt.Errorf("open baseline source for %q: %w",
+			img.Name, diff.ClassifyRegistryErr(err, raw))
+	}
+	manifestBytes, err := withRetry(ctx, retryTimes, retryDelay, func(ctx context.Context) ([]byte, error) {
+		b, _, e := src.GetManifest(ctx, nil)
+		return b, e
+	})
+	if err != nil {
+		_ = src.Close()
+		return resolvedBaseline{}, fmt.Errorf("read baseline manifest for %q: %w",
+			img.Name, diff.ClassifyRegistryErr(err, raw))
+	}
+	got := digest.FromBytes(manifestBytes)
+	if got != img.Baseline.ManifestDigest {
+		_ = src.Close()
+		return resolvedBaseline{}, &diff.ErrBaselineMismatch{
+			Name: img.Name, Expected: string(img.Baseline.ManifestDigest), Got: string(got),
+		}
+	}
+	return resolvedBaseline{Name: img.Name, Ref: ref, Src: src, Manifest: got}, nil
 }
 
 // closeResolvedBaselines closes all held-open ImageSource instances.
@@ -130,38 +143,27 @@ func rejectUnknownBaselineNames(sc *diff.Sidecar, expanded map[string]string) er
 }
 
 // expandDefaultOutput mirrors expandDefaultBaseline for the Outputs map:
-// when there is exactly one image and the caller supplied "default" as the key,
-// rewrite it to the image's actual name so the per-image lookup in Import works.
+// when there is exactly one image and the caller supplied the defaultImageKey
+// as the key, rewrite it to the image's actual name so the per-image lookup
+// in Import works.
 func expandDefaultOutput(sc *diff.Sidecar, outputs map[string]string) map[string]string {
-	if len(sc.Images) != 1 {
-		return outputs
-	}
-	_, ok := outputs["default"]
-	if !ok {
-		return outputs
-	}
-	expanded := make(map[string]string, len(outputs))
-	for k, v := range outputs {
-		if k == "default" {
-			expanded[sc.Images[0].Name] = v
-		} else {
-			expanded[k] = v
-		}
-	}
-	return expanded
+	return rewriteDefaultKey(sc, outputs)
 }
 
 func expandDefaultBaseline(sc *diff.Sidecar, baselines map[string]string) map[string]string {
+	return rewriteDefaultKey(sc, baselines)
+}
+
+func rewriteDefaultKey(sc *diff.Sidecar, m map[string]string) map[string]string {
 	if len(sc.Images) != 1 {
-		return baselines
+		return m
 	}
-	_, ok := baselines["default"]
-	if !ok {
-		return baselines
+	if _, ok := m[defaultImageKey]; !ok {
+		return m
 	}
-	expanded := make(map[string]string, len(baselines))
-	for k, v := range baselines {
-		if k == "default" {
+	expanded := make(map[string]string, len(m))
+	for k, v := range m {
+		if k == defaultImageKey {
 			expanded[sc.Images[0].Name] = v
 		} else {
 			expanded[k] = v

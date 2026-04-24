@@ -149,7 +149,7 @@ func validateTransportRef(ref string) error {
 		return fmt.Errorf("missing transport prefix: %q (expected e.g. docker-archive:%s)", ref, ref)
 	}
 	if _, err := alltransports.ParseImageName(ref); err != nil {
-		return fmt.Errorf("invalid image reference %q: %v", ref, err)
+		return fmt.Errorf("invalid image reference %q: %w", ref, err)
 	}
 	return nil
 }

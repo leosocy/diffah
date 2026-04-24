@@ -83,6 +83,28 @@ func Import(ctx context.Context, opts Options) error {
 		resolvedByName[r.Name] = r
 	}
 
+	imported, skipped, err := importEachImage(ctx, bundle, resolvedByName, outputs, opts)
+	if err != nil {
+		return err
+	}
+	log().InfoContext(ctx, "import complete",
+		"imported", imported, "total", len(bundle.sidecar.Images), "skipped", skipped)
+	rep.Phase("done")
+	return nil
+}
+
+// importEachImage composes and writes every image in the bundle for which a
+// baseline was resolved. Images without a resolved baseline are recorded in
+// the skipped list and not composed; --strict is enforced earlier by
+// resolveBaselines, so reaching here with an unresolved image implies the
+// caller opted into non-strict mode.
+func importEachImage(
+	ctx context.Context,
+	bundle *extractedBundle,
+	resolvedByName map[string]resolvedBaseline,
+	outputs map[string]string,
+	opts Options,
+) (int, []string, error) {
 	imported := 0
 	skipped := make([]string, 0)
 	for _, img := range bundle.sidecar.Images {
@@ -92,28 +114,24 @@ func Import(ctx context.Context, opts Options) error {
 			skipped = append(skipped, img.Name)
 			continue
 		}
-
 		rawOut, ok := outputs[img.Name]
 		if !ok {
-			return fmt.Errorf("no output reference in OUTPUT-SPEC for image %q", img.Name)
+			return 0, nil, fmt.Errorf("no output reference in OUTPUT-SPEC for image %q", img.Name)
 		}
 		if err := ensureOutputParent(rawOut); err != nil {
-			return fmt.Errorf("prepare output for image %q: %w", img.Name, err)
+			return 0, nil, fmt.Errorf("prepare output for image %q: %w", img.Name, err)
 		}
 		destRef, err := imageio.ParseReference(rawOut)
 		if err != nil {
-			return fmt.Errorf("parse output reference for image %q: %w", img.Name, err)
+			return 0, nil, fmt.Errorf("parse output reference for image %q: %w", img.Name, err)
 		}
-
-		if err := composeImage(ctx, img, bundle, rb, destRef, opts.SystemContext, opts.AllowConvert, opts.reporter()); err != nil {
-			return err
+		if err := composeImage(ctx, img, bundle, rb, destRef,
+			opts.SystemContext, opts.AllowConvert, opts.reporter()); err != nil {
+			return 0, nil, err
 		}
 		imported++
 	}
-	log().InfoContext(ctx, "import complete",
-		"imported", imported, "total", len(bundle.sidecar.Images), "skipped", skipped)
-	rep.Phase("done")
-	return nil
+	return imported, skipped, nil
 }
 
 func DryRun(ctx context.Context, opts Options) (DryRunReport, error) {

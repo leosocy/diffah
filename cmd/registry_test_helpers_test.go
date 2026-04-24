@@ -34,8 +34,8 @@ func seedOCIIntoRegistry(t *testing.T, srv *registrytest.Server, repo, tarPath s
 func seedOCIIntoRegistryWithToken(t *testing.T, srv *registrytest.Server, repo, tarPath, token string) {
 	t.Helper()
 	seedOCIWithSysctx(t, srv, repo, tarPath, &types.SystemContext{
-		DockerInsecureSkipTLSVerify:  types.OptionalBoolTrue,
-		DockerBearerRegistryToken:    token,
+		DockerInsecureSkipTLSVerify: types.OptionalBoolTrue,
+		DockerBearerRegistryToken:   token,
 	})
 }
 

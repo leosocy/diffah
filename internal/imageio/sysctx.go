@@ -42,37 +42,14 @@ func BuildSystemContext(f SystemContextFlags) (*types.SystemContext, error) {
 	if err := validateCredentialFlags(f); err != nil {
 		return nil, err
 	}
-
 	sc := &types.SystemContext{}
-
-	switch {
-	case f.AuthFile != "":
-		sc.AuthFilePath = f.AuthFile
-	case !f.NoCreds && f.Creds == "" && f.Username == "" && f.RegistryToken == "":
-		sc.AuthFilePath = defaultAuthFile()
+	applyAuthFile(sc, f)
+	if err := applyCredentials(sc, f); err != nil {
+		return nil, err
 	}
-
-	switch {
-	case f.Creds != "":
-		user, pass, ok := splitCreds(f.Creds)
-		if !ok {
-			return nil, fmt.Errorf("invalid --creds %q: expected USER[:PASS]", f.Creds)
-		}
-		sc.DockerAuthConfig = &types.DockerAuthConfig{Username: user, Password: pass}
-	case f.Username != "":
-		if f.Password == "" {
-			return nil, fmt.Errorf("--username requires --password")
-		}
-		sc.DockerAuthConfig = &types.DockerAuthConfig{Username: f.Username, Password: f.Password}
-	case f.NoCreds:
-		sc.AuthFilePath = ""
-		sc.DockerAuthConfig = nil
-	}
-
 	if f.RegistryToken != "" {
 		sc.DockerBearerRegistryToken = f.RegistryToken
 	}
-
 	if f.TLSVerify != nil {
 		if *f.TLSVerify {
 			sc.DockerInsecureSkipTLSVerify = types.OptionalBoolFalse
@@ -80,12 +57,39 @@ func BuildSystemContext(f SystemContextFlags) (*types.SystemContext, error) {
 			sc.DockerInsecureSkipTLSVerify = types.OptionalBoolTrue
 		}
 	}
-
 	if f.CertDir != "" {
 		sc.DockerCertPath = f.CertDir
 	}
-
 	return sc, nil
+}
+
+func applyAuthFile(sc *types.SystemContext, f SystemContextFlags) {
+	switch {
+	case f.AuthFile != "":
+		sc.AuthFilePath = f.AuthFile
+	case !f.NoCreds && f.Creds == "" && f.Username == "" && f.RegistryToken == "":
+		sc.AuthFilePath = defaultAuthFile()
+	}
+}
+
+func applyCredentials(sc *types.SystemContext, f SystemContextFlags) error {
+	switch {
+	case f.Creds != "":
+		user, pass, ok := splitCreds(f.Creds)
+		if !ok {
+			return fmt.Errorf("invalid --creds %q: expected USER[:PASS]", f.Creds)
+		}
+		sc.DockerAuthConfig = &types.DockerAuthConfig{Username: user, Password: pass}
+	case f.Username != "":
+		if f.Password == "" {
+			return fmt.Errorf("--username requires --password")
+		}
+		sc.DockerAuthConfig = &types.DockerAuthConfig{Username: f.Username, Password: f.Password}
+	case f.NoCreds:
+		sc.AuthFilePath = ""
+		sc.DockerAuthConfig = nil
+	}
+	return nil
 }
 
 func validateCredentialFlags(f SystemContextFlags) error {
