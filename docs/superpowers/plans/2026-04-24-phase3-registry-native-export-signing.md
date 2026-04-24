@@ -189,7 +189,7 @@ Expected: empty.
 - Modify: `cmd/diff.go`
 - Modify: `cmd/bundle.go`
 
-- [ ] **Step 1.4.1: Edit `cmd/diff.go` — in `runDiff`, rename Pair fields**
+- [ ] **Step 1.4.1: Edit `cmd/diff.go` — in `runDiff`, rename Pair fields only, keep the bare-path value**
 
 Change:
 ```go
@@ -204,19 +204,19 @@ To:
 ```go
 Pairs: []exporter.Pair{{
     Name:        "default",
-    BaselineRef: baseline.Raw,
-    TargetRef:   target.Raw,
+    BaselineRef: baseline.Path, // still bare path — perpair's OpenArchiveRef expects this
+    TargetRef:   target.Path,
 }},
 ```
 
-Note the switch from `baseline.Path` to `baseline.Raw` — this already includes the transport prefix (`docker-archive:/tmp/old.tar`), which is what Phase 3 will need once `planPair` switches to `alltransports.ParseImageName`. Still path-only today; behavior-identical for archive inputs because `OpenArchiveRef` strips the prefix internally (verify this with the test below).
+The field is renamed but the value keeps the bare path. Phase 3 will be the commit that switches the value to `baseline.Raw` — it must land together with the `planPair` swap from `OpenArchiveRef` to `alltransports.ParseImageName` so the two things stay consistent.
 
 - [ ] **Step 1.4.2: Edit `cmd/bundle.go` — same rename in `runBundle`**
 
 ```go
 pairs[i] = exporter.Pair{
     Name:        p.Name,
-    BaselineRef: p.Baseline, // was: p.Baseline → BaselinePath
+    BaselineRef: p.Baseline, // BundleSpec already holds the bare archive path post-resolveSpecPath
     TargetRef:   p.Target,
 }
 ```
@@ -233,10 +233,7 @@ Expected: empty (all references migrated).
 Run: `cd /Users/leosocy/workspace/repos/myself/diffah && go test ./...`
 Expected: all pass.
 
-Important check: the `imageio.OpenArchiveRef` call in `perpair.go` now receives `"docker-archive:/tmp/old.tar"` (the `.Raw` form) instead of `"/tmp/old.tar"`. `OpenArchiveRef` must accept both. Run:
-`cd /Users/leosocy/workspace/repos/myself/diffah && grep -n "OpenArchiveRef" internal/imageio/*.go`
-
-If `OpenArchiveRef` rejects transport-prefixed input, add a one-line `strings.TrimPrefix` inside the helper (or, preferred, strip the prefix at the call site in `perpair.go`) and re-run tests.
+Because Step 1.4 deliberately kept the value as `baseline.Path` (bare form), `imageio.OpenArchiveRef` still receives bare paths and does not need any modification. If you see test failures in `pkg/exporter` with errors like `cannot determine archive format for docker-archive:/...`, go back to Step 1.4 and verify you did NOT switch from `baseline.Path` to `baseline.Raw`. The prefix-stripping change is Phase 3's job, not Phase 1's.
 
 **If the test suite already fails here — stop and fix before committing.** Do NOT defer to later tasks.
 
