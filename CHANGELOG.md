@@ -22,6 +22,14 @@
   both verbs but Rekor upload is not yet implemented in this Phase 3
   slice; passing `--rekor-url` currently errors with a
   "not yet implemented" hint pointing at a follow-on PR.
+- **Verification on `apply` and `unbundle`**: `--verify PATH`
+  (ECDSA-P256 PEM public key) requires the archive's signature to
+  match. Absent `--verify` preserves today's behavior — signed
+  archives are processed byte-identically. When `--verify` is supplied
+  and the archive is unsigned, exit code is 4 (content error).
+- **Rekor proof verification**: `--verify-rekor-url URL` checks the
+  Rekor inclusion proof when a `.rekor.json` sidecar is present.
+  Missing `.rekor.json` only warns — it does not fail.
 
 ## [Unreleased] — Phase 2: Registry-native import
 

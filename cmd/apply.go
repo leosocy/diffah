@@ -13,6 +13,7 @@ var applyFlags = struct {
 	allowConvert       bool
 	dryRun             bool
 	buildSystemContext registryContextBuilder
+	buildVerify        verifyConfigBuilder
 }{}
 
 const applyExample = `  # Registry round-trip
@@ -43,6 +44,7 @@ func newApplyCommand() *cobra.Command {
 	f.BoolVar(&applyFlags.allowConvert, "allow-convert", false, "allow format conversion during apply")
 	f.BoolVarP(&applyFlags.dryRun, "dry-run", "n", false, "verify baseline reachability without writing")
 	applyFlags.buildSystemContext = installRegistryFlags(c)
+	applyFlags.buildVerify = installVerifyFlags(c)
 	installUsageTemplate(c)
 	return c
 }
@@ -64,6 +66,10 @@ func runApply(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	vc, err := applyFlags.buildVerify()
+	if err != nil {
+		return err
+	}
 
 	opts := importer.Options{
 		DeltaPath:        deltaIn,
@@ -75,6 +81,8 @@ func runApply(cmd *cobra.Command, args []string) error {
 		RetryTimes:       retryTimes,
 		RetryDelay:       retryDelay,
 		ProgressReporter: newProgressReporter(cmd.ErrOrStderr()),
+		VerifyPubKeyPath: vc.PubKeyPath,
+		VerifyRekorURL:   vc.RekorURL,
 	}
 	ctx := context.Background()
 

@@ -13,6 +13,11 @@ type extractedBundle struct {
 	tmpDir  string
 	sidecar *diff.Sidecar
 	blobDir string
+	// sidecarRawBytes holds the on-disk diffah.json tar entry bytes
+	// exactly as they appear in the archive. Preserved (not re-serialized
+	// from the parsed *diff.Sidecar) so the canonical digest computed
+	// during signature verification matches what the exporter signed.
+	sidecarRawBytes []byte
 }
 
 func extractBundle(deltaPath string) (*extractedBundle, error) {
@@ -31,9 +36,10 @@ func extractBundle(deltaPath string) (*extractedBundle, error) {
 		return nil, fmt.Errorf("parse sidecar: %w", err)
 	}
 	return &extractedBundle{
-		tmpDir:  tmpDir,
-		sidecar: sc,
-		blobDir: filepath.Join(tmpDir, "blobs"),
+		tmpDir:          tmpDir,
+		sidecar:         sc,
+		blobDir:         filepath.Join(tmpDir, "blobs"),
+		sidecarRawBytes: raw,
 	}, nil
 }
 

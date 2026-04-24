@@ -134,3 +134,41 @@ The following flags are available on `apply` and `unbundle` whenever the TARGET-
 - `--registry-token` cannot be combined with `--creds`, `--username`, `--password`, or `--no-creds`.
 
 Non-retryable errors (auth 401/403, 404, manifest schema errors) fail immediately without consuming retry budget.
+
+## Signatures (Phase 3)
+
+### Payload
+
+`payload = sha256( jcs( parse(sidecar bytes inside archive) ) )`
+
+— where `jcs` is [RFC 8785 JSON Canonicalization Scheme](https://www.rfc-editor.org/rfc/rfc8785) and `sidecar` is the `diffah.json` tar entry
+bytes *as they appear on disk in the archive*.
+
+### Sidecar files
+
+- `OUT.sig` — base64-encoded DER ECDSA signature + trailing `\n`.
+  Always written when signing.
+- `OUT.cert` — PEM x509 cert. Not written in keyed mode (reserved for
+  future keyless).
+- `OUT.rekor.json` — cosign 2.x Rekor bundle. Written only when
+  `--rekor-url URL` was set on the producer. Rekor upload itself is
+  deferred to a follow-on PR; `--rekor-url` currently errors with a
+  "not yet implemented" hint.
+
+### Verify matrix
+
+| Archive | `--verify` | Outcome |
+|---|---|---|
+| signed | supplied, key matches | exit 0 |
+| signed | supplied, key mismatch | exit 4 |
+| signed | absent | exit 0 (backward-compat) |
+| unsigned | supplied | exit 4 |
+| unsigned | absent | exit 0 |
+
+### Forward-compat reservations
+
+- `--sign-key cosign://...` — KMS-backed signing; errors today with a
+  reserved-but-unimplemented message.
+- `--verify cosign://...` — same class.
+- `--keyless` — Fulcio/OIDC keyless; reserved.
+- `--sign-inline` — not registered today; additive when added later.
