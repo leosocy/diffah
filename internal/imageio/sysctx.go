@@ -27,7 +27,9 @@ type SystemContextFlags struct {
 	RetryDelay    time.Duration
 }
 
-// OptionalBoolPtr is a helper for tests to build *bool values.
+// OptionalBoolPtr returns a pointer to v. Used when constructing
+// SystemContextFlags to distinguish "flag not set" (nil) from explicit
+// true/false.
 func OptionalBoolPtr(v bool) *bool { return &v }
 
 // BuildSystemContext validates the flag combination and constructs
