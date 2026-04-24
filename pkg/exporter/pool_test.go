@@ -27,10 +27,10 @@ func TestBlobPool_AddIfAbsentAndRefCount(t *testing.T) {
 func TestBlobPool_SeedManifestAndConfig(t *testing.T) {
 	ctx := context.Background()
 	p1, err := planPair(ctx, Pair{Name: "a", BaselineRef: "../../testdata/fixtures/v1_oci.tar",
-		TargetRef: "../../testdata/fixtures/v2_oci.tar"}, "linux/amd64")
+		TargetRef: "../../testdata/fixtures/v2_oci.tar"}, &Options{Platform: "linux/amd64"})
 	require.NoError(t, err)
 	p2, err := planPair(ctx, Pair{Name: "b", BaselineRef: "../../testdata/fixtures/v1_oci.tar",
-		TargetRef: "../../testdata/fixtures/v2_oci.tar"}, "linux/amd64")
+		TargetRef: "../../testdata/fixtures/v2_oci.tar"}, &Options{Platform: "linux/amd64"})
 	require.NoError(t, err)
 
 	pool := newBlobPool()
@@ -47,11 +47,11 @@ func TestEncodeShipped_ForcesFullOnCrossImageDup(t *testing.T) {
 	ctx := context.Background()
 	p1, err := planPair(ctx, Pair{Name: "a",
 		BaselineRef: "../../testdata/fixtures/v2_oci.tar",
-		TargetRef:   "../../testdata/fixtures/v3_oci.tar"}, "linux/amd64")
+		TargetRef:   "../../testdata/fixtures/v3_oci.tar"}, &Options{Platform: "linux/amd64"})
 	require.NoError(t, err)
 	p2, err := planPair(ctx, Pair{Name: "b",
 		BaselineRef: "../../testdata/fixtures/v2_oci.tar",
-		TargetRef:   "../../testdata/fixtures/v3_oci.tar"}, "linux/amd64")
+		TargetRef:   "../../testdata/fixtures/v3_oci.tar"}, &Options{Platform: "linux/amd64"})
 	require.NoError(t, err)
 
 	pool := newBlobPool()

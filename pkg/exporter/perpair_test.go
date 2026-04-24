@@ -11,7 +11,7 @@ func TestPlanPair_ClassifiesLayers(t *testing.T) {
 	p, err := planPair(context.Background(), Pair{
 		Name: "svc", BaselineRef: "../../testdata/fixtures/v1_oci.tar",
 		TargetRef: "../../testdata/fixtures/v2_oci.tar",
-	}, "linux/amd64")
+	}, &Options{Platform: "linux/amd64"})
 	require.NoError(t, err)
 	require.Equal(t, "svc", p.Name)
 	require.NotEmpty(t, p.TargetManifest)

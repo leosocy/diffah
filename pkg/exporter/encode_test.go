@@ -87,7 +87,7 @@ func TestEncodeShipped_StreamsWrittenDuringRead(t *testing.T) {
 		Name:        "svc-a",
 		BaselineRef: "../../testdata/fixtures/v1_oci.tar",
 		TargetRef:   "../../testdata/fixtures/v2_oci.tar",
-	}, "linux/amd64")
+	}, &Options{Platform: "linux/amd64"})
 	require.NoError(t, err)
 
 	pool := newBlobPool()
@@ -126,7 +126,7 @@ func TestEncodeShipped_WarningOnError_FallbackToFull(t *testing.T) {
 		Name:        "svc-a",
 		BaselineRef: "../../testdata/fixtures/v1_oci.tar",
 		TargetRef:   "../../testdata/fixtures/v2_oci.tar",
-	}, "linux/amd64")
+	}, &Options{Platform: "linux/amd64"})
 	require.NoError(t, err)
 
 	fakeDigest := digest.Digest("sha256:0000000000000000000000000000000000000000000000000000000000000000")

@@ -6,6 +6,8 @@ import (
 	"io"
 	"time"
 
+	"go.podman.io/image/v5/types"
+
 	"github.com/leosocy/diffah/internal/zstdpatch"
 	"github.com/leosocy/diffah/pkg/progress"
 )
@@ -18,6 +20,13 @@ type Options struct {
 	ToolVersion string
 	IntraLayer  string
 	CreatedAt   time.Time
+
+	// Registry & transport — threaded into every types.ImageReference
+	// call. Nil is acceptable; it behaves the same as today's path-only
+	// paths. Populated by cmd/diff.go / cmd/bundle.go in Phase 4.
+	SystemContext *types.SystemContext
+	RetryTimes    int
+	RetryDelay    time.Duration
 
 	ProgressReporter progress.Reporter
 	// Deprecated: use ProgressReporter. Will be removed in v0.4.
@@ -79,7 +88,7 @@ func buildBundle(ctx context.Context, opts *Options) (*builtBundle, error) {
 	pool := newBlobPool()
 
 	for _, p := range opts.Pairs {
-		plan, err := planPair(ctx, p, opts.Platform)
+		plan, err := planPair(ctx, p, opts)
 		if err != nil {
 			return nil, fmt.Errorf("plan pair %q: %w", p.Name, err)
 		}

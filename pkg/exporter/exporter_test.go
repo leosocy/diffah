@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.podman.io/image/v5/types"
 
 	"github.com/leosocy/diffah/internal/archive"
 	"github.com/leosocy/diffah/internal/zstdpatch"
@@ -48,6 +49,18 @@ func TestExport_DryRun_ManifestOnlyBaseline(t *testing.T) {
 func TestExport_DeterministicArchive(t *testing.T) {
 	t.Skip("rewritten in Task 17")
 	_ = exporter.Options{}
+}
+
+func TestOptions_AcceptsSystemContext(t *testing.T) {
+	sys := &types.SystemContext{DockerInsecureSkipTLSVerify: types.OptionalBoolTrue}
+	opts := exporter.Options{
+		Pairs:         []exporter.Pair{{Name: "a", BaselineRef: "b", TargetRef: "t"}},
+		SystemContext: sys,
+		RetryTimes:    3,
+	}
+	if opts.SystemContext == nil {
+		t.Fatal("SystemContext should be retained")
+	}
 }
 
 func TestPair_EmptyPairsRejected(t *testing.T) {

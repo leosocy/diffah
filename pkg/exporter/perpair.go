@@ -15,10 +15,16 @@ import (
 )
 
 type pairPlan struct {
-	Name              string
-	BaselineRef       string
-	BaselineImageRef  types.ImageReference
-	TargetImageRef    types.ImageReference
+	Name             string
+	BaselineRef      string
+	BaselineImageRef types.ImageReference
+	TargetImageRef   types.ImageReference
+	// SystemContext carries the transport/registry knobs — auth files,
+	// TLS verification, mirror rewriting, etc. — from opts.SystemContext.
+	// It is forwarded to every NewImageSource call in encodeShipped so
+	// each ref's transport receives the same credentials planPair used.
+	// Nil is acceptable for archive-only paths.
+	SystemContext     *types.SystemContext
 	TargetManifest    []byte
 	TargetMediaType   string
 	TargetLayerDescs  []diff.BlobRef
@@ -32,7 +38,7 @@ type pairPlan struct {
 	Required          []diff.BlobRef
 }
 
-func planPair(ctx context.Context, p Pair, platform string) (*pairPlan, error) {
+func planPair(ctx context.Context, p Pair, opts *Options) (*pairPlan, error) {
 	baseRef, err := imageio.OpenArchiveRef(p.BaselineRef)
 	if err != nil {
 		return nil, fmt.Errorf("open baseline %s: %w", p.BaselineRef, err)
@@ -42,11 +48,13 @@ func planPair(ctx context.Context, p Pair, platform string) (*pairPlan, error) {
 		return nil, fmt.Errorf("open target %s: %w", p.TargetRef, err)
 	}
 
-	_, baseDigests, baseMeta, baseMfBytes, baseMime, err := readManifestBundle(ctx, baseRef, platform)
+	_, baseDigests, baseMeta, baseMfBytes, baseMime, err := readManifestBundle(
+		ctx, baseRef, opts.SystemContext, opts.Platform)
 	if err != nil {
 		return nil, fmt.Errorf("read baseline manifest %s: %w", p.BaselineRef, err)
 	}
-	tgtParsed, _, _, tgtMfBytes, tgtMime, err := readManifestBundle(ctx, tgtRef, platform)
+	tgtParsed, _, _, tgtMfBytes, tgtMime, err := readManifestBundle(
+		ctx, tgtRef, opts.SystemContext, opts.Platform)
 	if err != nil {
 		return nil, fmt.Errorf("read target manifest %s: %w", p.TargetRef, err)
 	}
@@ -60,13 +68,14 @@ func planPair(ctx context.Context, p Pair, platform string) (*pairPlan, error) {
 	plan := diff.ComputePlan(tgtLayers, baseDigests)
 
 	tgtConfigDesc := tgtParsed.ConfigInfo()
-	cfgBytes, err := readBlobBytes(ctx, tgtRef, tgtConfigDesc.Digest)
+	cfgBytes, err := readBlobBytes(ctx, tgtRef, opts.SystemContext, tgtConfigDesc.Digest)
 	if err != nil {
 		return nil, fmt.Errorf("read target config: %w", err)
 	}
 
 	return &pairPlan{
 		Name: p.Name, BaselineRef: p.BaselineRef, BaselineImageRef: baseRef, TargetImageRef: tgtRef,
+		SystemContext:  opts.SystemContext,
 		TargetManifest: tgtMfBytes, TargetMediaType: tgtMime,
 		TargetLayerDescs: tgtLayers,
 		TargetConfigRaw:  cfgBytes,
@@ -84,9 +93,9 @@ func planPair(ctx context.Context, p Pair, platform string) (*pairPlan, error) {
 }
 
 func readManifestBundle(
-	ctx context.Context, ref types.ImageReference, platform string,
+	ctx context.Context, ref types.ImageReference, sys *types.SystemContext, platform string,
 ) (manifest.Manifest, []digest.Digest, []BaselineLayerMeta, []byte, string, error) {
-	src, err := ref.NewImageSource(ctx, nil)
+	src, err := ref.NewImageSource(ctx, sys)
 	if err != nil {
 		return nil, nil, nil, nil, "", err
 	}
@@ -117,8 +126,10 @@ func readManifestBundle(
 	return parsed, digests, meta, raw, mime, nil
 }
 
-func readBlobBytes(ctx context.Context, ref types.ImageReference, d digest.Digest) ([]byte, error) {
-	return streamBlobBytes(ctx, ref, d, nil)
+func readBlobBytes(
+	ctx context.Context, ref types.ImageReference, sys *types.SystemContext, d digest.Digest,
+) ([]byte, error) {
+	return streamBlobBytes(ctx, ref, sys, d, nil)
 }
 
 // streamBlobBytes reads a blob and, if onChunk is non-nil, reports each chunk's
@@ -126,10 +137,10 @@ func readBlobBytes(ctx context.Context, ref types.ImageReference, d digest.Diges
 // Encoders wire onChunk to progress.Layer.Written so the bar animates during
 // the read instead of jumping 0→100 % at Done().
 func streamBlobBytes(
-	ctx context.Context, ref types.ImageReference, d digest.Digest,
-	onChunk func(int64),
+	ctx context.Context, ref types.ImageReference, sys *types.SystemContext,
+	d digest.Digest, onChunk func(int64),
 ) ([]byte, error) {
-	src, err := ref.NewImageSource(ctx, nil)
+	src, err := ref.NewImageSource(ctx, sys)
 	if err != nil {
 		return nil, err
 	}
