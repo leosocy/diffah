@@ -239,6 +239,65 @@ func TestPlanner_EagerBaselineFingerprinting(t *testing.T) {
 	require.Equal(t, Fingerprint{}, p.baselineFP[digest.FromBytes(bBlob)])
 }
 
+func TestPlanner_PlanShippedReusesBaselineFingerprint(t *testing.T) {
+	skipWithoutZstdCLI(t)
+	baseA := pseudoRandom(10, 1<<14)
+	baseB := pseudoRandom(11, 1<<14)
+	target1 := append([]byte(nil), baseA...)
+	target1[0] ^= 0x01
+	target2 := append([]byte(nil), baseB...)
+	target2[0] ^= 0x02
+
+	baseADigest := digest.FromBytes(baseA)
+	baseBDigest := digest.FromBytes(baseB)
+
+	reads := map[digest.Digest]int{}
+	readBlob := func(d digest.Digest) ([]byte, error) {
+		reads[d]++
+		switch d {
+		case baseADigest:
+			return baseA, nil
+		case baseBDigest:
+			return baseB, nil
+		}
+		return nil, &missingBlobError{d: d}
+	}
+
+	baseline := []BaselineLayerMeta{
+		{Digest: baseADigest, Size: int64(len(baseA)), MediaType: "m"},
+		{Digest: baseBDigest, Size: int64(len(baseB)), MediaType: "m"},
+	}
+	p := NewPlanner(baseline, readBlob, nil)
+
+	ctx := context.Background()
+	tgt1 := diff.BlobRef{
+		Digest: digest.FromBytes(target1), Size: int64(len(target1)), MediaType: "m",
+	}
+	tgt2 := diff.BlobRef{
+		Digest: digest.FromBytes(target2), Size: int64(len(target2)), MediaType: "m",
+	}
+
+	_, _, err := p.PlanShipped(ctx, tgt1, target1)
+	require.NoError(t, err)
+	// Snapshot counts after first PlanShipped: ensureBaselineFP has read each
+	// baseline once, plus pickSimilar has pulled the chosen ref for patching.
+	afterFirst := map[digest.Digest]int{
+		baseADigest: reads[baseADigest], baseBDigest: reads[baseBDigest],
+	}
+
+	_, _, err = p.PlanShipped(ctx, tgt2, target2)
+	require.NoError(t, err)
+
+	// The second call must NOT re-run baseline fingerprinting — at most one
+	// extra baseline read may occur, for the patch reference it picks.
+	delta := (reads[baseADigest] - afterFirst[baseADigest]) +
+		(reads[baseBDigest] - afterFirst[baseBDigest])
+	require.LessOrEqual(t, delta, 1,
+		"second PlanShipped caused %d baseline reads (reads=%v, afterFirst=%v); "+
+			"fingerprint cache should mean at most one read (for the patch ref)",
+		delta, reads, afterFirst)
+}
+
 func TestPlanner_EagerFingerprinting_FailedBaselineIsNil(t *testing.T) {
 	aBlob := []byte("baseline-a")
 	blobs := blobMap{digest.FromBytes(aBlob): aBlob}
