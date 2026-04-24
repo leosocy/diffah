@@ -65,7 +65,7 @@ func runDiff(cmd *cobra.Command, args []string) error {
 	opts := exporter.Options{
 		Pairs: []exporter.Pair{{
 			Name:        "default",
-			BaselineRef: baseline.Path, // still bare path — perpair's OpenArchiveRef expects this
+			BaselineRef: baseline.Path,
 			TargetRef:   target.Path,
 		}},
 		Platform:         diffFlags.platform,
