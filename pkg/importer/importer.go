@@ -298,9 +298,9 @@ func ensureOutputParent(rawOut string) error {
 		if err := os.MkdirAll(parent, 0o755); err != nil {
 			return fmt.Errorf("mkdir parent for %s output %s: %w", transport, path, err)
 		}
-	case "dir":
+	case "dir", "oci":
 		if err := os.MkdirAll(path, 0o755); err != nil {
-			return fmt.Errorf("mkdir dir output %s: %w", path, err)
+			return fmt.Errorf("mkdir %s output %s: %w", transport, path, err)
 		}
 	}
 	return nil

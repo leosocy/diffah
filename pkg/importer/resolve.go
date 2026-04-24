@@ -44,16 +44,16 @@ func resolveBaselines(
 		src, err := ref.NewImageSource(ctx, sysctx)
 		if err != nil {
 			cleanup()
-			return nil, diff.ClassifyRegistryErr(
-				fmt.Errorf("open baseline source for %q: %w", img.Name, err), raw)
+			return nil, fmt.Errorf("open baseline source for %q: %w",
+				img.Name, diff.ClassifyRegistryErr(err, raw))
 		}
 
 		manifestBytes, _, err := src.GetManifest(ctx, nil)
 		if err != nil {
 			_ = src.Close()
 			cleanup()
-			return nil, diff.ClassifyRegistryErr(
-				fmt.Errorf("read baseline manifest for %q: %w", img.Name, err), raw)
+			return nil, fmt.Errorf("read baseline manifest for %q: %w",
+				img.Name, diff.ClassifyRegistryErr(err, raw))
 		}
 		got := digest.FromBytes(manifestBytes)
 		if got != img.Baseline.ManifestDigest {
