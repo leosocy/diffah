@@ -26,8 +26,8 @@ type Options struct {
 	Strict           bool
 	SystemContext    *types.SystemContext
 	AllowConvert     bool
-	RetryTimes       int           // reserved for Task 4.4; default 0 = no retry
-	RetryDelay       time.Duration // reserved for Task 4.4
+	RetryTimes       int           // default 0 = no retry; applied to baseline manifest+source open
+	RetryDelay       time.Duration // zero means exponential backoff (capped by withRetry)
 	ProgressReporter progress.Reporter
 	// Deprecated: use ProgressReporter. Will be removed in v0.4.
 	Progress io.Writer
@@ -306,19 +306,17 @@ type ImageDryRun struct {
 // ParseReference implementations resolve the path and require the parent
 // to exist.
 func ensureOutputParent(rawOut string) error {
-	i := strings.IndexByte(rawOut, ':')
-	if i < 0 {
+	transport, path, ok := strings.Cut(rawOut, ":")
+	if !ok {
 		return nil
 	}
-	transport := rawOut[:i]
-	path := rawOut[i+1:]
 	switch transport {
-	case "oci-archive", "docker-archive":
+	case FormatOCIArchive, FormatDockerArchive:
 		parent := filepath.Dir(path)
 		if err := os.MkdirAll(parent, 0o755); err != nil {
 			return fmt.Errorf("mkdir parent for %s output %s: %w", transport, path, err)
 		}
-	case "dir", "oci":
+	case FormatDir, "oci":
 		if err := os.MkdirAll(path, 0o755); err != nil {
 			return fmt.Errorf("mkdir %s output %s: %w", transport, path, err)
 		}

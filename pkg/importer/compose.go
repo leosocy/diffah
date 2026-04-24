@@ -208,7 +208,7 @@ func composeImage(
 	destRef types.ImageReference,
 	sysctx *types.SystemContext,
 	allowConvert bool,
-	_ progress.Reporter, // reserved for Phase 2 progress wiring; not used yet
+	_ progress.Reporter, // hook site for per-blob pull/push progress; not yet wired
 ) error {
 	mfPath := filepath.Join(bundle.blobDir, img.Target.ManifestDigest.Algorithm().String(),
 		img.Target.ManifestDigest.Encoded())

@@ -16,10 +16,10 @@ import (
 // argv, so cmd.Flags().Changed("tls-verify") reflects the user's intent.
 type registryContextBuilder func() (*types.SystemContext, int, time.Duration, error)
 
-// installRegistryFlags registers the Phase 2 registry & transport flag
-// block on cmd and returns a build closure. Installed on apply and
-// unbundle in Phase 2; diff and bundle add it in Phase 3 when they
-// gain registry-source capability.
+// installRegistryFlags registers the registry & transport flag block on
+// cmd and returns a build closure that produces a *types.SystemContext
+// plus retry parameters. Installed on every subcommand that speaks to a
+// registry.
 func installRegistryFlags(cmd *cobra.Command) registryContextBuilder {
 	flags := &imageio.SystemContextFlags{}
 	tlsVerify := true
