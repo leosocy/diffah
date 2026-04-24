@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/google/go-containerregistry/pkg/crane"
 	"github.com/stretchr/testify/require"
 	"go.podman.io/image/v5/copy"
 	"go.podman.io/image/v5/types"
@@ -94,6 +95,47 @@ func TestImporter_PullsBaselineWithBasicAuth(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
+}
+
+func TestImporter_PushesOutputToRegistry(t *testing.T) {
+	ctx := context.Background()
+	srv := registrytest.New(t)
+	pushFixtureIntoRegistry(t, ctx, srv, nil, "app/v1", testdataPath(t, "v1_oci.tar"))
+
+	tmp := t.TempDir()
+	deltaPath := filepath.Join(tmp, "delta.tar")
+	require.NoError(t, exporter.Export(ctx, exporter.Options{
+		Pairs: []exporter.Pair{{
+			Name:         "default",
+			BaselinePath: testdataPath(t, "v1_oci.tar"),
+			TargetPath:   testdataPath(t, "v2_oci.tar"),
+		}},
+		OutputPath:  deltaPath,
+		Platform:    "linux/amd64",
+		IntraLayer:  "auto",
+		ToolVersion: "test",
+	}))
+
+	targetRef := registryDockerURL(t, srv, "app/v2")
+	err := importer.Import(ctx, importer.Options{
+		DeltaPath: deltaPath,
+		Baselines: map[string]string{"default": registryDockerURL(t, srv, "app/v1")},
+		Outputs:   map[string]string{"default": targetRef},
+		Strict:    true,
+		AllowConvert: true,
+		SystemContext: &types.SystemContext{
+			DockerInsecureSkipTLSVerify: types.OptionalBoolTrue,
+		},
+	})
+	require.NoError(t, err)
+
+	// Second client reads the pushed tag back using crane — proves
+	// the image is actually present and readable in the registry.
+	img, err := crane.Pull(registryHost(t, srv)+"/app/v2:latest", crane.Insecure)
+	require.NoError(t, err)
+	d, err := img.Digest()
+	require.NoError(t, err)
+	require.NotEmpty(t, d.String())
 }
 
 // Helpers — keep at file bottom.
