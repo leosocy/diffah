@@ -32,7 +32,7 @@ func assembleSidecar(
 			Baseline: diff.BaselineRef{
 				ManifestDigest: digest.FromBytes(p.BaselineManifest),
 				MediaType:      p.BaselineMediaType,
-				SourceHint:     filepath.Base(p.BaselinePath),
+				SourceHint:     filepath.Base(p.BaselineRef),
 			},
 			Target: diff.TargetRef{
 				ManifestDigest: mfDigest,

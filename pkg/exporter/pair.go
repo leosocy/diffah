@@ -5,9 +5,9 @@ import (
 )
 
 type Pair struct {
-	Name         string
-	BaselinePath string
-	TargetPath   string
+	Name        string
+	BaselineRef string // transport-prefixed reference (e.g. "docker-archive:/tmp/old.tar", "docker://ghcr.io/org/app:v1")
+	TargetRef   string
 }
 
 func ValidatePairs(pairs []Pair) error {

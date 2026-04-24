@@ -57,8 +57,8 @@ func TestPair_EmptyPairsRejected(t *testing.T) {
 
 func TestPair_DuplicateNameRejected(t *testing.T) {
 	pairs := []exporter.Pair{
-		{Name: "a", BaselinePath: "b1.tar", TargetPath: "t1.tar"},
-		{Name: "a", BaselinePath: "b2.tar", TargetPath: "t2.tar"},
+		{Name: "a", BaselineRef: "b1.tar", TargetRef: "t1.tar"},
+		{Name: "a", BaselineRef: "b2.tar", TargetRef: "t2.tar"},
 	}
 	err := exporter.ValidatePairs(pairs)
 	require.Error(t, err)
@@ -71,7 +71,7 @@ func TestExport_RequiredMode_FailsWhenProbeMissing(t *testing.T) {
 	// this test will fail loudly on the dummy paths rather than silently
 	// skip the probe assertion.
 	opts := exporter.Options{
-		Pairs:       []exporter.Pair{{Name: "a", BaselinePath: "does-not-matter", TargetPath: "ditto"}},
+		Pairs:       []exporter.Pair{{Name: "a", BaselineRef: "does-not-matter", TargetRef: "ditto"}},
 		Platform:    "linux/amd64",
 		IntraLayer:  "required",
 		OutputPath:  filepath.Join(tmp, "bundle.tar"),
@@ -88,7 +88,7 @@ func TestExport_RequiredMode_FailsWhenProbeMissing(t *testing.T) {
 func TestExport_AutoMode_DowngradesSilentlyWhenProbeMissing(t *testing.T) {
 	tmp := t.TempDir()
 	opts := exporter.Options{
-		Pairs:       []exporter.Pair{{Name: "a", BaselinePath: "../../testdata/fixtures/v1_oci.tar", TargetPath: "../../testdata/fixtures/v2_oci.tar"}},
+		Pairs:       []exporter.Pair{{Name: "a", BaselineRef: "../../testdata/fixtures/v1_oci.tar", TargetRef: "../../testdata/fixtures/v2_oci.tar"}},
 		Platform:    "linux/amd64",
 		IntraLayer:  "auto",
 		OutputPath:  filepath.Join(tmp, "bundle.tar"),

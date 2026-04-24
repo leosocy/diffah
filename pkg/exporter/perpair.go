@@ -16,9 +16,9 @@ import (
 
 type pairPlan struct {
 	Name              string
-	BaselinePath      string
-	BaselineRef       types.ImageReference
-	TargetRef         types.ImageReference
+	BaselineRef       string
+	BaselineImageRef  types.ImageReference
+	TargetImageRef    types.ImageReference
 	TargetManifest    []byte
 	TargetMediaType   string
 	TargetLayerDescs  []diff.BlobRef
@@ -33,22 +33,22 @@ type pairPlan struct {
 }
 
 func planPair(ctx context.Context, p Pair, platform string) (*pairPlan, error) {
-	baseRef, err := imageio.OpenArchiveRef(p.BaselinePath)
+	baseRef, err := imageio.OpenArchiveRef(p.BaselineRef)
 	if err != nil {
-		return nil, fmt.Errorf("open baseline %s: %w", p.BaselinePath, err)
+		return nil, fmt.Errorf("open baseline %s: %w", p.BaselineRef, err)
 	}
-	tgtRef, err := imageio.OpenArchiveRef(p.TargetPath)
+	tgtRef, err := imageio.OpenArchiveRef(p.TargetRef)
 	if err != nil {
-		return nil, fmt.Errorf("open target %s: %w", p.TargetPath, err)
+		return nil, fmt.Errorf("open target %s: %w", p.TargetRef, err)
 	}
 
 	_, baseDigests, baseMeta, baseMfBytes, baseMime, err := readManifestBundle(ctx, baseRef, platform)
 	if err != nil {
-		return nil, fmt.Errorf("read baseline manifest %s: %w", p.BaselinePath, err)
+		return nil, fmt.Errorf("read baseline manifest %s: %w", p.BaselineRef, err)
 	}
 	tgtParsed, _, _, tgtMfBytes, tgtMime, err := readManifestBundle(ctx, tgtRef, platform)
 	if err != nil {
-		return nil, fmt.Errorf("read target manifest %s: %w", p.TargetPath, err)
+		return nil, fmt.Errorf("read target manifest %s: %w", p.TargetRef, err)
 	}
 
 	tgtLayers := make([]diff.BlobRef, 0, len(tgtParsed.LayerInfos()))
@@ -66,7 +66,7 @@ func planPair(ctx context.Context, p Pair, platform string) (*pairPlan, error) {
 	}
 
 	return &pairPlan{
-		Name: p.Name, BaselinePath: p.BaselinePath, BaselineRef: baseRef, TargetRef: tgtRef,
+		Name: p.Name, BaselineRef: p.BaselineRef, BaselineImageRef: baseRef, TargetImageRef: tgtRef,
 		TargetManifest: tgtMfBytes, TargetMediaType: tgtMime,
 		TargetLayerDescs: tgtLayers,
 		TargetConfigRaw:  cfgBytes,

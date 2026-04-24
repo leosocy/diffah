@@ -63,8 +63,8 @@ func TestIntegration_PartialImport(t *testing.T) {
 		t.Skip()
 	}
 	h := newBundleHarness(t, []exporter.Pair{{
-		Name: "svc-a", BaselinePath: "../../testdata/fixtures/v1_oci.tar",
-		TargetPath: "../../testdata/fixtures/v2_oci.tar",
+		Name: "svc-a", BaselineRef: "../../testdata/fixtures/v1_oci.tar",
+		TargetRef: "../../testdata/fixtures/v2_oci.tar",
 	}})
 	opts := h.importOpts(map[string]string{"svc-a": "oci-archive:../../testdata/fixtures/v1_oci.tar"}, false)
 	err := Import(h.ctx, opts)
@@ -76,8 +76,8 @@ func TestIntegration_StrictRejectsMissing(t *testing.T) {
 		t.Skip()
 	}
 	h := newBundleHarness(t, []exporter.Pair{{
-		Name: "svc-a", BaselinePath: "../../testdata/fixtures/v1_oci.tar",
-		TargetPath: "../../testdata/fixtures/v2_oci.tar",
+		Name: "svc-a", BaselineRef: "../../testdata/fixtures/v1_oci.tar",
+		TargetRef: "../../testdata/fixtures/v2_oci.tar",
 	}})
 	opts := h.importOpts(map[string]string{}, true)
 	err := Import(h.ctx, opts)
@@ -91,10 +91,10 @@ func TestIntegration_ForceFullDedup(t *testing.T) {
 		t.Skip()
 	}
 	h := newBundleHarness(t, []exporter.Pair{
-		{Name: "svc-a", BaselinePath: "../../testdata/fixtures/v1_oci.tar",
-			TargetPath: "../../testdata/fixtures/v2_oci.tar"},
-		{Name: "svc-b", BaselinePath: "../../testdata/fixtures/v1_oci.tar",
-			TargetPath: "../../testdata/fixtures/v2_oci.tar"},
+		{Name: "svc-a", BaselineRef: "../../testdata/fixtures/v1_oci.tar",
+			TargetRef: "../../testdata/fixtures/v2_oci.tar"},
+		{Name: "svc-b", BaselineRef: "../../testdata/fixtures/v1_oci.tar",
+			TargetRef: "../../testdata/fixtures/v2_oci.tar"},
 	})
 	for d, e := range h.sidecar.Blobs {
 		if d == h.sidecar.Images[0].Target.ManifestDigest {
@@ -111,8 +111,8 @@ func TestIntegration_UnknownBaselineName(t *testing.T) {
 		t.Skip()
 	}
 	h := newBundleHarness(t, []exporter.Pair{{
-		Name: "svc-a", BaselinePath: "../../testdata/fixtures/v1_oci.tar",
-		TargetPath: "../../testdata/fixtures/v2_oci.tar",
+		Name: "svc-a", BaselineRef: "../../testdata/fixtures/v1_oci.tar",
+		TargetRef: "../../testdata/fixtures/v2_oci.tar",
 	}})
 	opts := h.importOpts(map[string]string{"unknown-svc": "oci-archive:../../testdata/fixtures/v1_oci.tar"}, false)
 	err := Import(h.ctx, opts)
@@ -127,8 +127,8 @@ func TestIntegration_BaselineMismatch(t *testing.T) {
 		t.Skip()
 	}
 	h := newBundleHarness(t, []exporter.Pair{{
-		Name: "svc-a", BaselinePath: "../../testdata/fixtures/v1_oci.tar",
-		TargetPath: "../../testdata/fixtures/v2_oci.tar",
+		Name: "svc-a", BaselineRef: "../../testdata/fixtures/v1_oci.tar",
+		TargetRef: "../../testdata/fixtures/v2_oci.tar",
 	}})
 	opts := h.importOpts(map[string]string{"svc-a": "oci-archive:../../testdata/fixtures/v2_oci.tar"}, false)
 	err := Import(h.ctx, opts)
@@ -158,8 +158,8 @@ func TestIntegration_Determinism(t *testing.T) {
 	}
 	dir := t.TempDir()
 	pairs := []exporter.Pair{{
-		Name: "svc-a", BaselinePath: "../../testdata/fixtures/v1_oci.tar",
-		TargetPath: "../../testdata/fixtures/v2_oci.tar",
+		Name: "svc-a", BaselineRef: "../../testdata/fixtures/v1_oci.tar",
+		TargetRef: "../../testdata/fixtures/v2_oci.tar",
 	}}
 	ts := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 
@@ -189,8 +189,8 @@ func TestIntegration_BundleOfOnePositional(t *testing.T) {
 		t.Skip()
 	}
 	h := newBundleHarness(t, []exporter.Pair{{
-		Name: "svc-a", BaselinePath: "../../testdata/fixtures/v1_oci.tar",
-		TargetPath: "../../testdata/fixtures/v2_oci.tar",
+		Name: "svc-a", BaselineRef: "../../testdata/fixtures/v1_oci.tar",
+		TargetRef: "../../testdata/fixtures/v2_oci.tar",
 	}})
 	opts := h.importOpts(map[string]string{"default": "oci-archive:../../testdata/fixtures/v1_oci.tar"}, false)
 	err := Import(h.ctx, opts)
@@ -320,10 +320,10 @@ func TestIntegration_MultiImageBundle_ForceFullDedup(t *testing.T) {
 func newMultiImageBundleHarness(t *testing.T) *bundleHarness {
 	t.Helper()
 	return newBundleHarness(t, []exporter.Pair{
-		{Name: "svc-a", BaselinePath: "../../testdata/fixtures/v1_oci.tar",
-			TargetPath: "../../testdata/fixtures/v2_oci.tar"},
-		{Name: "svc-b", BaselinePath: "../../testdata/fixtures/v1_oci.tar",
-			TargetPath: "../../testdata/fixtures/v2_oci.tar"},
+		{Name: "svc-a", BaselineRef: "../../testdata/fixtures/v1_oci.tar",
+			TargetRef: "../../testdata/fixtures/v2_oci.tar"},
+		{Name: "svc-b", BaselineRef: "../../testdata/fixtures/v1_oci.tar",
+			TargetRef: "../../testdata/fixtures/v2_oci.tar"},
 	})
 }
 
@@ -425,13 +425,13 @@ func fixtureImageName(_ *testing.T) string {
 func fixturePair(t *testing.T) exporter.Pair {
 	t.Helper()
 	return exporter.Pair{
-		Name:         "svc-a",
-		BaselinePath: "../../testdata/fixtures/v1_oci.tar",
-		TargetPath:   "../../testdata/fixtures/v2_oci.tar",
+		Name:        "svc-a",
+		BaselineRef: "../../testdata/fixtures/v1_oci.tar",
+		TargetRef:   "../../testdata/fixtures/v2_oci.tar",
 	}
 }
 
-func fixtureBaselinePath(_ *testing.T) string {
+func fixtureBaselineArchivePath(_ *testing.T) string {
 	return "../../testdata/fixtures/v1_oci.tar"
 }
 
@@ -464,7 +464,7 @@ func TestIntegration_AutoDowngradesUnderReducedPATH(t *testing.T) {
 	require.NoError(t, os.MkdirAll(outDir, 0o755))
 	err = Import(context.Background(), Options{
 		DeltaPath: bundlePath,
-		Baselines: map[string]string{fixtureImageName(t): "oci-archive:" + fixtureBaselinePath(t)},
+		Baselines: map[string]string{fixtureImageName(t): "oci-archive:" + fixtureBaselineArchivePath(t)},
 		Outputs:   map[string]string{fixtureImageName(t): "oci-archive:" + filepath.Join(outDir, fixtureImageName(t)+".tar")},
 	})
 	require.NoError(t, err)

@@ -59,9 +59,9 @@ func runBundle(cmd *cobra.Command, args []string) error {
 	pairs := make([]exporter.Pair, len(spec.Pairs))
 	for i, p := range spec.Pairs {
 		pairs[i] = exporter.Pair{
-			Name:         p.Name,
-			BaselinePath: p.Baseline,
-			TargetPath:   p.Target,
+			Name:        p.Name,
+			BaselineRef: p.Baseline,
+			TargetRef:   p.Target,
 		}
 	}
 
