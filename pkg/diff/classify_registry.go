@@ -12,6 +12,13 @@ import (
 // error is not recognised as registry-related, the original error is
 // returned unchanged so the existing errs.Classify fallbacks still
 // apply.
+//
+// HACK: string-based matching tracks the error message contracts of
+// docker/podman/distribution at the time of writing. When upstream
+// phrasing drifts, the patterns here must be updated and tests
+// extended. Case ordering is deliberate: auth is checked first so
+// that a message like "unauthorized: manifest not found" classifies
+// as auth (the actionable root cause) rather than a missing manifest.
 func ClassifyRegistryErr(err error, ref string) error {
 	if err == nil {
 		return nil
