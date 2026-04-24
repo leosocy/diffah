@@ -28,7 +28,7 @@ func ClassifyRegistryErr(err error, ref string) error {
 	switch {
 	case containsAny(msg, "unauthorized", "authentication required", "denied"):
 		return &ErrRegistryAuth{Registry: ref}
-	case containsAny(msg, "manifest unknown", "not found"):
+	case containsAny(msg, "manifest unknown", "name unknown", "not found"):
 		return &ErrRegistryManifestMissing{Ref: ref}
 	case containsAny(msg, "schema version", "unsupported media type", "invalid manifest"):
 		return &ErrRegistryManifestInvalid{Ref: ref, Reason: err.Error()}

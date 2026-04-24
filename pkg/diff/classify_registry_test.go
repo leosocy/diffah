@@ -25,6 +25,16 @@ func TestClassifyRegistryErr_ManifestMissing(t *testing.T) {
 	require.ErrorAs(t, got, &typed)
 }
 
+func TestClassifyRegistryErr_NameUnknown(t *testing.T) {
+	// OCI distribution spec returns NAME_UNKNOWN when the repository does not
+	// exist at all. This is semantically "image not found" and must classify
+	// as content so callers get exit 4, not exit 1 (internal).
+	upstream := fmt.Errorf("name unknown: Unknown name")
+	got := ClassifyRegistryErr(upstream, "docker://127.0.0.1:12345/nonexistent/repo:latest")
+	var typed *ErrRegistryManifestMissing
+	require.ErrorAs(t, got, &typed)
+}
+
 func TestClassifyRegistryErr_Network(t *testing.T) {
 	upstream := &url.Error{Op: "Get", URL: "https://x", Err: &net.OpError{Op: "dial", Err: errors.New("connection refused")}}
 	got := ClassifyRegistryErr(upstream, "docker://x/y:z")
