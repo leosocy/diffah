@@ -7,32 +7,44 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/leosocy/diffah/internal/imageio"
 	"github.com/leosocy/diffah/pkg/diff"
 	"github.com/leosocy/diffah/pkg/exporter"
 )
 
-// defaultToDockerArchive prepends "docker-archive:" to values that have
-// no transport prefix. Used while BundleSpec still accepts bare paths;
-// Phase 5 removes this by requiring prefixes at the spec-parse layer.
+// defaultToArchiveTransport normalises a BundleSpec baseline/target value
+// into an alltransports-parseable reference. Already-prefixed values
+// ("docker://…", "oci-archive:…", "docker-archive:…") pass through
+// unchanged. Bare paths are sniffed against the tar header: an OCI
+// archive gets "oci-archive:" and a docker archive gets "docker-archive:".
+// If the file cannot be opened or the format cannot be determined the
+// function falls back to "docker-archive:" so the downstream
+// alltransports parser emits the error message that existed pre-Phase 3.
+// Phase 5 will retire this shim by requiring transport prefixes at the
+// spec-parse layer.
 //
-// Heuristic: treat a leading segment before ':' as a transport only
-// when it contains no slash or backslash. BundleSpec writes absolute
-// filesystem paths today, so "/tmp/old.tar" has a slash in its prefix
-// and falls through to the prepend branch. "docker-archive:/tmp/x.tar"
-// has no slash before ':' and is already-prefixed.
-//
-// POSIX paths only. A Windows bare path like `C:\foo.tar` has no slash
-// in the segment before ':' and would be misclassified as transport
-// "C". The project is macOS/Linux-only today; Phase 5 retires the
-// shim before Windows becomes a concern.
-func defaultToDockerArchive(s string) string {
-	if i := strings.Index(s, ":"); i > 0 {
-		prefix := s[:i]
-		if !strings.ContainsAny(prefix, "/\\") {
-			return s
-		}
+// Transport-prefix detection uses the same heuristic the shim has
+// always used: a leading segment before ':' that contains no slash or
+// backslash is treated as a transport name. BundleSpec values are
+// POSIX-style absolute paths today; Windows support would have to
+// revisit this before the shim is retired.
+func defaultToArchiveTransport(s string) string {
+	if hasTransportPrefix(s) {
+		return s
 	}
-	return "docker-archive:" + s
+	if format, err := imageio.SniffArchiveFormat(s); err == nil {
+		return format + ":" + s
+	}
+	return imageio.FormatDockerArchive + ":" + s
+}
+
+func hasTransportPrefix(s string) bool {
+	i := strings.Index(s, ":")
+	if i <= 0 {
+		return false
+	}
+	prefix := s[:i]
+	return !strings.ContainsAny(prefix, "/\\")
 }
 
 var bundleFlags = struct {
@@ -85,8 +97,8 @@ func runBundle(cmd *cobra.Command, args []string) error {
 	for i, p := range spec.Pairs {
 		pairs[i] = exporter.Pair{
 			Name:        p.Name,
-			BaselineRef: defaultToDockerArchive(p.Baseline),
-			TargetRef:   defaultToDockerArchive(p.Target),
+			BaselineRef: defaultToArchiveTransport(p.Baseline),
+			TargetRef:   defaultToArchiveTransport(p.Target),
 		}
 	}
 

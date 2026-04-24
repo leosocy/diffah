@@ -8,6 +8,7 @@ import (
 
 	"github.com/opencontainers/go-digest"
 	"go.podman.io/image/v5/manifest"
+	"go.podman.io/image/v5/pkg/blobinfocache/none"
 	"go.podman.io/image/v5/transports/alltransports"
 	"go.podman.io/image/v5/types"
 
@@ -51,12 +52,14 @@ func planPair(ctx context.Context, p Pair, opts *Options) (*pairPlan, error) {
 	_, baseDigests, baseMeta, baseMfBytes, baseMime, err := readManifestBundle(
 		ctx, baseRef, opts.SystemContext, opts.Platform)
 	if err != nil {
-		return nil, fmt.Errorf("read baseline manifest %s: %w", p.BaselineRef, err)
+		return nil, fmt.Errorf("read baseline manifest %s: %w",
+			p.BaselineRef, diff.ClassifyRegistryErr(err, p.BaselineRef))
 	}
 	tgtParsed, _, _, tgtMfBytes, tgtMime, err := readManifestBundle(
 		ctx, tgtRef, opts.SystemContext, opts.Platform)
 	if err != nil {
-		return nil, fmt.Errorf("read target manifest %s: %w", p.TargetRef, err)
+		return nil, fmt.Errorf("read target manifest %s: %w",
+			p.TargetRef, diff.ClassifyRegistryErr(err, p.TargetRef))
 	}
 
 	tgtLayers := make([]diff.BlobRef, 0, len(tgtParsed.LayerInfos()))
@@ -70,7 +73,8 @@ func planPair(ctx context.Context, p Pair, opts *Options) (*pairPlan, error) {
 	tgtConfigDesc := tgtParsed.ConfigInfo()
 	cfgBytes, err := readBlobBytes(ctx, tgtRef, opts.SystemContext, tgtConfigDesc.Digest)
 	if err != nil {
-		return nil, fmt.Errorf("read target config: %w", err)
+		return nil, fmt.Errorf("read target config: %w",
+			diff.ClassifyRegistryErr(err, p.TargetRef))
 	}
 
 	return &pairPlan{
@@ -145,7 +149,11 @@ func streamBlobBytes(
 		return nil, err
 	}
 	defer src.Close()
-	r, _, err := src.GetBlob(ctx, types.BlobInfo{Digest: d}, nil)
+	// NoCache is the canonical "don't record/consult the BIC" sentinel.
+	// Passing a literal nil here panics on the docker transport because
+	// go.podman.io/image/v5/docker calls RecordKnownLocation on the cache
+	// unconditionally inside dockerClient.getBlob.
+	r, _, err := src.GetBlob(ctx, types.BlobInfo{Digest: d}, none.NoCache)
 	if err != nil {
 		return nil, err
 	}

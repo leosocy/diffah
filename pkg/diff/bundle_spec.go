@@ -155,8 +155,27 @@ func validateTransportRef(ref string) error {
 }
 
 func resolveSpecPath(base, p string) string {
+	if hasTransportPrefix(p) {
+		return p
+	}
 	if filepath.IsAbs(p) {
 		return p
 	}
 	return filepath.Join(base, p)
+}
+
+// hasTransportPrefix returns true when p starts with a transport name
+// followed by ':' (e.g. "docker://...", "oci-archive:...",
+// "docker-archive:..."). The heuristic treats a leading segment that
+// contains no slash or backslash before the first ':' as a transport.
+// This keeps resolveSpecPath from joining transport-prefixed values to
+// the spec dir. Phase 5 retires this by requiring transport prefixes
+// at the spec layer and validating them up front.
+func hasTransportPrefix(p string) bool {
+	colon := strings.Index(p, ":")
+	if colon <= 0 {
+		return false
+	}
+	prefix := p[:colon]
+	return !strings.ContainsAny(prefix, "/\\")
 }
