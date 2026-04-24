@@ -8,9 +8,9 @@ import (
 
 	"github.com/opencontainers/go-digest"
 	"go.podman.io/image/v5/manifest"
+	"go.podman.io/image/v5/transports/alltransports"
 	"go.podman.io/image/v5/types"
 
-	"github.com/leosocy/diffah/internal/imageio"
 	"github.com/leosocy/diffah/pkg/diff"
 )
 
@@ -39,13 +39,13 @@ type pairPlan struct {
 }
 
 func planPair(ctx context.Context, p Pair, opts *Options) (*pairPlan, error) {
-	baseRef, err := imageio.OpenArchiveRef(p.BaselineRef)
+	baseRef, err := alltransports.ParseImageName(p.BaselineRef)
 	if err != nil {
-		return nil, fmt.Errorf("open baseline %s: %w", p.BaselineRef, err)
+		return nil, fmt.Errorf("parse baseline ref %s: %w", p.BaselineRef, err)
 	}
-	tgtRef, err := imageio.OpenArchiveRef(p.TargetRef)
+	tgtRef, err := alltransports.ParseImageName(p.TargetRef)
 	if err != nil {
-		return nil, fmt.Errorf("open target %s: %w", p.TargetRef, err)
+		return nil, fmt.Errorf("parse target ref %s: %w", p.TargetRef, err)
 	}
 
 	_, baseDigests, baseMeta, baseMfBytes, baseMime, err := readManifestBundle(

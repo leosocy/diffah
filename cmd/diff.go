@@ -65,8 +65,8 @@ func runDiff(cmd *cobra.Command, args []string) error {
 	opts := exporter.Options{
 		Pairs: []exporter.Pair{{
 			Name:        "default",
-			BaselineRef: baseline.Path,
-			TargetRef:   target.Path,
+			BaselineRef: baseline.Raw,
+			TargetRef:   target.Raw,
 		}},
 		Platform:         diffFlags.platform,
 		Compress:         diffFlags.compress,

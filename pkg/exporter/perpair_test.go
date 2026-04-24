@@ -9,8 +9,8 @@ import (
 
 func TestPlanPair_ClassifiesLayers(t *testing.T) {
 	p, err := planPair(context.Background(), Pair{
-		Name: "svc", BaselineRef: "../../testdata/fixtures/v1_oci.tar",
-		TargetRef: "../../testdata/fixtures/v2_oci.tar",
+		Name: "svc", BaselineRef: "oci-archive:../../testdata/fixtures/v1_oci.tar",
+		TargetRef: "oci-archive:../../testdata/fixtures/v2_oci.tar",
 	}, &Options{Platform: "linux/amd64"})
 	require.NoError(t, err)
 	require.Equal(t, "svc", p.Name)

@@ -3,12 +3,32 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/leosocy/diffah/pkg/diff"
 	"github.com/leosocy/diffah/pkg/exporter"
 )
+
+// defaultToDockerArchive prepends "docker-archive:" to values that have
+// no transport prefix. Used while BundleSpec still accepts bare paths;
+// Phase 5 removes this by requiring prefixes at the spec-parse layer.
+//
+// Heuristic: treat a leading segment before ':' as a transport only
+// when it contains no slash or backslash. BundleSpec writes absolute
+// filesystem paths today, so "/tmp/old.tar" has a slash in its prefix
+// and falls through to the prepend branch. "docker-archive:/tmp/x.tar"
+// has no slash before ':' and is already-prefixed.
+func defaultToDockerArchive(s string) string {
+	if i := strings.Index(s, ":"); i > 0 {
+		prefix := s[:i]
+		if !strings.ContainsAny(prefix, "/\\") {
+			return s
+		}
+	}
+	return "docker-archive:" + s
+}
 
 var bundleFlags = struct {
 	platform   string
@@ -60,8 +80,8 @@ func runBundle(cmd *cobra.Command, args []string) error {
 	for i, p := range spec.Pairs {
 		pairs[i] = exporter.Pair{
 			Name:        p.Name,
-			BaselineRef: p.Baseline,
-			TargetRef:   p.Target,
+			BaselineRef: defaultToDockerArchive(p.Baseline),
+			TargetRef:   defaultToDockerArchive(p.Target),
 		}
 	}
 

@@ -6,11 +6,12 @@ import (
 
 type Pair struct {
 	Name string
-	// BaselineRef holds a bare archive filesystem path today (routed
-	// through imageio.OpenArchiveRef). Phase 3 switches planPair to
-	// alltransports.ParseImageName and this field starts accepting
-	// transport-prefixed refs (e.g. "docker-archive:/tmp/old.tar",
-	// "docker://ghcr.io/org/app:v1").
+	// BaselineRef / TargetRef carry transport-prefixed references that
+	// planPair feeds directly to alltransports.ParseImageName. Supported
+	// forms include "docker-archive:/tmp/old.tar",
+	// "oci-archive:/tmp/new.tar", "oci:/tmp/layout", "dir:/tmp/dir",
+	// and "docker://host/repo:tag". Bare paths are rejected; cmd/
+	// callers are responsible for normalizing their inputs.
 	BaselineRef string
 	TargetRef   string
 }

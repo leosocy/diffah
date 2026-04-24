@@ -52,8 +52,8 @@ func buildTestBundle(t *testing.T, name string) string {
 	err := exporter.Export(context.Background(), exporter.Options{
 		Pairs: []exporter.Pair{{
 			Name:        name,
-			BaselineRef: "../../testdata/fixtures/v1_oci.tar",
-			TargetRef:   "../../testdata/fixtures/v2_oci.tar",
+			BaselineRef: "oci-archive:../../testdata/fixtures/v1_oci.tar",
+			TargetRef: "oci-archive:../../testdata/fixtures/v2_oci.tar",
 		}},
 		Platform:    "linux/amd64",
 		IntraLayer:  "off",

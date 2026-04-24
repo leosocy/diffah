@@ -101,7 +101,7 @@ func TestExport_RequiredMode_FailsWhenProbeMissing(t *testing.T) {
 func TestExport_AutoMode_DowngradesSilentlyWhenProbeMissing(t *testing.T) {
 	tmp := t.TempDir()
 	opts := exporter.Options{
-		Pairs:       []exporter.Pair{{Name: "a", BaselineRef: "../../testdata/fixtures/v1_oci.tar", TargetRef: "../../testdata/fixtures/v2_oci.tar"}},
+		Pairs:       []exporter.Pair{{Name: "a", BaselineRef: "oci-archive:../../testdata/fixtures/v1_oci.tar", TargetRef: "oci-archive:../../testdata/fixtures/v2_oci.tar"}},
 		Platform:    "linux/amd64",
 		IntraLayer:  "auto",
 		OutputPath:  filepath.Join(tmp, "bundle.tar"),
