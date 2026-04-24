@@ -35,6 +35,15 @@ type SignRequest struct {
 	Payload         []byte // sha256(jcs(sidecar.json)); MUST be 32 bytes
 }
 
+// ProbeKey performs the same PEM/envelope parse that Sign would do, but
+// discards the parsed key. Useful for dry-run / doctor paths that want
+// to fail fast on unreadable or malformed key files without doing the
+// downstream planning work.
+func ProbeKey(path string, passphrase []byte) error {
+	_, err := loadPrivateKey(path, passphrase)
+	return err
+}
+
 // Sign produces an ECDSA-P256 signature over req.Payload using the key
 // at req.KeyPath. Cosign-boxed (scrypt + nacl/secretbox) keys require a
 // passphrase; plain PEM keys do not. When req.RekorURL is non-empty the

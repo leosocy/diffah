@@ -138,6 +138,39 @@ func TestSign_EncryptedKey_MissingPassphrase(t *testing.T) {
 	}
 }
 
+// TestProbeKey_GoodPlainPEM asserts a well-formed unencrypted key parses
+// successfully via the ProbeKey helper. Used by the CLI dry-run path.
+func TestProbeKey_GoodPlainPEM(t *testing.T) {
+	t.Parallel()
+	if err := signer.ProbeKey(unencryptedKey, nil); err != nil {
+		t.Fatalf("ProbeKey: %v", err)
+	}
+}
+
+// TestProbeKey_MissingFile asserts the underlying file-open error
+// surfaces — the CLI layer wraps it into CategoryUser.
+func TestProbeKey_MissingFile(t *testing.T) {
+	t.Parallel()
+	err := signer.ProbeKey("/does/not/exist/key.pem", nil)
+	if err == nil {
+		t.Fatal("expected error on missing key file")
+	}
+}
+
+// TestProbeKey_EncryptedKeyHappyPath asserts an encrypted key with the
+// correct passphrase parses via ProbeKey. Mirrors TestSign_EncryptedKey
+// for the probe-only code path.
+func TestProbeKey_EncryptedKeyHappyPath(t *testing.T) {
+	t.Parallel()
+	pass, err := os.ReadFile(passphrasePath)
+	if err != nil {
+		t.Fatalf("read passphrase fixture: %v", err)
+	}
+	if err := signer.ProbeKey(encryptedKey, append([]byte{}, pass...)); err != nil {
+		t.Fatalf("ProbeKey encrypted: %v", err)
+	}
+}
+
 // TestSign_PassphraseZeroedAfterUse pins the SignRequest contract: the
 // PassphraseBytes slice is zeroed in place after Sign returns. Callers
 // rely on this to minimise the lifetime of secret material in memory.

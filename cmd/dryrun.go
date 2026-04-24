@@ -1,13 +1,42 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"time"
 
+	"github.com/spf13/cobra"
+
+	"github.com/leosocy/diffah/pkg/diff/errs"
 	"github.com/leosocy/diffah/pkg/exporter"
 	"github.com/leosocy/diffah/pkg/importer"
+	"github.com/leosocy/diffah/pkg/signer"
 )
+
+// runExportDryRun is the shared dry-run branch used by diff and bundle.
+// It probes the sign-key first (fail fast on unreadable / malformed
+// key files), then prints either text or JSON statistics. The sign
+// probe is the single consumer of the passphrase in dry-run mode — the
+// real-sign path has its own call chain through exporter.Export.
+func runExportDryRun(ctx context.Context, cmd *cobra.Command, opts exporter.Options,
+	signing bool, signReq signer.SignRequest, textFmt string) error {
+	if signing {
+		if err := signer.ProbeKey(signReq.KeyPath, signReq.PassphraseBytes); err != nil {
+			return &cliErr{cat: errs.CategoryUser, msg: "read key file " + signReq.KeyPath + ": " + err.Error()}
+		}
+	}
+	stats, err := exporter.DryRun(ctx, opts)
+	if err != nil {
+		return err
+	}
+	if outputFormat == outputJSON {
+		return writeJSON(cmd.OutOrStdout(), exportDryRunJSON(stats))
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), textFmt,
+		stats.TotalBlobs, stats.TotalImages, stats.ArchiveSize)
+	return nil
+}
 
 func exportDryRunJSON(stats exporter.DryRunStats) any {
 	images := make([]map[string]any, 0, len(stats.PerImage))

@@ -12,6 +12,17 @@
   sed -E -i '' 's|(\"baseline\"\|\"target\"): \"([^:\"]*\.tar[a-z]*)\"|\1: \"docker-archive:\2\"|g' bundle.json
   ```
 
+### Additions
+
+- **Signing on `diff` and `bundle`**: `--sign-key PATH` writes a
+  cosign-compatible `.sig` sidecar next to the archive. Supports plain
+  PEM and cosign-boxed (scrypt + nacl/secretbox) private keys.
+  Passphrase via `--sign-key-password-stdin`.
+- **Rekor transparency opt-in**: `--rekor-url URL` is registered on
+  both verbs but Rekor upload is not yet implemented in this Phase 3
+  slice; passing `--rekor-url` currently errors with a
+  "not yet implemented" hint pointing at a follow-on PR.
+
 ## [Unreleased] — Phase 2: Registry-native import
 
 ### Breaking changes
