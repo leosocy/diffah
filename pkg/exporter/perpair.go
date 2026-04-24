@@ -1,6 +1,7 @@
 package exporter
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -117,6 +118,17 @@ func readManifestBundle(
 }
 
 func readBlobBytes(ctx context.Context, ref types.ImageReference, d digest.Digest) ([]byte, error) {
+	return streamBlobBytes(ctx, ref, d, nil)
+}
+
+// streamBlobBytes reads a blob and, if onChunk is non-nil, reports each chunk's
+// byte count as it arrives. The returned slice holds the full blob bytes.
+// Encoders wire onChunk to progress.Layer.Written so the bar animates during
+// the read instead of jumping 0→100 % at Done().
+func streamBlobBytes(
+	ctx context.Context, ref types.ImageReference, d digest.Digest,
+	onChunk func(int64),
+) ([]byte, error) {
 	src, err := ref.NewImageSource(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -127,5 +139,30 @@ func readBlobBytes(ctx context.Context, ref types.ImageReference, d digest.Diges
 		return nil, err
 	}
 	defer r.Close()
-	return io.ReadAll(r)
+	return readAllReportingChunks(r, onChunk)
+}
+
+// readAllReportingChunks drains r into a byte slice and, for every non-zero
+// chunk read, invokes onChunk(n). If onChunk is nil this collapses to
+// io.ReadAll. Split out so chunking behavior is unit-testable without a live
+// ImageSource.
+func readAllReportingChunks(r io.Reader, onChunk func(int64)) ([]byte, error) {
+	if onChunk == nil {
+		return io.ReadAll(r)
+	}
+	var buf bytes.Buffer
+	chunk := make([]byte, 64*1024)
+	for {
+		n, err := r.Read(chunk)
+		if n > 0 {
+			buf.Write(chunk[:n])
+			onChunk(int64(n))
+		}
+		if err == io.EOF {
+			return buf.Bytes(), nil
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
 }

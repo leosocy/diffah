@@ -16,7 +16,7 @@ func NewAuto(w io.Writer) Reporter {
 
 func newAutoFor(w io.Writer, tty, color, ci bool) Reporter {
 	if tty && !ci && color {
-		return NewBars(w)
+		return newBarsUnchecked(w)
 	}
 	return NewLine(w)
 }

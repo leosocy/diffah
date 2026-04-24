@@ -155,6 +155,24 @@ func TestFromWriter_NonNil(t *testing.T) {
 	}
 }
 
+func TestNewBars_FallsBackToLineOnNonTTY(t *testing.T) {
+	var buf bytes.Buffer
+	r := progress.NewBars(&buf)
+	r.Phase("encoding")
+	l := r.StartLayer(digest.Digest("sha256:fallbackcafebabe"), 1024, "full")
+	l.Written(1024)
+	l.Done()
+	r.Finish()
+
+	out := buf.String()
+	if !strings.Contains(out, "[encoding]") {
+		t.Errorf("non-TTY NewBars must still emit phase markers (line fallback), got %q", out)
+	}
+	if !strings.Contains(out, "done") {
+		t.Errorf("non-TTY NewBars must still emit layer done lines (line fallback), got %q", out)
+	}
+}
+
 func TestReporter_Interface(_ *testing.T) {
 	implementations := []progress.Reporter{
 		progress.NewDiscard(),
