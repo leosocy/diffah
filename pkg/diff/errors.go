@@ -166,7 +166,8 @@ type ErrMultiImageNeedsNamedBaselines struct{ N int }
 
 func (e *ErrMultiImageNeedsNamedBaselines) Error() string {
 	return fmt.Sprintf(
-		"archive contains %d images; multi-image unbundle requires a BASELINE-SPEC JSON mapping each image name to its baseline path",
+		"archive contains %d images; multi-image unbundle requires a BASELINE-SPEC JSON"+
+			" mapping each image name to its baseline path",
 		e.N)
 }
 

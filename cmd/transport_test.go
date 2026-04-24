@@ -5,8 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/leosocy/diffah/pkg/diff/errs"
 	"github.com/stretchr/testify/require"
+
+	"github.com/leosocy/diffah/pkg/diff/errs"
 )
 
 func TestParseImageRef_AcceptsSupportedTransports(t *testing.T) {
