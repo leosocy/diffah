@@ -1,8 +1,10 @@
 package diff
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -14,7 +16,7 @@ func TestParseBundleSpec_HappyPath(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "b.tar"), []byte{}, 0o600))
 	raw := []byte(`{
 		"pairs": [
-			{"name":"service-a","baseline":"a.tar","target":"b.tar"}
+			{"name":"service-a","baseline":"docker-archive:a.tar","target":"docker-archive:b.tar"}
 		]
 	}`)
 	specPath := filepath.Join(dir, "bundle.json")
@@ -24,8 +26,8 @@ func TestParseBundleSpec_HappyPath(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, spec.Pairs, 1)
 	require.Equal(t, "service-a", spec.Pairs[0].Name)
-	require.Equal(t, filepath.Join(dir, "a.tar"), spec.Pairs[0].Baseline)
-	require.Equal(t, filepath.Join(dir, "b.tar"), spec.Pairs[0].Target)
+	require.Equal(t, "docker-archive:"+filepath.Join(dir, "a.tar"), spec.Pairs[0].Baseline)
+	require.Equal(t, "docker-archive:"+filepath.Join(dir, "b.tar"), spec.Pairs[0].Target)
 }
 
 func TestParseBaselineSpec_HappyPath(t *testing.T) {
@@ -67,9 +69,9 @@ func TestParseBundleSpec_RejectsMalformed(t *testing.T) {
 		body string
 		want string
 	}{
-		{"missing name", `{"pairs":[{"baseline":"a","target":"b"}]}`, "name"},
-		{"duplicate name", `{"pairs":[{"name":"x","baseline":"a","target":"b"},{"name":"x","baseline":"c","target":"d"}]}`, "duplicate"},
-		{"bad name", `{"pairs":[{"name":"-bad","baseline":"a","target":"b"}]}`, "name"},
+		{"missing name", `{"pairs":[{"baseline":"docker-archive:a","target":"docker-archive:b"}]}`, "name"},
+		{"duplicate name", `{"pairs":[{"name":"x","baseline":"docker-archive:a","target":"docker-archive:b"},{"name":"x","baseline":"docker-archive:c","target":"docker-archive:d"}]}`, "duplicate"},
+		{"bad name", `{"pairs":[{"name":"-bad","baseline":"docker-archive:a","target":"docker-archive:b"}]}`, "name"},
 		{"bad JSON", `{invalid`, "bundle spec"},
 	}
 	for _, tc := range cases {
@@ -81,6 +83,32 @@ func TestParseBundleSpec_RejectsMalformed(t *testing.T) {
 			require.Error(t, err)
 			require.Contains(t, err.Error(), tc.want)
 		})
+	}
+}
+
+func TestParseBundleSpec_BarePathRejected(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "bundle.json")
+	if err := os.WriteFile(path, []byte(`{
+  "pairs": [
+    {"name": "svc-a", "baseline": "v1/svc-a.tar", "target": "v2/svc-a.tar"}
+  ]
+}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := ParseBundleSpec(path)
+	if err == nil {
+		t.Fatal("expected error on bare-path baseline")
+	}
+	var missing *ErrBundleSpecMissingTransport
+	if !errors.As(err, &missing) {
+		t.Fatalf("want ErrBundleSpecMissingTransport, got %T: %v", err, err)
+	}
+	if missing.FieldPath != "pairs[0].baseline" {
+		t.Errorf("FieldPath = %q, want pairs[0].baseline", missing.FieldPath)
+	}
+	if !strings.Contains(err.Error(), "docker-archive:") {
+		t.Error("migration hint should mention 'docker-archive:' prefix")
 	}
 }
 

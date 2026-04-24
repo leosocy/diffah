@@ -3,49 +3,12 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/spf13/cobra"
 
-	"github.com/leosocy/diffah/internal/imageio"
 	"github.com/leosocy/diffah/pkg/diff"
 	"github.com/leosocy/diffah/pkg/exporter"
 )
-
-// defaultToArchiveTransport normalises a BundleSpec baseline/target value
-// into an alltransports-parseable reference. Already-prefixed values
-// ("docker://…", "oci-archive:…", "docker-archive:…") pass through
-// unchanged. Bare paths are sniffed against the tar header: an OCI
-// archive gets "oci-archive:" and a docker archive gets "docker-archive:".
-// If the file cannot be opened or the format cannot be determined the
-// function falls back to "docker-archive:" so the downstream
-// alltransports parser emits the error message that existed pre-Phase 3.
-// Phase 5 will retire this shim by requiring transport prefixes at the
-// spec-parse layer.
-//
-// Transport-prefix detection uses the same heuristic the shim has
-// always used: a leading segment before ':' that contains no slash or
-// backslash is treated as a transport name. BundleSpec values are
-// POSIX-style absolute paths today; Windows support would have to
-// revisit this before the shim is retired.
-func defaultToArchiveTransport(s string) string {
-	if hasTransportPrefix(s) {
-		return s
-	}
-	if format, err := imageio.SniffArchiveFormat(s); err == nil {
-		return format + ":" + s
-	}
-	return imageio.FormatDockerArchive + ":" + s
-}
-
-func hasTransportPrefix(s string) bool {
-	i := strings.Index(s, ":")
-	if i <= 0 {
-		return false
-	}
-	prefix := s[:i]
-	return !strings.ContainsAny(prefix, "/\\")
-}
 
 var bundleFlags = struct {
 	platform           string
@@ -99,8 +62,8 @@ func runBundle(cmd *cobra.Command, args []string) error {
 	for i, p := range spec.Pairs {
 		pairs[i] = exporter.Pair{
 			Name:        p.Name,
-			BaselineRef: defaultToArchiveTransport(p.Baseline),
-			TargetRef:   defaultToArchiveTransport(p.Target),
+			BaselineRef: p.Baseline,
+			TargetRef:   p.Target,
 		}
 	}
 

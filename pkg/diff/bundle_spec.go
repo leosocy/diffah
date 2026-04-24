@@ -48,8 +48,21 @@ func ParseBundleSpec(path string) (*BundleSpec, error) {
 			return nil, &ErrInvalidBundleSpec{Path: path, Reason: fmt.Sprintf(
 				"pairs[%d] requires baseline and target", i)}
 		}
-		p.Baseline = resolveSpecPath(base, p.Baseline)
-		p.Target = resolveSpecPath(base, p.Target)
+		if err := validateTransportRef(p.Baseline); err != nil {
+			return nil, &ErrBundleSpecMissingTransport{
+				FieldPath: fmt.Sprintf("pairs[%d].baseline", i),
+				Value:     p.Baseline,
+			}
+		}
+		p.Baseline = resolveTransportPrefixedPath(base, p.Baseline)
+
+		if err := validateTransportRef(p.Target); err != nil {
+			return nil, &ErrBundleSpecMissingTransport{
+				FieldPath: fmt.Sprintf("pairs[%d].target", i),
+				Value:     p.Target,
+			}
+		}
+		p.Target = resolveTransportPrefixedPath(base, p.Target)
 	}
 	return &spec, nil
 }
@@ -154,28 +167,26 @@ func validateTransportRef(ref string) error {
 	return nil
 }
 
-func resolveSpecPath(base, p string) string {
-	if hasTransportPrefix(p) {
-		return p
+// resolveTransportPrefixedPath resolves relative filesystem paths inside
+// file-backed transports against the spec-file directory. Registry
+// transports (docker://) are returned unchanged.
+func resolveTransportPrefixedPath(base, ref string) string {
+	prefix, rest, ok := strings.Cut(ref, ":")
+	if !ok {
+		return ref // unreachable after validateTransportRef; belt-and-braces
 	}
-	if filepath.IsAbs(p) {
-		return p
+	switch prefix {
+	case "docker-archive", "oci-archive", "oci", "dir":
+		pathPart := rest
+		tail := ""
+		if idx := strings.Index(rest, ":"); idx >= 0 {
+			pathPart, tail = rest[:idx], rest[idx:]
+		}
+		if !filepath.IsAbs(pathPart) {
+			pathPart = filepath.Join(base, pathPart)
+		}
+		return prefix + ":" + pathPart + tail
+	default:
+		return ref
 	}
-	return filepath.Join(base, p)
-}
-
-// hasTransportPrefix returns true when p starts with a transport name
-// followed by ':' (e.g. "docker://...", "oci-archive:...",
-// "docker-archive:..."). The heuristic treats a leading segment that
-// contains no slash or backslash before the first ':' as a transport.
-// This keeps resolveSpecPath from joining transport-prefixed values to
-// the spec dir. Phase 5 retires this by requiring transport prefixes
-// at the spec layer and validating them up front.
-func hasTransportPrefix(p string) bool {
-	colon := strings.Index(p, ":")
-	if colon <= 0 {
-		return false
-	}
-	prefix := p[:colon]
-	return !strings.ContainsAny(prefix, "/\\")
 }

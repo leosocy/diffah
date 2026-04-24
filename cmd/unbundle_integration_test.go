@@ -20,8 +20,8 @@ func TestUnbundleCommand_BundleRoundTrip(t *testing.T) {
 	bundleSpec := map[string]any{
 		"pairs": []map[string]string{{
 			"name":     "app",
-			"baseline": filepath.Join(root, "testdata/fixtures/v1_oci.tar"),
-			"target":   filepath.Join(root, "testdata/fixtures/v2_oci.tar"),
+			"baseline": "oci-archive:" + filepath.Join(root, "testdata/fixtures/v1_oci.tar"),
+			"target":   "oci-archive:" + filepath.Join(root, "testdata/fixtures/v2_oci.tar"),
 		}},
 	}
 	specPath := filepath.Join(tmp, "bundle.json")

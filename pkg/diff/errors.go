@@ -204,6 +204,34 @@ func (e *ErrInvalidBundleSpec) Error() string {
 	return fmt.Sprintf("invalid bundle spec: %s", e.Reason)
 }
 
+// ErrBundleSpecMissingTransport is returned when a BundleSpec pair's
+// baseline or target value does not carry a transport prefix.
+// Includes a sed migration hint that rewrites bare *.tar values to
+// docker-archive:*.tar in place.
+type ErrBundleSpecMissingTransport struct {
+	FieldPath string // e.g. "pairs[0].baseline"
+	Value     string
+}
+
+// bundleSpecSedHint is the one-liner that rewrites bare-path baseline /
+// target values into docker-archive:-prefixed values in place.
+const bundleSpecSedHint = `  sed -E -i '' 's|(\"baseline\"\|\"target\"): ` +
+	`\"([^:\"]*\.tar[a-z]*)\"|\1: \"docker-archive:\2\"|g' bundle.json`
+
+func (e *ErrBundleSpecMissingTransport) Error() string {
+	return fmt.Sprintf(
+		"%s: missing transport prefix (%q)\n\n"+
+			"prefix archive paths with 'docker-archive:' —\n"+
+			"%s",
+		e.FieldPath, e.Value, bundleSpecSedHint,
+	)
+}
+
+func (*ErrBundleSpecMissingTransport) Category() errs.Category { return errs.CategoryUser }
+func (*ErrBundleSpecMissingTransport) NextAction() string {
+	return "prefix each bundle-spec value with a transport (docker-archive:, docker://, oci:, dir:)"
+}
+
 type ErrDuplicateBundleName struct{ Name string }
 
 func (e *ErrDuplicateBundleName) Error() string {
@@ -388,6 +416,7 @@ var (
 	_ errs.Categorized = (*ErrBaselineMismatch)(nil)
 	_ errs.Categorized = (*ErrBaselineMissing)(nil)
 	_ errs.Categorized = (*ErrInvalidBundleSpec)(nil)
+	_ errs.Categorized = (*ErrBundleSpecMissingTransport)(nil)
 	_ errs.Categorized = (*ErrDuplicateBundleName)(nil)
 	_ errs.Categorized = (*ErrRegistryAuth)(nil)
 	_ errs.Categorized = (*ErrRegistryNetwork)(nil)

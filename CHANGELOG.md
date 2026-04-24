@@ -1,5 +1,17 @@
 # Changelog
 
+## [Unreleased] — Phase 3: Registry-native export + signing
+
+### Breaking changes
+
+- **`BundleSpec` JSON**: `baseline` / `target` values must now carry a
+  transport prefix. Bare-path values (`"baseline": "v1/svc.tar"`) fail
+  with a migration hint. One-liner fix:
+
+  ```
+  sed -E -i '' 's|(\"baseline\"\|\"target\"): \"([^:\"]*\.tar[a-z]*)\"|\1: \"docker-archive:\2\"|g' bundle.json
+  ```
+
 ## [Unreleased] — Phase 2: Registry-native import
 
 ### Breaking changes
