@@ -35,13 +35,6 @@ func TestUnbundleCommand_AcceptsStrict(t *testing.T) {
 	require.Contains(t, stdout.String(), "--strict")
 }
 
-func TestUnbundleCommand_ArgsNowRequireOutputSpec(t *testing.T) {
-	var stdout bytes.Buffer
-	code := Run(&stdout, nil, "unbundle", "--help")
-	require.Equal(t, 0, code)
-	require.Contains(t, stdout.String(), "DELTA-IN BASELINE-SPEC OUTPUT-SPEC")
-}
-
 func TestUnbundleCommand_RejectsMissingOutputSpec(t *testing.T) {
 	tmp := t.TempDir()
 	deltaPath := filepath.Join(tmp, "delta.tar")

@@ -70,8 +70,9 @@ func TestParseImageRef_ReservedTransports(t *testing.T) {
 }
 
 func TestParseImageRef_AcceptsRegistryTransports(t *testing.T) {
-	// oci: and dir: transports require the path to exist on disk during parse;
-	// use a temp dir so the test is hermetic.
+	// oci: and dir: transports resolve the path via its parent; the
+	// leaf may be absent but the parent directory must exist.
+	// Use a temp dir so the test is hermetic.
 	tmp := t.TempDir()
 
 	cases := []struct {
