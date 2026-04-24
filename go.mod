@@ -3,6 +3,7 @@ module github.com/leosocy/diffah
 go 1.25.4
 
 require (
+	github.com/google/go-containerregistry v0.21.5
 	github.com/klauspost/compress v1.18.5
 	github.com/mattn/go-isatty v0.0.21
 	github.com/opencontainers/go-digest v1.0.0
@@ -40,7 +41,6 @@ require (
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
-	github.com/google/go-containerregistry v0.21.5 // indirect
 	github.com/google/go-intervals v0.0.2 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/mux v1.8.1 // indirect
