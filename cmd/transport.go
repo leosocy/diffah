@@ -10,6 +10,7 @@ import (
 type ImageRef struct {
 	Transport string
 	Path      string
+	Raw       string // original "transport:path" string as supplied by the user
 }
 
 var supportedInputTransports = map[string]bool{
@@ -42,7 +43,7 @@ func ParseImageRef(argName, raw string) (ImageRef, error) {
 	if rest == "" {
 		return ImageRef{}, newEmptyTransportPathErr(argName, prefix, raw)
 	}
-	return ImageRef{Transport: prefix, Path: rest}, nil
+	return ImageRef{Transport: prefix, Path: rest, Raw: raw}, nil
 }
 
 func splitTransport(raw string) (prefix, rest string, ok bool) {

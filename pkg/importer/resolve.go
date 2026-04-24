@@ -14,44 +14,58 @@ import (
 type resolvedBaseline struct {
 	Name     string
 	Ref      types.ImageReference
+	Src      types.ImageSource
 	Manifest digest.Digest
 }
 
 func resolveBaselines(
-	ctx context.Context, sc *diff.Sidecar, baselines map[string]string, strict bool,
+	ctx context.Context, sc *diff.Sidecar, baselines map[string]string, sysctx *types.SystemContext, strict bool,
 ) ([]resolvedBaseline, error) {
 	result := make([]resolvedBaseline, 0, len(sc.Images))
 	resolved := make(map[string]struct{}, len(sc.Images))
 
 	expanded := expandDefaultBaseline(sc, baselines)
 
+	// cleanup closes any sources already opened if we return an error partway through.
+	cleanup := func() {
+		closeResolvedBaselines(result)
+	}
+
 	for _, img := range sc.Images {
-		path, ok := expanded[img.Name]
+		raw, ok := expanded[img.Name]
 		if !ok {
 			continue
 		}
-		ref, err := imageio.OpenArchiveRef(path)
+		ref, err := imageio.ParseReference(raw)
 		if err != nil {
-			return nil, fmt.Errorf("open baseline %s for %q: %w", path, img.Name, err)
+			cleanup()
+			return nil, fmt.Errorf("parse baseline reference %q for %q: %w", raw, img.Name, err)
 		}
-		src, err := ref.NewImageSource(ctx, nil)
+		src, err := ref.NewImageSource(ctx, sysctx)
 		if err != nil {
-			return nil, fmt.Errorf("open baseline source for %q: %w", img.Name, err)
+			cleanup()
+			return nil, diff.ClassifyRegistryErr(
+				fmt.Errorf("open baseline source for %q: %w", img.Name, err), raw)
 		}
-		raw, _, err := src.GetManifest(ctx, nil)
-		src.Close()
+
+		manifestBytes, _, err := src.GetManifest(ctx, nil)
 		if err != nil {
-			return nil, fmt.Errorf("read baseline manifest for %q: %w", img.Name, err)
+			_ = src.Close()
+			cleanup()
+			return nil, diff.ClassifyRegistryErr(
+				fmt.Errorf("read baseline manifest for %q: %w", img.Name, err), raw)
 		}
-		got := digest.FromBytes(raw)
+		got := digest.FromBytes(manifestBytes)
 		if got != img.Baseline.ManifestDigest {
+			_ = src.Close()
+			cleanup()
 			return nil, &diff.ErrBaselineMismatch{
 				Name: img.Name, Expected: string(img.Baseline.ManifestDigest), Got: string(got),
 			}
 		}
 		resolved[img.Name] = struct{}{}
 		result = append(result, resolvedBaseline{
-			Name: img.Name, Ref: ref, Manifest: got,
+			Name: img.Name, Ref: ref, Src: src, Manifest: got,
 		})
 	}
 
@@ -63,15 +77,27 @@ func resolveBaselines(
 			}
 		}
 		if len(missing) > 0 {
+			cleanup()
 			return nil, &diff.ErrBaselineMissing{Names: missing}
 		}
 	}
 
 	if err := rejectUnknownBaselineNames(sc, expanded); err != nil {
+		cleanup()
 		return nil, err
 	}
 
 	return result, nil
+}
+
+// closeResolvedBaselines closes all held-open ImageSource instances.
+// Safe to call with a nil or partially-populated slice.
+func closeResolvedBaselines(list []resolvedBaseline) {
+	for _, rb := range list {
+		if rb.Src != nil {
+			_ = rb.Src.Close()
+		}
+	}
 }
 
 func rejectUnknownBaselineNames(sc *diff.Sidecar, expanded map[string]string) error {
@@ -89,6 +115,28 @@ func rejectUnknownBaselineNames(sc *diff.Sidecar, expanded map[string]string) er
 		}
 	}
 	return nil
+}
+
+// expandDefaultOutput mirrors expandDefaultBaseline for the Outputs map:
+// when there is exactly one image and the caller supplied "default" as the key,
+// rewrite it to the image's actual name so the per-image lookup in Import works.
+func expandDefaultOutput(sc *diff.Sidecar, outputs map[string]string) map[string]string {
+	if len(sc.Images) != 1 {
+		return outputs
+	}
+	_, ok := outputs["default"]
+	if !ok {
+		return outputs
+	}
+	expanded := make(map[string]string, len(outputs))
+	for k, v := range outputs {
+		if k == "default" {
+			expanded[sc.Images[0].Name] = v
+		} else {
+			expanded[k] = v
+		}
+	}
+	return expanded
 }
 
 func expandDefaultBaseline(sc *diff.Sidecar, baselines map[string]string) map[string]string {

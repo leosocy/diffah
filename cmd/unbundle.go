@@ -3,7 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"strings"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 
@@ -63,23 +63,28 @@ func runUnbundle(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("parse baseline spec: %w", err)
 	}
-	baselines := make(map[string]string, len(spec.Baselines))
-	for name, ref := range spec.Baselines {
-		// TODO(Task 5.4): drop this strip once the importer consumes transport
-		// refs directly. BASELINE-SPEC now requires a transport prefix (Task 1.3),
-		// but the importer still opens bare paths via imageio.OpenArchiveRef until
-		// Stage 2 rewires it.
-		ref = strings.TrimPrefix(ref, "oci-archive:")
-		ref = strings.TrimPrefix(ref, "docker-archive:")
-		baselines[name] = ref
+
+	// Build Outputs map: per-image output refs derived from OUTPUT-DIR and --image-format.
+	// Each image writes to <outDir>/<name>.tar (archive) or <outDir>/<name>/ (dir).
+	// Stage 5.4 will rewire this to accept transport-prefixed OUTPUT-SPEC directly.
+	outputs := make(map[string]string, len(spec.Baselines))
+	for name := range spec.Baselines {
+		switch unbundleFlags.imageFormat {
+		case importer.FormatDir:
+			outputs[name] = "dir:" + filepath.Join(outDir, name)
+		case importer.FormatDockerArchive:
+			outputs[name] = "docker-archive:" + filepath.Join(outDir, name+".tar")
+		default:
+			// Default: oci-archive (also covers "oci-archive" explicit value)
+			outputs[name] = "oci-archive:" + filepath.Join(outDir, name+".tar")
+		}
 	}
 
 	opts := importer.Options{
 		DeltaPath:        deltaIn,
-		Baselines:        baselines,
+		Baselines:        spec.Baselines, // raw transport-prefixed refs from the spec
+		Outputs:          outputs,
 		Strict:           unbundleFlags.strict,
-		OutputPath:       outDir,
-		OutputFormat:     unbundleFlags.imageFormat,
 		AllowConvert:     unbundleFlags.allowConvert,
 		ProgressReporter: newProgressReporter(cmd.ErrOrStderr()),
 	}

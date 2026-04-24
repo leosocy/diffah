@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/spf13/cobra"
 
@@ -63,8 +62,7 @@ func runApply(cmd *cobra.Command, args []string) error {
 
 	// TARGET-OUT is the final artifact path. Treat an existing regular file
 	// as overwritable (consistent with 'diff'), but refuse to cross-type
-	// clobber a directory: that is almost always a user typo and os.Rename
-	// would fail late with a confusing internal error.
+	// clobber a directory: that is almost always a user typo.
 	if info, err := os.Stat(targetOut); err == nil && info.IsDir() {
 		return &cliErr{
 			cat:  errs.CategoryUser,
@@ -73,25 +71,20 @@ func runApply(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Importer writes per-image under OutputPath which must be a directory.
-	// For single-image apply, stage a scratch dir alongside TARGET-OUT and
-	// rename the produced "default.*" artifact to TARGET-OUT.
-	scratchParent := filepath.Dir(targetOut)
-	if scratchParent == "" {
-		scratchParent = "."
+	// Determine the output reference. For now, use --image-format to pick the transport;
+	// if empty, default to "oci-archive". Stage 5 will rewire TARGET-OUT to require a
+	// transport prefix directly.
+	outputTransport := applyFlags.imageFormat
+	if outputTransport == "" {
+		outputTransport = "oci-archive"
 	}
-	scratch, err := os.MkdirTemp(scratchParent, "diffah-apply-")
-	if err != nil {
-		return fmt.Errorf("create scratch dir: %w", err)
-	}
-	defer os.RemoveAll(scratch)
+	targetRef := outputTransport + ":" + targetOut
 
 	opts := importer.Options{
 		DeltaPath:        deltaIn,
-		Baselines:        map[string]string{"default": baseline.Path},
+		Baselines:        map[string]string{"default": baseline.Raw},
+		Outputs:          map[string]string{"default": targetRef},
 		Strict:           true,
-		OutputPath:       scratch,
-		OutputFormat:     applyFlags.imageFormat,
 		AllowConvert:     applyFlags.allowConvert,
 		ProgressReporter: newProgressReporter(cmd.ErrOrStderr()),
 	}
@@ -111,33 +104,6 @@ func runApply(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	produced, err := findSingleImageArtifact(scratch)
-	if err != nil {
-		return err
-	}
-	if err := os.Rename(produced, targetOut); err != nil {
-		return fmt.Errorf("move produced artifact to %s: %w", targetOut, err)
-	}
 	fmt.Fprintf(cmd.OutOrStdout(), "wrote %s\n", targetOut)
 	return nil
-}
-
-// findSingleImageArtifact returns the path of the single image artifact
-// written into the scratch directory by importer.Import. The importer writes
-// per-image under its map key, which is hard-coded to "default" for
-// single-image apply, so only "default" (dir form) or "default.tar" (archive
-// form) are valid matches — match exactly rather than any ".tar" to avoid
-// silently picking up stray artifacts.
-func findSingleImageArtifact(dir string) (string, error) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return "", fmt.Errorf("read scratch dir: %w", err)
-	}
-	for _, e := range entries {
-		name := e.Name()
-		if name == "default" || name == "default.tar" {
-			return filepath.Join(dir, name), nil
-		}
-	}
-	return "", fmt.Errorf("no default image artifact produced in %s", dir)
 }
