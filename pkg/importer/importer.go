@@ -7,33 +7,27 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/opencontainers/go-digest"
-	"go.podman.io/image/v5/directory"
-	dockerarchive "go.podman.io/image/v5/docker/archive"
-	dockerref "go.podman.io/image/v5/docker/reference"
-	ociarchive "go.podman.io/image/v5/oci/archive"
 	"go.podman.io/image/v5/types"
 
+	"github.com/leosocy/diffah/internal/imageio"
 	"github.com/leosocy/diffah/internal/zstdpatch"
 	"github.com/leosocy/diffah/pkg/diff"
 	"github.com/leosocy/diffah/pkg/progress"
 )
 
-const (
-	FormatDockerArchive = "docker-archive"
-	FormatOCIArchive    = "oci-archive"
-	FormatDir           = "dir"
-)
-
 type Options struct {
 	DeltaPath        string
-	Baselines        map[string]string
+	Baselines        map[string]string // transport-prefixed refs
+	Outputs          map[string]string // transport-prefixed dest refs
 	Strict           bool
-	OutputPath       string
-	OutputFormat     string
+	SystemContext    *types.SystemContext
 	AllowConvert     bool
+	RetryTimes       int           // default 0 = no retry; applied to baseline manifest+source open
+	RetryDelay       time.Duration // zero means exponential backoff (capped by withRetry)
 	ProgressReporter progress.Reporter
 	// Deprecated: use ProgressReporter. Will be removed in v0.4.
 	Progress io.Writer
@@ -72,17 +66,14 @@ func Import(ctx context.Context, opts Options) error {
 	if err := validatePositionalBaseline(bundle.sidecar, opts.Baselines); err != nil {
 		return err
 	}
-	resolved, err := resolveBaselines(ctx, bundle.sidecar, opts.Baselines, opts.Strict)
+	resolved, err := resolveBaselines(ctx, bundle.sidecar, opts.Baselines, opts.SystemContext,
+		opts.RetryTimes, opts.RetryDelay, opts.Strict)
 	if err != nil {
 		return err
 	}
+	defer closeResolvedBaselines(resolved)
 
-	if err := ensureOutputIsDirectory(opts.OutputPath); err != nil {
-		return err
-	}
-	if err := os.MkdirAll(opts.OutputPath, 0o755); err != nil {
-		return fmt.Errorf("mkdir output %s: %w", opts.OutputPath, err)
-	}
+	outputs := expandDefaultOutput(bundle.sidecar, opts.Outputs)
 
 	rep := opts.reporter()
 	rep.Phase("extracting")
@@ -92,6 +83,28 @@ func Import(ctx context.Context, opts Options) error {
 		resolvedByName[r.Name] = r
 	}
 
+	imported, skipped, err := importEachImage(ctx, bundle, resolvedByName, outputs, opts)
+	if err != nil {
+		return err
+	}
+	log().InfoContext(ctx, "import complete",
+		"imported", imported, "total", len(bundle.sidecar.Images), "skipped", skipped)
+	rep.Phase("done")
+	return nil
+}
+
+// importEachImage composes and writes every image in the bundle for which a
+// baseline was resolved. Images without a resolved baseline are recorded in
+// the skipped list and not composed; --strict is enforced earlier by
+// resolveBaselines, so reaching here with an unresolved image implies the
+// caller opted into non-strict mode.
+func importEachImage(
+	ctx context.Context,
+	bundle *extractedBundle,
+	resolvedByName map[string]resolvedBaseline,
+	outputs map[string]string,
+	opts Options,
+) (int, []string, error) {
 	imported := 0
 	skipped := make([]string, 0)
 	for _, img := range bundle.sidecar.Images {
@@ -101,32 +114,24 @@ func Import(ctx context.Context, opts Options) error {
 			skipped = append(skipped, img.Name)
 			continue
 		}
-		if err := composeImage(ctx, img, bundle, rb,
-			opts.OutputPath, opts.OutputFormat, opts.AllowConvert); err != nil {
-			return err
+		rawOut, ok := outputs[img.Name]
+		if !ok {
+			return 0, nil, fmt.Errorf("no output reference in OUTPUT-SPEC for image %q", img.Name)
+		}
+		if err := ensureOutputParent(rawOut); err != nil {
+			return 0, nil, fmt.Errorf("prepare output for image %q: %w", img.Name, err)
+		}
+		destRef, err := imageio.ParseReference(rawOut)
+		if err != nil {
+			return 0, nil, fmt.Errorf("parse output reference for image %q: %w", img.Name, err)
+		}
+		if err := composeImage(ctx, img, bundle, rb, destRef,
+			opts.SystemContext, opts.AllowConvert, opts.reporter()); err != nil {
+			return 0, nil, err
 		}
 		imported++
 	}
-	log().InfoContext(ctx, "import complete",
-		"imported", imported, "total", len(bundle.sidecar.Images), "skipped", skipped)
-	rep.Phase("done")
-	return nil
-}
-
-func ensureOutputIsDirectory(path string) error {
-	info, err := os.Stat(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return fmt.Errorf("stat output %s: %w", path, err)
-	}
-	if !info.IsDir() {
-		return fmt.Errorf(
-			"OUTPUT %s must be a directory (bundle output is written to OUTPUT/<name>.tar or OUTPUT/<name>/)",
-			path)
-	}
-	return nil
+	return imported, skipped, nil
 }
 
 func DryRun(ctx context.Context, opts Options) (DryRunReport, error) {
@@ -152,10 +157,12 @@ func DryRun(ctx context.Context, opts Options) (DryRunReport, error) {
 		}
 	}
 
-	resolved, err := resolveBaselines(ctx, bundle.sidecar, opts.Baselines, opts.Strict)
+	resolved, err := resolveBaselines(ctx, bundle.sidecar, opts.Baselines, opts.SystemContext,
+		opts.RetryTimes, opts.RetryDelay, opts.Strict)
 	if err != nil {
 		return DryRunReport{}, err
 	}
+	defer closeResolvedBaselines(resolved)
 
 	images, err := buildImageDryRuns(bundle, resolved)
 	if err != nil {
@@ -293,26 +300,26 @@ type ImageDryRun struct {
 	PatchLayerCount        int
 }
 
-func buildOutputRef(path, format string) (types.ImageReference, error) {
-	switch format {
-	case FormatDockerArchive, "":
-		named, err := dockerref.ParseNormalizedNamed("diffah-import:latest")
-		if err != nil {
-			return nil, fmt.Errorf("build docker ref: %w", err)
-		}
-		nt, ok := named.(dockerref.NamedTagged)
-		if !ok {
-			return nil, fmt.Errorf("docker ref not NamedTagged")
-		}
-		return dockerarchive.NewReference(path, nt)
-	case FormatOCIArchive:
-		return ociarchive.NewReference(path, "diffah-import:latest")
-	case FormatDir:
-		if err := os.MkdirAll(path, 0o755); err != nil {
-			return nil, fmt.Errorf("mkdir %s: %w", path, err)
-		}
-		return directory.NewReference(path)
-	default:
-		return nil, &diff.ErrUnknownImageFormat{Got: format}
+// ensureOutputParent creates the parent directory for file-based output
+// transports (oci-archive:, docker-archive:, dir:). Remote transports
+// (docker://, etc.) are skipped. This is required because transport
+// ParseReference implementations resolve the path and require the parent
+// to exist.
+func ensureOutputParent(rawOut string) error {
+	transport, path, ok := strings.Cut(rawOut, ":")
+	if !ok {
+		return nil
 	}
+	switch transport {
+	case FormatOCIArchive, FormatDockerArchive:
+		parent := filepath.Dir(path)
+		if err := os.MkdirAll(parent, 0o755); err != nil {
+			return fmt.Errorf("mkdir parent for %s output %s: %w", transport, path, err)
+		}
+	case FormatDir, "oci":
+		if err := os.MkdirAll(path, 0o755); err != nil {
+			return fmt.Errorf("mkdir %s output %s: %w", transport, path, err)
+		}
+	}
+	return nil
 }

@@ -1,5 +1,66 @@
 # Changelog
 
+## [Unreleased] — Phase 2: Registry-native import
+
+### Breaking changes
+
+- **`apply`**: positional TARGET-OUT renamed to TARGET-IMAGE; transport
+  prefix now required (e.g. `oci-archive:/tmp/out.tar` instead of
+  `/tmp/out.tar`). Bare paths error with a "Did you mean:" hint when the
+  tail looks like a tar archive.
+- **`unbundle`**: positional OUTPUT-DIR renamed to OUTPUT-SPEC. The new
+  positional points at a JSON spec file of shape
+  `{"outputs": {"<name>": "<transport>:<ref>"}}` symmetric with
+  BASELINE-SPEC. Supplying a directory as OUTPUT-SPEC now errors with
+  "must be a JSON file" instead of silently writing there.
+- **BASELINE-SPEC JSON**: values must carry a transport prefix. Existing
+  spec files that use bare filesystem paths fail user/2 on first parse;
+  prefix with `docker-archive:` or `oci-archive:` to migrate.
+- **Removed flags**: `--image-format` on both `apply` and `unbundle`.
+  The transport prefix on the TARGET-IMAGE / OUTPUT-SPEC entry is now
+  authoritative for output format selection.
+
+### Additions
+
+- **Transport acceptance**: `apply` and `unbundle` now accept
+  `docker://`, `oci:`, and `dir:` on image positionals (in addition to
+  `docker-archive:` and `oci-archive:`).
+- **Registry & transport flag block** on `apply` and `unbundle`:
+  `--authfile`, `--creds`, `--username`/`--password`, `--no-creds`,
+  `--registry-token`, `--tls-verify`, `--cert-dir`, `--retry-times`,
+  `--retry-delay`. Authfile precedence chain mirrors skopeo's:
+  `$REGISTRY_AUTH_FILE` → `$XDG_RUNTIME_DIR/containers/auth.json` →
+  `$HOME/.docker/config.json`.
+- **Lazy baseline fetch**: when a baseline is a `docker://` reference,
+  only the blobs referenced by patch-encoded entries in the delta
+  cross the wire. The baseline manifest is always fetched; no other
+  layers are.
+- **Retry with backoff**: transient 5xx / 429 / connection-refused
+  retries up to `--retry-times` with exponential backoff (capped at 30s)
+  or `--retry-delay` if supplied. Auth, 404, and manifest-schema errors
+  are non-retryable and fail fast.
+- **Registry error classification**: auth 401/403 → exit 2 (user);
+  network/DNS/TLS → exit 3 (environment); manifest missing/invalid →
+  exit 4 (content).
+
+### Internal
+
+- `pkg/importer.Options` fields: `OutputPath` and `OutputFormat` removed;
+  `Outputs map[string]string`, `SystemContext *types.SystemContext`,
+  `RetryTimes int`, `RetryDelay time.Duration` added.
+- `pkg/diff.ParseOutputSpec` added; `ParseBaselineSpec` now requires
+  transport-prefixed values.
+- New `internal/imageio.BuildSystemContext`; new
+  `internal/registrytest` in-process OCI registry harness used by the
+  integration test suite.
+
+### Non-goals / deferred
+
+- Registry-source `diff` and `bundle` (export side): Phase 3.
+- Signature generation and verification (cosign): Phase 3.
+- The `docker-daemon:`, `containers-storage:`, `ostree:`, `sif:`,
+  `tarball:` transports remain "reserved but not yet implemented."
+
 ## [Unreleased] — CLI redesign (skopeo-inspired)
 
 - **Removed:** `diffah export` and `diffah import`. Old invocations now

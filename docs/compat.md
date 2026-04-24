@@ -9,9 +9,9 @@ codes, the sidecar schema, structured log output, and progress output.
 |------|--------------|------|
 | 0    | success      | operation completed |
 | 1    | internal     | bug, panic, or an unclassified error |
-| 2    | user         | bad flag, missing/extra positional arguments, missing transport prefix on image reference, malformed bundle or baseline spec file, wrong baseline supplied (baseline manifest digest does not match the one the delta was built against), invocation of a removed verb (`export`, `import`) |
-| 3    | environment  | missing zstd, network failure, filesystem permission, registry auth |
-| 4    | content      | sidecar schema mismatch, blob digest mismatch (archive corruption), unsupported schema version (e.g. Phase 1 archive), file that is not a diffah delta archive |
+| 2    | user         | bad flag, missing/extra positional arguments, missing transport prefix on image reference, malformed bundle or baseline spec file, wrong baseline supplied (baseline manifest digest does not match the one the delta was built against), invocation of a removed verb (`export`, `import`); registry 401/403 auth failures |
+| 3    | environment  | missing zstd, network failure, filesystem permission; registry network / DNS / TLS failures |
+| 4    | content      | sidecar schema mismatch, blob digest mismatch (archive corruption), unsupported schema version (e.g. Phase 1 archive), file that is not a diffah delta archive; registry manifest missing (404, NAME_UNKNOWN) or manifest invalid (unsupported schema) |
 
 **Stability:** exit-code mappings for specific errors may be refined (e.g. a
 new env-level fallback being added). Exit code 0 for "success" never
@@ -80,3 +80,57 @@ Rules:
   renaming is breaking.
 - `next_action` is optional; when empty, renderers omit the hint line in
   text mode and the `next_action` key may be omitted in JSON mode.
+
+## Transports
+
+The table below lists which transport prefixes are accepted on each positional type.
+
+| Transport          | `*-IMAGE` positionals | BASELINE-SPEC / OUTPUT-SPEC values | `diff` / `bundle` positionals |
+|--------------------|-----------------------|-------------------------------------|-------------------------------|
+| `docker-archive:`  | yes                   | yes                                 | yes                           |
+| `oci-archive:`     | yes                   | yes                                 | yes                           |
+| `docker://`        | yes                   | yes                                 | Phase 3                       |
+| `oci:`             | yes                   | yes                                 | Phase 3                       |
+| `dir:`             | yes                   | yes                                 | Phase 3                       |
+| `docker-daemon:`   | reserved              | reserved                            | reserved                      |
+| `containers-storage:` | reserved          | reserved                            | reserved                      |
+| `ostree:`          | reserved              | reserved                            | reserved                      |
+| `sif:`             | reserved              | reserved                            | reserved                      |
+| `tarball:`         | reserved              | reserved                            | reserved                      |
+
+"Phase 3" means the transport is parsed and validated but the verb rejects it with a "not yet implemented" error. "Reserved" means the transport string is recognised and returns "reserved but not yet implemented."
+
+Note: `diff` and `bundle` (the export-side verbs) still only accept archive transports (`docker-archive:`, `oci-archive:`) in Phase 2. Registry-source export is Phase 3.
+
+## Registry and transport flags
+
+The following flags are available on `apply` and `unbundle` whenever the TARGET-IMAGE or any OUTPUT-SPEC entry uses a `docker://`, `oci:`, or `dir:` transport.
+
+| Flag                        | Default | Description |
+|-----------------------------|---------|-------------|
+| `--authfile PATH`           | see below | Path to a containers auth file. |
+| `--creds USER[:PASS]`       | —       | Inline credentials. Mutually exclusive with `--username`/`--password` and `--no-creds`. |
+| `--username USER`           | —       | Registry username. Must be paired with `--password`. Mutually exclusive with `--creds` and `--no-creds`. |
+| `--password PASS`           | —       | Registry password. Must be paired with `--username`. |
+| `--no-creds`                | false   | Disable all credential lookup. Mutually exclusive with `--creds`, `--username`, `--password`, `--authfile`, and `--registry-token`. |
+| `--registry-token TOKEN`    | —       | Bearer token passed directly in the Authorization header. Mutually exclusive with `--creds`, `--username`/`--password`, and `--no-creds`. |
+| `--tls-verify`              | true    | Verify TLS certificates. Set `--tls-verify=false` only in test environments. |
+| `--cert-dir PATH`           | —       | Directory of additional CA certificates (PEM). |
+| `--retry-times N`           | 3       | Number of retries for transient failures (5xx, 429, connection-refused). |
+| `--retry-delay DURATION`    | —       | Fixed retry delay. If omitted, exponential backoff is used, capped at 30 s. |
+
+**Authfile precedence** (highest to lowest):
+
+1. `--authfile PATH` (explicit flag)
+2. `$REGISTRY_AUTH_FILE` environment variable
+3. `$XDG_RUNTIME_DIR/containers/auth.json`
+4. `$HOME/.docker/config.json`
+
+**Mutual-exclusion rules:**
+
+- `--creds` cannot be combined with `--username`, `--password`, `--no-creds`, or `--registry-token`.
+- `--username` and `--password` must appear together; neither can be combined with `--creds`, `--no-creds`, or `--registry-token`.
+- `--no-creds` cannot be combined with any other credential flag (`--creds`, `--username`, `--password`, `--authfile`, `--registry-token`).
+- `--registry-token` cannot be combined with `--creds`, `--username`, `--password`, or `--no-creds`.
+
+Non-retryable errors (auth 401/403, 404, manifest schema errors) fail immediately without consuming retry budget.

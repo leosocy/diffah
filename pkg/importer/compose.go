@@ -16,6 +16,20 @@ import (
 	"github.com/leosocy/diffah/internal/imageio"
 	"github.com/leosocy/diffah/internal/zstdpatch"
 	"github.com/leosocy/diffah/pkg/diff"
+	"github.com/leosocy/diffah/pkg/progress"
+)
+
+const (
+	FormatDockerArchive = "docker-archive"
+	FormatOCIArchive    = "oci-archive"
+	FormatDir           = "dir"
+)
+
+// Known single-image manifest media types. Manifest lists are rejected
+// upstream by the exporter, so these two cover every sidecar we can see.
+const (
+	mimeDockerSchema2 = "application/vnd.docker.distribution.manifest.v2+json"
+	mimeOCIManifest   = "application/vnd.oci.image.manifest.v1+json"
 )
 
 // bundleImageSource implements go.podman.io/image/v5/types.ImageSource for
@@ -183,23 +197,19 @@ func (r *staticSourceRef) DeleteImage(_ context.Context, _ *types.SystemContext)
 	return fmt.Errorf("staticSourceRef.DeleteImage not supported")
 }
 
-// composeImage imports a single resolved image into outputDir/<name>.tar
-// (for archive formats) or outputDir/<name>/ (for dir format). It streams
-// blobs via bundleImageSource — no tmpdir materialization.
+// composeImage assembles a single image from bundle blobs + baseline and
+// streams the result to destRef via copy.Image. rb.Src must already be open —
+// this function does not open a new baseline source and does not close rb.Src.
 func composeImage(
 	ctx context.Context,
 	img diff.ImageEntry,
 	bundle *extractedBundle,
 	rb resolvedBaseline,
-	outputDir, outputFormat string,
+	destRef types.ImageReference,
+	sysctx *types.SystemContext,
 	allowConvert bool,
+	_ progress.Reporter, // hook site for per-blob pull/push progress; not yet wired
 ) error {
-	baseSrc, err := rb.Ref.NewImageSource(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("open baseline source for %q: %w", img.Name, err)
-	}
-	defer baseSrc.Close()
-
 	mfPath := filepath.Join(bundle.blobDir, img.Target.ManifestDigest.Algorithm().String(),
 		img.Target.ManifestDigest.Encoded())
 	mfBytes, err := os.ReadFile(mfPath)
@@ -212,55 +222,61 @@ func composeImage(
 		manifest:     mfBytes,
 		manifestMime: img.Target.MediaType,
 		sidecar:      bundle.sidecar,
-		baseline:     baseSrc,
+		baseline:     rb.Src, // already open — DO NOT open a fresh one
 		imageName:    img.Name,
 	}
 	src.ref = &staticSourceRef{src: src}
 
-	resolvedFmt, err := resolveOutputFormat(outputFormat, img.Target.MediaType, allowConvert)
-	if err != nil {
+	if err := enforceOutputCompat(destRef, src, allowConvert); err != nil {
 		return err
 	}
 
-	return copyBundleToOutput(ctx, src, outputDir, img.Name, resolvedFmt)
-}
-
-func copyBundleToOutput(
-	ctx context.Context,
-	src *bundleImageSource,
-	outputDir, imgName, resolvedFmt string,
-) error {
-	var outPath string
-	switch resolvedFmt {
-	case FormatDir:
-		outPath = filepath.Join(outputDir, imgName)
-	case FormatDockerArchive, FormatOCIArchive:
-		outPath = filepath.Join(outputDir, imgName+".tar")
-	default:
-		return &diff.ErrUnknownImageFormat{Got: resolvedFmt}
-	}
-
-	outRef, err := buildOutputRef(outPath, resolvedFmt)
-	if err != nil {
-		return err
-	}
 	policyCtx, err := imageio.DefaultPolicyContext()
 	if err != nil {
 		return err
 	}
 	defer func() { _ = policyCtx.Destroy() }()
 
-	copyOpts := &copy.Options{}
-	if resolvedFmt == FormatDir {
+	copyOpts := &copy.Options{
+		SourceCtx:      sysctx,
+		DestinationCtx: sysctx,
+		ReportWriter:   io.Discard,
+	}
+	if destRef.Transport().Name() == FormatDir {
 		copyOpts.PreserveDigests = true
 	}
-	if _, err := copy.Image(ctx, policyCtx, outRef, src.ref, copyOpts); err != nil {
-		if resolvedFmt == FormatDir {
-			_ = os.RemoveAll(outPath)
-		} else {
-			_ = os.Remove(outPath)
+	if _, err := copy.Image(ctx, policyCtx, destRef, src.Reference(), copyOpts); err != nil {
+		return fmt.Errorf("copy to %s: %w", destRef.StringWithinTransport(),
+			diff.ClassifyRegistryErr(err, destRef.StringWithinTransport()))
+	}
+	return nil
+}
+
+// enforceOutputCompat rejects a destination transport + source manifest
+// combination that would require cross-format conversion, unless
+// allowConvert was explicitly set.
+func enforceOutputCompat(dest types.ImageReference, src types.ImageSource, allowConvert bool) error {
+	if allowConvert {
+		return nil
+	}
+	_, mime, err := src.GetManifest(context.Background(), nil)
+	if err != nil {
+		return fmt.Errorf("read assembled manifest: %w", err)
+	}
+	if mime == "" {
+		return nil
+	}
+	switch dest.Transport().Name() {
+	case FormatDockerArchive:
+		if mime != mimeDockerSchema2 {
+			return &diff.ErrIncompatibleOutputFormat{SourceMime: mime, OutputFormat: FormatDockerArchive}
 		}
-		return fmt.Errorf("compose %q: %w", imgName, err)
+	case FormatOCIArchive, "oci":
+		if mime != mimeOCIManifest {
+			return &diff.ErrIncompatibleOutputFormat{SourceMime: mime, OutputFormat: dest.Transport().Name()}
+		}
+		// dir: always permitted — dir transport copies blobs byte-for-byte regardless of manifest media type.
+		// docker:// and other registry transports — upstream copy.Image handles manifest conversion.
 	}
 	return nil
 }

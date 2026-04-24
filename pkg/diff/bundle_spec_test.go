@@ -30,15 +30,14 @@ func TestParseBundleSpec_HappyPath(t *testing.T) {
 
 func TestParseBaselineSpec_HappyPath(t *testing.T) {
 	dir := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "a.tar"), []byte{}, 0o600))
-	raw := []byte(`{"baselines":{"service-a":"a.tar"}}`)
+	raw := []byte(`{"baselines":{"service-a":"oci-archive:/tmp/a.tar"}}`)
 	specPath := filepath.Join(dir, "baselines.json")
 	require.NoError(t, os.WriteFile(specPath, raw, 0o600))
 
 	spec, err := ParseBaselineSpec(specPath)
 	require.NoError(t, err)
 	require.Equal(t, map[string]string{
-		"service-a": filepath.Join(dir, "a.tar"),
+		"service-a": "oci-archive:/tmp/a.tar",
 	}, spec.Baselines)
 }
 
@@ -83,4 +82,27 @@ func TestParseBundleSpec_RejectsMalformed(t *testing.T) {
 			require.Contains(t, err.Error(), tc.want)
 		})
 	}
+}
+
+func TestParseBaselineSpec_RejectsBarePath(t *testing.T) {
+	tmp := t.TempDir()
+	specPath := filepath.Join(tmp, "baselines.json")
+	require.NoError(t, os.WriteFile(specPath, []byte(
+		`{"baselines":{"svc-a":"/tmp/a.tar"}}`), 0o600))
+
+	_, err := ParseBaselineSpec(specPath)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "missing transport prefix")
+	require.Contains(t, err.Error(), "svc-a")
+}
+
+func TestParseBaselineSpec_AcceptsTransportRefs(t *testing.T) {
+	tmp := t.TempDir()
+	specPath := filepath.Join(tmp, "baselines.json")
+	require.NoError(t, os.WriteFile(specPath, []byte(
+		`{"baselines":{"svc-a":"docker://x/y:v1"}}`), 0o600))
+
+	spec, err := ParseBaselineSpec(specPath)
+	require.NoError(t, err)
+	require.Equal(t, "docker://x/y:v1", spec.Baselines["svc-a"])
 }

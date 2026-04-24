@@ -35,8 +35,8 @@ func newRemovedImport() *cobra.Command {
 		DisableFlagParsing: true,
 		RunE: func(*cobra.Command, []string) error {
 			return removedErr("import", []removedReplacement{
-				{verb: "apply", args: "DELTA-IN BASELINE-IMAGE TARGET-OUT", note: "single-image apply"},
-				{verb: "unbundle", args: "DELTA-IN BASELINE-SPEC OUTPUT-DIR", note: "multi-image unbundle via spec file"},
+				{verb: "apply", args: "DELTA-IN BASELINE-IMAGE TARGET-IMAGE", note: "single-image apply"},
+				{verb: "unbundle", args: "DELTA-IN BASELINE-SPEC OUTPUT-SPEC", note: "multi-image unbundle via spec file"},
 			})
 		},
 	}

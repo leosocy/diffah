@@ -16,12 +16,14 @@ func TestResolveBaselines_HappyPath(t *testing.T) {
 	defer b.cleanup()
 
 	baselines := map[string]string{
-		"svc-a": "../../testdata/fixtures/v1_oci.tar",
+		"svc-a": "oci-archive:../../testdata/fixtures/v1_oci.tar",
 	}
-	result, err := resolveBaselines(context.Background(), b.sidecar, baselines, false)
+	result, err := resolveBaselines(context.Background(), b.sidecar, baselines, nil, 0, 0, false)
 	require.NoError(t, err)
 	require.Len(t, result, 1)
 	require.Equal(t, "svc-a", result[0].Name)
+	require.NotNil(t, result[0].Src, "Src must be open")
+	closeResolvedBaselines(result)
 }
 
 func TestResolveBaselines_StrictRejectsMissing(t *testing.T) {
@@ -30,7 +32,7 @@ func TestResolveBaselines_StrictRejectsMissing(t *testing.T) {
 	require.NoError(t, err)
 	defer b.cleanup()
 
-	_, err = resolveBaselines(context.Background(), b.sidecar, map[string]string{}, true)
+	_, err = resolveBaselines(context.Background(), b.sidecar, map[string]string{}, nil, 0, 0, true)
 	require.Error(t, err)
 }
 
@@ -41,9 +43,9 @@ func TestResolveBaselines_MismatchDigest(t *testing.T) {
 	defer b.cleanup()
 
 	baselines := map[string]string{
-		"svc-a": "../../testdata/fixtures/v2_oci.tar",
+		"svc-a": "oci-archive:../../testdata/fixtures/v2_oci.tar",
 	}
-	_, err = resolveBaselines(context.Background(), b.sidecar, baselines, false)
+	_, err = resolveBaselines(context.Background(), b.sidecar, baselines, nil, 0, 0, false)
 	require.Error(t, err)
 	var mismatch *diff.ErrBaselineMismatch
 	require.ErrorAs(t, err, &mismatch, "wrong baseline must produce ErrBaselineMismatch")
