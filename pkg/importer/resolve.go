@@ -3,6 +3,7 @@ package importer
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/opencontainers/go-digest"
 	"go.podman.io/image/v5/types"
@@ -19,7 +20,13 @@ type resolvedBaseline struct {
 }
 
 func resolveBaselines(
-	ctx context.Context, sc *diff.Sidecar, baselines map[string]string, sysctx *types.SystemContext, strict bool,
+	ctx context.Context,
+	sc *diff.Sidecar,
+	baselines map[string]string,
+	sysctx *types.SystemContext,
+	retryTimes int,
+	retryDelay time.Duration,
+	strict bool,
 ) ([]resolvedBaseline, error) {
 	result := make([]resolvedBaseline, 0, len(sc.Images))
 	resolved := make(map[string]struct{}, len(sc.Images))
@@ -41,14 +48,19 @@ func resolveBaselines(
 			cleanup()
 			return nil, fmt.Errorf("parse baseline reference %q for %q: %w", raw, img.Name, err)
 		}
-		src, err := ref.NewImageSource(ctx, sysctx)
+		src, err := withRetry(ctx, retryTimes, retryDelay, func(ctx context.Context) (types.ImageSource, error) {
+			return ref.NewImageSource(ctx, sysctx)
+		})
 		if err != nil {
 			cleanup()
 			return nil, fmt.Errorf("open baseline source for %q: %w",
 				img.Name, diff.ClassifyRegistryErr(err, raw))
 		}
 
-		manifestBytes, _, err := src.GetManifest(ctx, nil)
+		manifestBytes, err := withRetry(ctx, retryTimes, retryDelay, func(ctx context.Context) ([]byte, error) {
+			b, _, e := src.GetManifest(ctx, nil)
+			return b, e
+		})
 		if err != nil {
 			_ = src.Close()
 			cleanup()

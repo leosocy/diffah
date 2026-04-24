@@ -4,9 +4,11 @@ package importer_test
 
 import (
 	"context"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/google/go-containerregistry/pkg/crane"
@@ -205,6 +207,79 @@ func shippedDigestsInDelta(t *testing.T, deltaPath string) map[digest.Digest]str
 		out[d] = struct{}{}
 	}
 	return out
+}
+
+func TestImporter_RetriesOn503(t *testing.T) {
+	ctx := context.Background()
+	// Fault only fires on GET /manifests/ (not PUT, which is used during push seeding).
+	srv := registrytest.New(t,
+		registrytest.WithInjectFault(func(r *http.Request) bool {
+			return r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/manifests/")
+		}, http.StatusServiceUnavailable, 2),
+	)
+	pushFixtureIntoRegistry(t, ctx, srv, nil, "app/v1", testdataPath(t, "v1_oci.tar"))
+
+	tmp := t.TempDir()
+	deltaPath := filepath.Join(tmp, "delta.tar")
+	require.NoError(t, exporter.Export(ctx, exporter.Options{
+		Pairs: []exporter.Pair{{
+			Name:         "default",
+			BaselinePath: testdataPath(t, "v1_oci.tar"),
+			TargetPath:   testdataPath(t, "v2_oci.tar"),
+		}},
+		OutputPath:  deltaPath,
+		Platform:    "linux/amd64",
+		IntraLayer:  "auto",
+		ToolVersion: "test",
+	}))
+
+	outPath := "oci-archive:" + filepath.Join(tmp, "restored.tar")
+	require.NoError(t, importer.Import(ctx, importer.Options{
+		DeltaPath:    deltaPath,
+		Baselines:    map[string]string{"default": registryDockerURL(t, srv, "app/v1")},
+		Outputs:      map[string]string{"default": outPath},
+		Strict:       true,
+		AllowConvert: true,
+		RetryTimes:   3,
+		SystemContext: &types.SystemContext{DockerInsecureSkipTLSVerify: types.OptionalBoolTrue},
+	}))
+}
+
+func TestImporter_NoRetryWhenRetryTimesIsZero(t *testing.T) {
+	ctx := context.Background()
+	// Fault only fires on GET /manifests/ (not PUT used during push seeding).
+	srv := registrytest.New(t,
+		registrytest.WithInjectFault(func(r *http.Request) bool {
+			return r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/manifests/")
+		}, http.StatusServiceUnavailable, 2),
+	)
+	pushFixtureIntoRegistry(t, ctx, srv, nil, "app/v1", testdataPath(t, "v1_oci.tar"))
+
+	tmp := t.TempDir()
+	deltaPath := filepath.Join(tmp, "delta.tar")
+	require.NoError(t, exporter.Export(ctx, exporter.Options{
+		Pairs: []exporter.Pair{{
+			Name:         "default",
+			BaselinePath: testdataPath(t, "v1_oci.tar"),
+			TargetPath:   testdataPath(t, "v2_oci.tar"),
+		}},
+		OutputPath:  deltaPath,
+		Platform:    "linux/amd64",
+		IntraLayer:  "auto",
+		ToolVersion: "test",
+	}))
+
+	outPath := "oci-archive:" + filepath.Join(tmp, "restored.tar")
+	err := importer.Import(ctx, importer.Options{
+		DeltaPath:    deltaPath,
+		Baselines:    map[string]string{"default": registryDockerURL(t, srv, "app/v1")},
+		Outputs:      map[string]string{"default": outPath},
+		Strict:       true,
+		AllowConvert: true,
+		RetryTimes:   0,
+		SystemContext: &types.SystemContext{DockerInsecureSkipTLSVerify: types.OptionalBoolTrue},
+	})
+	require.Error(t, err)
 }
 
 // Helpers — keep at file bottom.

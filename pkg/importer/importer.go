@@ -66,7 +66,8 @@ func Import(ctx context.Context, opts Options) error {
 	if err := validatePositionalBaseline(bundle.sidecar, opts.Baselines); err != nil {
 		return err
 	}
-	resolved, err := resolveBaselines(ctx, bundle.sidecar, opts.Baselines, opts.SystemContext, opts.Strict)
+	resolved, err := resolveBaselines(ctx, bundle.sidecar, opts.Baselines, opts.SystemContext,
+		opts.RetryTimes, opts.RetryDelay, opts.Strict)
 	if err != nil {
 		return err
 	}
@@ -138,7 +139,8 @@ func DryRun(ctx context.Context, opts Options) (DryRunReport, error) {
 		}
 	}
 
-	resolved, err := resolveBaselines(ctx, bundle.sidecar, opts.Baselines, opts.SystemContext, opts.Strict)
+	resolved, err := resolveBaselines(ctx, bundle.sidecar, opts.Baselines, opts.SystemContext,
+		opts.RetryTimes, opts.RetryDelay, opts.Strict)
 	if err != nil {
 		return DryRunReport{}, err
 	}
