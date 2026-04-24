@@ -53,7 +53,7 @@ func buildTestBundle(t *testing.T, name string) string {
 		Pairs: []exporter.Pair{{
 			Name:        name,
 			BaselineRef: "oci-archive:../../testdata/fixtures/v1_oci.tar",
-			TargetRef: "oci-archive:../../testdata/fixtures/v2_oci.tar",
+			TargetRef:   "oci-archive:../../testdata/fixtures/v2_oci.tar",
 		}},
 		Platform:    "linux/amd64",
 		IntraLayer:  "off",

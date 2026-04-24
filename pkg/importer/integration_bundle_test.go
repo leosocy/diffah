@@ -427,7 +427,7 @@ func fixturePair(t *testing.T) exporter.Pair {
 	return exporter.Pair{
 		Name:        "svc-a",
 		BaselineRef: "oci-archive:../../testdata/fixtures/v1_oci.tar",
-		TargetRef: "oci-archive:../../testdata/fixtures/v2_oci.tar",
+		TargetRef:   "oci-archive:../../testdata/fixtures/v2_oci.tar",
 	}
 }
 

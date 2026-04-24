@@ -20,6 +20,11 @@ import (
 // filesystem paths today, so "/tmp/old.tar" has a slash in its prefix
 // and falls through to the prepend branch. "docker-archive:/tmp/x.tar"
 // has no slash before ':' and is already-prefixed.
+//
+// POSIX paths only. A Windows bare path like `C:\foo.tar` has no slash
+// in the segment before ':' and would be misclassified as transport
+// "C". The project is macOS/Linux-only today; Phase 5 retires the
+// shim before Windows becomes a concern.
 func defaultToDockerArchive(s string) string {
 	if i := strings.Index(s, ":"); i > 0 {
 		prefix := s[:i]

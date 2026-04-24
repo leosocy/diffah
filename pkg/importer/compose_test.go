@@ -102,7 +102,7 @@ func TestBundleImageSource_GetBlob_PatchEncoding_DecodesAndVerifies(t *testing.T
 		Pairs: []exporter.Pair{{
 			Name:        "svc-a",
 			BaselineRef: "oci-archive:../../testdata/fixtures/v1_oci.tar",
-			TargetRef: "oci-archive:../../testdata/fixtures/v2_oci.tar",
+			TargetRef:   "oci-archive:../../testdata/fixtures/v2_oci.tar",
 		}},
 		Platform:    "linux/amd64",
 		IntraLayer:  "auto",
@@ -157,7 +157,7 @@ func TestBundleImageSource_GetBlob_PatchEncoding_CorruptedBlob_RaisesAssemblyMis
 		Pairs: []exporter.Pair{{
 			Name:        "svc-a",
 			BaselineRef: "oci-archive:../../testdata/fixtures/v1_oci.tar",
-			TargetRef: "oci-archive:../../testdata/fixtures/v2_oci.tar",
+			TargetRef:   "oci-archive:../../testdata/fixtures/v2_oci.tar",
 		}},
 		Platform:    "linux/amd64",
 		IntraLayer:  "auto",
@@ -209,7 +209,7 @@ func TestBundleImageSource_GetBlob_BaselineDelegation_Verified(t *testing.T) {
 		Pairs: []exporter.Pair{{
 			Name:        "svc-a",
 			BaselineRef: "oci-archive:../../testdata/fixtures/v1_oci.tar",
-			TargetRef: "oci-archive:../../testdata/fixtures/v2_oci.tar",
+			TargetRef:   "oci-archive:../../testdata/fixtures/v2_oci.tar",
 		}},
 		Platform:    "linux/amd64",
 		IntraLayer:  "off",

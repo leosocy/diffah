@@ -14,7 +14,7 @@ func TestAssembleSidecar_Minimal(t *testing.T) {
 	ctx := context.Background()
 	p1, err := planPair(ctx, Pair{Name: "svc-a",
 		BaselineRef: "oci-archive:../../testdata/fixtures/v1_oci.tar",
-		TargetRef: "oci-archive:../../testdata/fixtures/v2_oci.tar"}, &Options{Platform: "linux/amd64"})
+		TargetRef:   "oci-archive:../../testdata/fixtures/v2_oci.tar"}, &Options{Platform: "linux/amd64"})
 	require.NoError(t, err)
 
 	pool := newBlobPool()

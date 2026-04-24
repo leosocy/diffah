@@ -36,7 +36,7 @@ func TestImporter_PullsBaselineAnonymously(t *testing.T) {
 		Pairs: []exporter.Pair{{
 			Name:        "default",
 			BaselineRef: "oci-archive:" + testdataPath(t, "v1_oci.tar"),
-			TargetRef: "oci-archive:" + testdataPath(t, "v2_oci.tar"),
+			TargetRef:   "oci-archive:" + testdataPath(t, "v2_oci.tar"),
 		}},
 		OutputPath:  deltaPath,
 		Platform:    "linux/amd64",
@@ -76,7 +76,7 @@ func TestImporter_PullsBaselineWithBasicAuth(t *testing.T) {
 		Pairs: []exporter.Pair{{
 			Name:        "default",
 			BaselineRef: "oci-archive:" + testdataPath(t, "v1_oci.tar"),
-			TargetRef: "oci-archive:" + testdataPath(t, "v2_oci.tar"),
+			TargetRef:   "oci-archive:" + testdataPath(t, "v2_oci.tar"),
 		}},
 		OutputPath:  deltaPath,
 		Platform:    "linux/amd64",
@@ -113,7 +113,7 @@ func TestImporter_PushesOutputToRegistry(t *testing.T) {
 		Pairs: []exporter.Pair{{
 			Name:        "default",
 			BaselineRef: "oci-archive:" + testdataPath(t, "v1_oci.tar"),
-			TargetRef: "oci-archive:" + testdataPath(t, "v2_oci.tar"),
+			TargetRef:   "oci-archive:" + testdataPath(t, "v2_oci.tar"),
 		}},
 		OutputPath:  deltaPath,
 		Platform:    "linux/amd64",
@@ -154,7 +154,7 @@ func TestImporter_LazyBaselineFetch_OnlyReferencedBlobsPulled(t *testing.T) {
 		Pairs: []exporter.Pair{{
 			Name:        "default",
 			BaselineRef: "oci-archive:" + testdataPath(t, "v1_oci.tar"),
-			TargetRef: "oci-archive:" + testdataPath(t, "v2_oci.tar"),
+			TargetRef:   "oci-archive:" + testdataPath(t, "v2_oci.tar"),
 		}},
 		OutputPath:  deltaPath,
 		Platform:    "linux/amd64",
@@ -225,7 +225,7 @@ func TestImporter_RetriesOn503(t *testing.T) {
 		Pairs: []exporter.Pair{{
 			Name:        "default",
 			BaselineRef: "oci-archive:" + testdataPath(t, "v1_oci.tar"),
-			TargetRef: "oci-archive:" + testdataPath(t, "v2_oci.tar"),
+			TargetRef:   "oci-archive:" + testdataPath(t, "v2_oci.tar"),
 		}},
 		OutputPath:  deltaPath,
 		Platform:    "linux/amd64",
@@ -261,7 +261,7 @@ func TestImporter_NoRetryWhenRetryTimesIsZero(t *testing.T) {
 		Pairs: []exporter.Pair{{
 			Name:        "default",
 			BaselineRef: "oci-archive:" + testdataPath(t, "v1_oci.tar"),
-			TargetRef: "oci-archive:" + testdataPath(t, "v2_oci.tar"),
+			TargetRef:   "oci-archive:" + testdataPath(t, "v2_oci.tar"),
 		}},
 		OutputPath:  deltaPath,
 		Platform:    "linux/amd64",

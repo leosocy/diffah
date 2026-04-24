@@ -18,12 +18,12 @@ import (
 // "host/repo:tag" rather than filepath.Base's unhelpful "tag".
 func sourceHintFor(ref string) string {
 	for _, prefix := range []string{"docker-archive:", "oci-archive:", "oci:", "dir:"} {
-		if strings.HasPrefix(ref, prefix) {
-			return filepath.Base(strings.TrimPrefix(ref, prefix))
+		if rest, ok := strings.CutPrefix(ref, prefix); ok {
+			return filepath.Base(rest)
 		}
 	}
-	if strings.HasPrefix(ref, "docker://") {
-		return strings.TrimPrefix(ref, "docker://")
+	if rest, ok := strings.CutPrefix(ref, "docker://"); ok {
+		return rest
 	}
 	return ref
 }

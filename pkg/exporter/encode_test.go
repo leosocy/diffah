@@ -86,7 +86,7 @@ func TestEncodeShipped_StreamsWrittenDuringRead(t *testing.T) {
 	plan, err := planPair(ctx, Pair{
 		Name:        "svc-a",
 		BaselineRef: "oci-archive:../../testdata/fixtures/v1_oci.tar",
-		TargetRef: "oci-archive:../../testdata/fixtures/v2_oci.tar",
+		TargetRef:   "oci-archive:../../testdata/fixtures/v2_oci.tar",
 	}, &Options{Platform: "linux/amd64"})
 	require.NoError(t, err)
 
@@ -125,7 +125,7 @@ func TestEncodeShipped_WarningOnError_FallbackToFull(t *testing.T) {
 	plan, err := planPair(ctx, Pair{
 		Name:        "svc-a",
 		BaselineRef: "oci-archive:../../testdata/fixtures/v1_oci.tar",
-		TargetRef: "oci-archive:../../testdata/fixtures/v2_oci.tar",
+		TargetRef:   "oci-archive:../../testdata/fixtures/v2_oci.tar",
 	}, &Options{Platform: "linux/amd64"})
 	require.NoError(t, err)
 

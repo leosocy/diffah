@@ -41,11 +41,11 @@ type pairPlan struct {
 func planPair(ctx context.Context, p Pair, opts *Options) (*pairPlan, error) {
 	baseRef, err := alltransports.ParseImageName(p.BaselineRef)
 	if err != nil {
-		return nil, fmt.Errorf("parse baseline ref %s: %w", p.BaselineRef, err)
+		return nil, fmt.Errorf("parse baseline ref %q: %w", p.BaselineRef, err)
 	}
 	tgtRef, err := alltransports.ParseImageName(p.TargetRef)
 	if err != nil {
-		return nil, fmt.Errorf("parse target ref %s: %w", p.TargetRef, err)
+		return nil, fmt.Errorf("parse target ref %q: %w", p.TargetRef, err)
 	}
 
 	_, baseDigests, baseMeta, baseMfBytes, baseMime, err := readManifestBundle(
