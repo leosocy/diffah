@@ -26,6 +26,7 @@ type config struct {
 	tls                  bool
 	caPEM                []byte
 	certDir              string
+	faults               []*faultRule
 }
 
 // WithBasicAuth enables HTTP Basic-auth middleware.
@@ -67,6 +68,7 @@ func New(t *testing.T, opts ...Option) *Server {
 	base := registry.New()
 	h := s.accessLogMiddleware(base)
 	h = authMiddleware(cfg, h)
+	h = faultMiddleware(cfg, h)
 
 	if cfg.tls {
 		cert := generateTLSMaterial(t, cfg)
@@ -124,6 +126,41 @@ func (s *Server) accessLogMiddleware(next http.Handler) http.Handler {
 			})
 			s.mu.Unlock()
 		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+type faultRule struct {
+	match   func(*http.Request) bool
+	status  int
+	failN   int
+	counter int
+}
+
+// WithInjectFault makes the first failN matching requests return status.
+// Use e.g. failN=2 to exercise a 3-retry loop that succeeds on attempt 3.
+func WithInjectFault(match func(*http.Request) bool, status, failN int) Option {
+	return func(c *config) {
+		c.faults = append(c.faults, &faultRule{match: match, status: status, failN: failN})
+	}
+}
+
+func faultMiddleware(cfg *config, next http.Handler) http.Handler {
+	if len(cfg.faults) == 0 {
+		return next
+	}
+	var mu sync.Mutex
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		for _, f := range cfg.faults {
+			if f.counter < f.failN && f.match(r) {
+				f.counter++
+				mu.Unlock()
+				http.Error(w, "injected fault", f.status)
+				return
+			}
+		}
+		mu.Unlock()
 		next.ServeHTTP(w, r)
 	})
 }

@@ -65,3 +65,24 @@ func TestWithTLS_ServesHTTPS(t *testing.T) {
 	require.NotEmpty(t, srv.CACertPEM())
 	require.NotEmpty(t, srv.ClientCertDir())
 }
+
+func TestWithInjectFault_RespondsFailingUntilCount(t *testing.T) {
+	srv := registrytest.New(t, registrytest.WithInjectFault(
+		func(r *http.Request) bool { return strings.HasSuffix(r.URL.Path, "/v2/") },
+		http.StatusServiceUnavailable,
+		2, // first 2 requests fail
+	))
+	defer srv.Close()
+
+	// First two requests 503, third succeeds.
+	for i := 0; i < 3; i++ {
+		resp, err := http.Get(srv.URL() + "/v2/")
+		require.NoError(t, err)
+		if i < 2 {
+			require.Equal(t, http.StatusServiceUnavailable, resp.StatusCode, "request %d", i)
+		} else {
+			require.Equal(t, http.StatusOK, resp.StatusCode, "request %d", i)
+		}
+		resp.Body.Close()
+	}
+}
