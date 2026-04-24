@@ -2,6 +2,7 @@ package registrytest_test
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -54,4 +55,13 @@ func TestAccessLog_RecordsBlobFetches(t *testing.T) {
 	require.Len(t, hits, 1)
 	require.Equal(t, "some/repo", hits[0].Repo)
 	require.Equal(t, "sha256:abc", hits[0].Digest.String())
+}
+
+func TestWithTLS_ServesHTTPS(t *testing.T) {
+	srv := registrytest.New(t, registrytest.WithTLS())
+	defer srv.Close()
+
+	require.True(t, strings.HasPrefix(srv.URL(), "https://"))
+	require.NotEmpty(t, srv.CACertPEM())
+	require.NotEmpty(t, srv.ClientCertDir())
 }

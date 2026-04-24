@@ -5,6 +5,7 @@
 package registrytest
 
 import (
+	"crypto/tls"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -22,6 +23,9 @@ type Option func(*config)
 type config struct {
 	basicUser, basicPass string
 	bearerToken          string
+	tls                  bool
+	caPEM                []byte
+	certDir              string
 }
 
 // WithBasicAuth enables HTTP Basic-auth middleware.
@@ -43,6 +47,8 @@ type BlobRequest struct {
 // Server is the in-process registry returned by New.
 type Server struct {
 	httptest *httptest.Server
+	caPEM    []byte
+	certDir  string
 
 	mu       sync.Mutex
 	blobHits []BlobRequest
@@ -61,7 +67,18 @@ func New(t *testing.T, opts ...Option) *Server {
 	base := registry.New()
 	h := s.accessLogMiddleware(base)
 	h = authMiddleware(cfg, h)
-	s.httptest = httptest.NewServer(h)
+
+	if cfg.tls {
+		cert := generateTLSMaterial(t, cfg)
+		ts := httptest.NewUnstartedServer(h)
+		ts.TLS = &tls.Config{Certificates: []tls.Certificate{cert}}
+		ts.StartTLS()
+		s.httptest = ts
+	} else {
+		s.httptest = httptest.NewServer(h)
+	}
+	s.caPEM = cfg.caPEM
+	s.certDir = cfg.certDir
 	t.Cleanup(s.Close)
 	return s
 }
@@ -76,6 +93,15 @@ func (s *Server) Close() {
 		s.httptest = nil
 	}
 }
+
+// CACertPEM returns the PEM-encoded server certificate (which doubles
+// as the CA in this harness's self-signed chain). Empty if WithTLS
+// was not passed.
+func (s *Server) CACertPEM() []byte { return s.caPEM }
+
+// ClientCertDir returns a directory suitable for --cert-dir, containing
+// registry.crt. Empty if WithTLS was not passed.
+func (s *Server) ClientCertDir() string { return s.certDir }
 
 // BlobHits returns every /v2/<repo>/blobs/<digest> request observed.
 // Tests use it to assert lazy-fetch behaviour.
