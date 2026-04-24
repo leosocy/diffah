@@ -30,15 +30,14 @@ func TestParseBundleSpec_HappyPath(t *testing.T) {
 
 func TestParseBaselineSpec_HappyPath(t *testing.T) {
 	dir := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "a.tar"), []byte{}, 0o600))
-	raw := []byte(`{"baselines":{"service-a":"a.tar"}}`)
+	raw := []byte(`{"baselines":{"service-a":"oci-archive:/tmp/a.tar"}}`)
 	specPath := filepath.Join(dir, "baselines.json")
 	require.NoError(t, os.WriteFile(specPath, raw, 0o600))
 
 	spec, err := ParseBaselineSpec(specPath)
 	require.NoError(t, err)
 	require.Equal(t, map[string]string{
-		"service-a": filepath.Join(dir, "a.tar"),
+		"service-a": "oci-archive:/tmp/a.tar",
 	}, spec.Baselines)
 }
 

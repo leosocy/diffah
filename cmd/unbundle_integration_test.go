@@ -37,7 +37,7 @@ func TestUnbundleCommand_BundleRoundTrip(t *testing.T) {
 
 	baselineSpec := map[string]any{
 		"baselines": map[string]string{
-			"app": filepath.Join(root, "testdata/fixtures/v1_oci.tar"),
+			"app": "oci-archive:" + filepath.Join(root, "testdata/fixtures/v1_oci.tar"),
 		},
 	}
 	baselinePath := filepath.Join(tmp, "baselines.json")

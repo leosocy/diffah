@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -63,8 +64,14 @@ func runUnbundle(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("parse baseline spec: %w", err)
 	}
 	baselines := make(map[string]string, len(spec.Baselines))
-	for name, path := range spec.Baselines {
-		baselines[name] = path
+	for name, ref := range spec.Baselines {
+		// TODO(Task 5.4): drop this strip once the importer consumes transport
+		// refs directly. BASELINE-SPEC now requires a transport prefix (Task 1.3),
+		// but the importer still opens bare paths via imageio.OpenArchiveRef until
+		// Stage 2 rewires it.
+		ref = strings.TrimPrefix(ref, "oci-archive:")
+		ref = strings.TrimPrefix(ref, "docker-archive:")
+		baselines[name] = ref
 	}
 
 	opts := importer.Options{
