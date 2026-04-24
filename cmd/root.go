@@ -14,7 +14,10 @@ import (
 
 var version = "dev"
 
-const outputJSON = "json"
+const (
+	outputText = "text"
+	outputJSON = "json"
+)
 
 var (
 	logLevel     string
@@ -105,13 +108,22 @@ func init() {
 	pf := rootCmd.PersistentFlags()
 	pf.StringVar(&logLevel, "log-level", "info", "log level: debug|info|warn|error (env: DIFFAH_LOG_LEVEL)")
 	pf.StringVar(&logFormat, "log-format", "auto", "log format: auto|text|json (env: DIFFAH_LOG_FORMAT)")
-	pf.BoolVar(&quiet, "quiet", false, "suppress info logs and progress bars (level=warn)")
-	pf.BoolVar(&verbose, "verbose", false, "enable debug logs (level=debug)")
+	pf.BoolVarP(&quiet, "quiet", "q", false, "suppress info logs and progress bars (level=warn)")
+	pf.BoolVarP(&verbose, "verbose", "v", false, "enable debug logs (level=debug)")
 	pf.StringVar(&progressMode, "progress", "auto", "progress output: auto|bars|lines|off")
-	pf.StringVar(&outputFormat, "output", "text",
-		"output format: text|json (applies to inspect/dry-run/doctor and error rendering)")
+	pf.StringVarP(&outputFormat, "format", "o", outputText,
+		"rendering format: text|json (applies to inspect/dry-run/doctor and error output)")
 
 	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, _ []string) error {
+		switch outputFormat {
+		case outputText, outputJSON:
+		default:
+			return &cliErr{
+				cat:  errs.CategoryUser,
+				msg:  fmt.Sprintf("invalid --format %q (valid: text, json)", outputFormat),
+				hint: "pass --format text or --format json",
+			}
+		}
 		lvl := logLevel
 		if v := os.Getenv("DIFFAH_LOG_LEVEL"); v != "" && !cmd.Flags().Changed("log-level") {
 			lvl = v

@@ -237,7 +237,7 @@ func copyBundleToOutput(
 	case FormatDockerArchive, FormatOCIArchive:
 		outPath = filepath.Join(outputDir, imgName+".tar")
 	default:
-		return fmt.Errorf("unknown --output-format %q", resolvedFmt)
+		return &diff.ErrUnknownImageFormat{Got: resolvedFmt}
 	}
 
 	outRef, err := buildOutputRef(outPath, resolvedFmt)

@@ -9,9 +9,9 @@ codes, the sidecar schema, structured log output, and progress output.
 |------|--------------|------|
 | 0    | success      | operation completed |
 | 1    | internal     | bug, panic, or an unclassified error |
-| 2    | user         | bad flag, missing input, conflicting options, malformed `--baseline` or `--pair`, wrong baseline supplied |
+| 2    | user         | bad flag, missing/extra positional arguments, missing transport prefix on image reference, malformed bundle or baseline spec file, wrong baseline supplied (baseline manifest digest does not match the one the delta was built against), invocation of a removed verb (`export`, `import`) |
 | 3    | environment  | missing zstd, network failure, filesystem permission, registry auth |
-| 4    | content      | sidecar schema mismatch, digest mismatch, archive corruption, unsupported schema version |
+| 4    | content      | sidecar schema mismatch, blob digest mismatch (archive corruption), unsupported schema version (e.g. Phase 1 archive), file that is not a diffah delta archive |
 
 **Stability:** exit-code mappings for specific errors may be refined (e.g. a
 new env-level fallback being added). Exit code 0 for "success" never
@@ -59,7 +59,7 @@ Progress output (bars on TTY, lines on non-TTY) is for **humans, not
 machines**. It has no stability guarantee. Machine consumers must use
 `--log-format=json` + structured slog events instead.
 
-## JSON data output (`--output json`)
+## JSON data output (`--format json` / `-o json`)
 
 Every JSON response is a top-level envelope:
 

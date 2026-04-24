@@ -36,15 +36,7 @@ func runInspect(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		var p1 *diff.ErrPhase1Archive
 		if errors.As(err, &p1) {
-			if outputFormat == outputJSON {
-				return writeJSON(cmd.OutOrStdout(), map[string]any{
-					"feature":         "phase1",
-					"recommended_fix": "re-export with current diffah",
-				})
-			}
-			fmt.Fprintln(cmd.OutOrStdout(), "This archive uses the Phase 1 (single-image) schema.")
-			fmt.Fprintln(cmd.OutOrStdout(), "Re-export with the current diffah to use the bundle format.")
-			return nil
+			return reportPhase1Archive(cmd.OutOrStdout(), p1)
 		}
 		return err
 	}
@@ -118,6 +110,21 @@ func yesNo(b bool) string {
 		return "yes"
 	}
 	return "no"
+}
+
+// reportPhase1Archive prints the operator-facing hint for a Phase 1 archive
+// and returns the typed error so classify routes to content/4.
+func reportPhase1Archive(w io.Writer, err *diff.ErrPhase1Archive) error {
+	if outputFormat == outputJSON {
+		_ = writeJSON(w, map[string]any{
+			"feature":         "phase1",
+			"recommended_fix": "re-export with current diffah",
+		})
+		return err
+	}
+	fmt.Fprintln(w, "This archive uses the Phase 1 (single-image) schema.")
+	fmt.Fprintln(w, "Re-export with the current diffah to use the bundle format.")
+	return err
 }
 
 func inspectJSON(path string, s *diff.Sidecar, requiresZstd, zstdAvailable bool) any {

@@ -22,8 +22,10 @@ func TestRootCommand_HasExpectedSubcommands(t *testing.T) {
 	for _, c := range rootCmd.Commands() {
 		names[c.Name()] = true
 	}
-	require.True(t, names["export"], "export subcommand missing")
-	require.True(t, names["import"], "import subcommand missing")
+	require.True(t, names["diff"], "diff subcommand missing")
+	require.True(t, names["apply"], "apply subcommand missing")
+	require.True(t, names["bundle"], "bundle subcommand missing")
+	require.True(t, names["unbundle"], "unbundle subcommand missing")
 	require.True(t, names["inspect"], "inspect subcommand missing")
 	require.True(t, names["version"], "version subcommand missing")
 	require.True(t, names["doctor"], "doctor subcommand missing")
@@ -37,8 +39,10 @@ func TestRootCommand_HelpListsSubcommands(t *testing.T) {
 	require.NoError(t, rootCmd.Execute())
 
 	out := buf.String()
-	require.Contains(t, out, "export")
-	require.Contains(t, out, "import")
+	require.Contains(t, out, "diff")
+	require.Contains(t, out, "apply")
+	require.Contains(t, out, "bundle")
+	require.Contains(t, out, "unbundle")
 	require.Contains(t, out, "inspect")
 }
 
@@ -124,6 +128,51 @@ func withLoggerDefaults(t *testing.T, level, format string) {
 		logLevel, logFormat = prevLevel, prevFormat
 	})
 	logLevel, logFormat = level, format
+}
+
+func TestGlobalFormat_ShortFlagO_SetsJSON(t *testing.T) {
+	var stdout bytes.Buffer
+	code := Run(&stdout, nil, "-o", "json", "doctor")
+	require.Equal(t, 0, code)
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal(stdout.Bytes(), &parsed))
+	require.Equal(t, float64(1), parsed["schema_version"])
+}
+
+func TestGlobalFormat_LongFlagFormat_SetsJSON(t *testing.T) {
+	var stdout bytes.Buffer
+	code := Run(&stdout, nil, "--format", "json", "doctor")
+	require.Equal(t, 0, code)
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal(stdout.Bytes(), &parsed))
+	require.Equal(t, float64(1), parsed["schema_version"])
+}
+
+func TestGlobalOutput_RemovedEmitsUnknownFlag(t *testing.T) {
+	var stderr bytes.Buffer
+	code := Run(nil, &stderr, "--output", "json", "version")
+	require.NotEqual(t, 0, code)
+	require.Contains(t, stderr.String(), "unknown flag")
+}
+
+func TestGlobalFormat_RejectsUnknownValue(t *testing.T) {
+	var stderr bytes.Buffer
+	code := Run(nil, &stderr, "--format", "yaml", "version")
+	require.Equal(t, 2, code)
+	require.Contains(t, stderr.String(), `invalid --format "yaml"`)
+	require.Contains(t, stderr.String(), "valid: text, json")
+}
+
+func TestQuietShortFlag(t *testing.T) {
+	var stdout bytes.Buffer
+	code := Run(&stdout, nil, "-q", "version")
+	require.Equal(t, 0, code)
+}
+
+func TestVerboseShortFlag(t *testing.T) {
+	var stdout bytes.Buffer
+	code := Run(&stdout, nil, "-v", "version")
+	require.Equal(t, 0, code)
 }
 
 func TestRewireSlogToBars_AutoFormatHonorsTTY(t *testing.T) {

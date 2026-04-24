@@ -42,6 +42,25 @@ func (e *ErrIncompatibleOutputFormat) Error() string {
 		e.SourceMime, e.OutputFormat)
 }
 
+// ErrUnknownImageFormat is returned when the caller passes a value to the
+// --image-format flag that is not one of the supported image formats
+// (docker-archive, oci-archive, dir).
+type ErrUnknownImageFormat struct{ Got string }
+
+func (e *ErrUnknownImageFormat) Error() string {
+	return fmt.Sprintf("unknown --image-format %q (valid: docker-archive, oci-archive, dir)", e.Got)
+}
+
+// ErrNotADiffahArchive is returned when a file that was expected to be a
+// diffah delta archive is opened but does not contain the sidecar JSON.
+// Classified as content because the file — if it existed and was readable —
+// simply is not a diffah artifact.
+type ErrNotADiffahArchive struct{ Path string }
+
+func (e *ErrNotADiffahArchive) Error() string {
+	return fmt.Sprintf("archive %s is not a diffah delta (missing %s)", e.Path, SidecarFilename)
+}
+
 // ErrSourceManifestUnreadable is returned when the target manifest cannot be
 // fetched or parsed.
 type ErrSourceManifestUnreadable struct {
@@ -147,7 +166,8 @@ type ErrMultiImageNeedsNamedBaselines struct{ N int }
 
 func (e *ErrMultiImageNeedsNamedBaselines) Error() string {
 	return fmt.Sprintf(
-		"archive contains %d images; multi-image import requires --baseline NAME=PATH or --baseline-spec",
+		"archive contains %d images; multi-image unbundle requires a BASELINE-SPEC JSON"+
+			" mapping each image name to its baseline path",
 		e.N)
 }
 
@@ -207,7 +227,17 @@ func (*ErrBaselineMissingBlob) NextAction() string {
 
 func (*ErrIncompatibleOutputFormat) Category() errs.Category { return errs.CategoryUser }
 func (*ErrIncompatibleOutputFormat) NextAction() string {
-	return "pass --allow-convert to accept digest drift, or pick a compatible --output-format"
+	return "pass --allow-convert to accept digest drift, or pick a compatible --image-format"
+}
+
+func (*ErrUnknownImageFormat) Category() errs.Category { return errs.CategoryUser }
+func (*ErrUnknownImageFormat) NextAction() string {
+	return "use one of: docker-archive, oci-archive, dir"
+}
+
+func (*ErrNotADiffahArchive) Category() errs.Category { return errs.CategoryContent }
+func (*ErrNotADiffahArchive) NextAction() string {
+	return "verify the path points at an archive produced by 'diffah diff' or 'diffah bundle'"
 }
 
 func (e *ErrSourceManifestUnreadable) Category() errs.Category {
@@ -250,7 +280,7 @@ func (*ErrInvalidBundleFormat) Category() errs.Category { return errs.CategoryCo
 
 func (*ErrMultiImageNeedsNamedBaselines) Category() errs.Category { return errs.CategoryUser }
 func (*ErrMultiImageNeedsNamedBaselines) NextAction() string {
-	return "pass --baseline NAME=PATH (repeatable) or --baseline-spec FILE"
+	return "pass a BASELINE-SPEC JSON file mapping each image name to its baseline path (see 'diffah unbundle --help')"
 }
 
 func (*ErrBaselineNameUnknown) Category() errs.Category { return errs.CategoryUser }
@@ -265,7 +295,7 @@ func (*ErrBaselineMismatch) NextAction() string {
 
 func (*ErrBaselineMissing) Category() errs.Category { return errs.CategoryUser }
 func (*ErrBaselineMissing) NextAction() string {
-	return "provide --baseline NAME=PATH for each missing image or drop --strict"
+	return "add the missing image(s) to the BASELINE-SPEC JSON, or drop --strict to skip them"
 }
 
 func (*ErrInvalidBundleSpec) Category() errs.Category { return errs.CategoryUser }
