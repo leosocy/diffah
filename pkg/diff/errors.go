@@ -210,6 +210,46 @@ func (e *ErrDuplicateBundleName) Error() string {
 	return fmt.Sprintf("duplicate bundle image name %q", e.Name)
 }
 
+// ErrRegistryAuth is returned when authentication against a registry
+// fails (401/403 or an auth-config parse error). Classified as user.
+type ErrRegistryAuth struct{ Registry string }
+
+func (e *ErrRegistryAuth) Error() string {
+	return fmt.Sprintf("authentication failed against registry %q", e.Registry)
+}
+
+// ErrRegistryNetwork wraps connectivity, DNS, and timeout errors
+// raised while talking to a registry. Classified as environment.
+type ErrRegistryNetwork struct {
+	Op    string
+	Cause error
+}
+
+func (e *ErrRegistryNetwork) Error() string {
+	if e.Cause == nil {
+		return fmt.Sprintf("registry network error during %s", e.Op)
+	}
+	return fmt.Sprintf("registry network error during %s: %v", e.Op, e.Cause)
+}
+
+func (e *ErrRegistryNetwork) Unwrap() error { return e.Cause }
+
+// ErrRegistryManifestMissing is returned when a manifest request
+// returns 404. Classified as content.
+type ErrRegistryManifestMissing struct{ Ref string }
+
+func (e *ErrRegistryManifestMissing) Error() string {
+	return fmt.Sprintf("manifest not found at %s", e.Ref)
+}
+
+// ErrRegistryManifestInvalid is returned when a manifest body fails
+// to parse or uses an unsupported schema. Classified as content.
+type ErrRegistryManifestInvalid struct{ Ref, Reason string }
+
+func (e *ErrRegistryManifestInvalid) Error() string {
+	return fmt.Sprintf("invalid manifest at %s: %s", e.Ref, e.Reason)
+}
+
 func (*ErrManifestListUnselected) Category() errs.Category { return errs.CategoryUser }
 func (*ErrManifestListUnselected) NextAction() string {
 	return "pass --platform os/arch[/variant] to select a manifest-list instance"
@@ -308,6 +348,26 @@ func (*ErrDuplicateBundleName) NextAction() string {
 	return "each image name in a bundle must be unique"
 }
 
+func (*ErrRegistryAuth) Category() errs.Category { return errs.CategoryUser }
+func (*ErrRegistryAuth) NextAction() string {
+	return "verify --authfile or --creds for this registry"
+}
+
+func (*ErrRegistryNetwork) Category() errs.Category { return errs.CategoryEnvironment }
+func (*ErrRegistryNetwork) NextAction() string {
+	return "check connectivity and retry with --retry-times / --retry-delay"
+}
+
+func (*ErrRegistryManifestMissing) Category() errs.Category { return errs.CategoryContent }
+func (*ErrRegistryManifestMissing) NextAction() string {
+	return "manifest was not found — check tag or repository spelling"
+}
+
+func (*ErrRegistryManifestInvalid) Category() errs.Category { return errs.CategoryContent }
+func (*ErrRegistryManifestInvalid) NextAction() string {
+	return "manifest at this reference is corrupt or uses an unsupported schema"
+}
+
 var (
 	_ errs.Categorized = (*ErrManifestListUnselected)(nil)
 	_ errs.Categorized = (*ErrSidecarSchema)(nil)
@@ -329,4 +389,8 @@ var (
 	_ errs.Categorized = (*ErrBaselineMissing)(nil)
 	_ errs.Categorized = (*ErrInvalidBundleSpec)(nil)
 	_ errs.Categorized = (*ErrDuplicateBundleName)(nil)
+	_ errs.Categorized = (*ErrRegistryAuth)(nil)
+	_ errs.Categorized = (*ErrRegistryNetwork)(nil)
+	_ errs.Categorized = (*ErrRegistryManifestMissing)(nil)
+	_ errs.Categorized = (*ErrRegistryManifestInvalid)(nil)
 )
