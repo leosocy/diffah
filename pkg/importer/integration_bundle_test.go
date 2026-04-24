@@ -42,14 +42,19 @@ func newBundleHarness(t *testing.T, pairs []exporter.Pair) *bundleHarness {
 	return &bundleHarness{t: t, ctx: ctx, tmpDir: tmpDir, bundlePath: bundlePath, sidecar: b.sidecar}
 }
 
+// importOpts builds an Options that writes oci-archive outputs to a per-test
+// directory. Baseline values must already carry their transport prefix.
 func (h *bundleHarness) importOpts(baselines map[string]string, strict bool) Options {
 	outDir := filepath.Join(h.tmpDir, "output")
+	outputs := make(map[string]string, len(baselines))
+	for name := range baselines {
+		outputs[name] = "oci-archive:" + filepath.Join(outDir, name+".tar")
+	}
 	return Options{
-		DeltaPath:    h.bundlePath,
-		Baselines:    baselines,
-		Strict:       strict,
-		OutputPath:   outDir,
-		OutputFormat: "oci-archive",
+		DeltaPath: h.bundlePath,
+		Baselines: baselines,
+		Outputs:   outputs,
+		Strict:    strict,
 	}
 }
 
@@ -61,7 +66,7 @@ func TestIntegration_PartialImport(t *testing.T) {
 		Name: "svc-a", BaselinePath: "../../testdata/fixtures/v1_oci.tar",
 		TargetPath: "../../testdata/fixtures/v2_oci.tar",
 	}})
-	opts := h.importOpts(map[string]string{"svc-a": "../../testdata/fixtures/v1_oci.tar"}, false)
+	opts := h.importOpts(map[string]string{"svc-a": "oci-archive:../../testdata/fixtures/v1_oci.tar"}, false)
 	err := Import(h.ctx, opts)
 	require.NoError(t, err)
 }
@@ -109,7 +114,7 @@ func TestIntegration_UnknownBaselineName(t *testing.T) {
 		Name: "svc-a", BaselinePath: "../../testdata/fixtures/v1_oci.tar",
 		TargetPath: "../../testdata/fixtures/v2_oci.tar",
 	}})
-	opts := h.importOpts(map[string]string{"unknown-svc": "../../testdata/fixtures/v1_oci.tar"}, false)
+	opts := h.importOpts(map[string]string{"unknown-svc": "oci-archive:../../testdata/fixtures/v1_oci.tar"}, false)
 	err := Import(h.ctx, opts)
 	require.Error(t, err)
 	var unknown *diff.ErrBaselineNameUnknown
@@ -125,7 +130,7 @@ func TestIntegration_BaselineMismatch(t *testing.T) {
 		Name: "svc-a", BaselinePath: "../../testdata/fixtures/v1_oci.tar",
 		TargetPath: "../../testdata/fixtures/v2_oci.tar",
 	}})
-	opts := h.importOpts(map[string]string{"svc-a": "../../testdata/fixtures/v2_oci.tar"}, false)
+	opts := h.importOpts(map[string]string{"svc-a": "oci-archive:../../testdata/fixtures/v2_oci.tar"}, false)
 	err := Import(h.ctx, opts)
 	require.Error(t, err)
 	var mismatch *diff.ErrBaselineMismatch
@@ -137,10 +142,9 @@ func TestIntegration_LegacyArchiveRejected(t *testing.T) {
 		t.Skip()
 	}
 	opts := Options{
-		DeltaPath:    "../../testdata/fixtures/v1_phase1.tar",
-		Baselines:    map[string]string{"default": "../../testdata/fixtures/v1_oci.tar"},
-		OutputPath:   filepath.Join(t.TempDir(), "output"),
-		OutputFormat: "oci-archive",
+		DeltaPath: "../../testdata/fixtures/v1_phase1.tar",
+		Baselines: map[string]string{"default": "oci-archive:../../testdata/fixtures/v1_oci.tar"},
+		Outputs:   map[string]string{"default": "oci-archive:" + filepath.Join(t.TempDir(), "out.tar")},
 	}
 	err := Import(context.Background(), opts)
 	require.Error(t, err)
@@ -188,7 +192,7 @@ func TestIntegration_BundleOfOnePositional(t *testing.T) {
 		Name: "svc-a", BaselinePath: "../../testdata/fixtures/v1_oci.tar",
 		TargetPath: "../../testdata/fixtures/v2_oci.tar",
 	}})
-	opts := h.importOpts(map[string]string{"default": "../../testdata/fixtures/v1_oci.tar"}, false)
+	opts := h.importOpts(map[string]string{"default": "oci-archive:../../testdata/fixtures/v1_oci.tar"}, false)
 	err := Import(h.ctx, opts)
 	require.NoError(t, err)
 }
@@ -199,8 +203,8 @@ func TestIntegration_MultiImageBundle_UnknownBaselineName(t *testing.T) {
 	}
 	h := newMultiImageBundleHarness(t)
 	opts := h.importOpts(map[string]string{
-		"svc-a":      "../../testdata/fixtures/v1_oci.tar",
-		"wrong-name": "../../testdata/fixtures/v1_oci.tar",
+		"svc-a":      "oci-archive:../../testdata/fixtures/v1_oci.tar",
+		"wrong-name": "oci-archive:../../testdata/fixtures/v1_oci.tar",
 	}, false)
 	err := Import(h.ctx, opts)
 	require.Error(t, err)
@@ -231,7 +235,7 @@ func TestIntegration_MultiImageBundle_StrictMissingOne(t *testing.T) {
 	}
 	h := newMultiImageBundleHarness(t)
 	opts := h.importOpts(map[string]string{
-		"svc-a": "../../testdata/fixtures/v1_oci.tar",
+		"svc-a": "oci-archive:../../testdata/fixtures/v1_oci.tar",
 	}, true)
 	err := Import(h.ctx, opts)
 	require.Error(t, err)
@@ -247,8 +251,8 @@ func TestIntegration_MultiImageBundle_BaselineMismatch(t *testing.T) {
 	}
 	h := newMultiImageBundleHarness(t)
 	opts := h.importOpts(map[string]string{
-		"svc-a": "../../testdata/fixtures/v2_oci.tar",
-		"svc-b": "../../testdata/fixtures/v1_oci.tar",
+		"svc-a": "oci-archive:../../testdata/fixtures/v2_oci.tar",
+		"svc-b": "oci-archive:../../testdata/fixtures/v1_oci.tar",
 	}, false)
 	err := Import(h.ctx, opts)
 	require.Error(t, err)
@@ -263,7 +267,7 @@ func TestIntegration_MultiImageBundle_PositionalBaselineRejected(t *testing.T) {
 	}
 	h := newMultiImageBundleHarness(t)
 	opts := h.importOpts(map[string]string{
-		"default": "../../testdata/fixtures/v1_oci.tar",
+		"default": "oci-archive:../../testdata/fixtures/v1_oci.tar",
 	}, false)
 	err := Import(h.ctx, opts)
 	require.Error(t, err)
@@ -278,7 +282,7 @@ func TestIntegration_MultiImageBundle_DryRunReport(t *testing.T) {
 	}
 	h := newMultiImageBundleHarness(t)
 	opts := h.importOpts(map[string]string{
-		"svc-a": "../../testdata/fixtures/v1_oci.tar",
+		"svc-a": "oci-archive:../../testdata/fixtures/v1_oci.tar",
 	}, false)
 	report, err := DryRun(h.ctx, opts)
 	require.NoError(t, err)
@@ -332,11 +336,13 @@ func TestIntegration_MultiImageBundle_ImportsBoth(t *testing.T) {
 	opts := Options{
 		DeltaPath: h.bundlePath,
 		Baselines: map[string]string{
-			"svc-a": "../../testdata/fixtures/v1_oci.tar",
-			"svc-b": "../../testdata/fixtures/v1_oci.tar",
+			"svc-a": "oci-archive:../../testdata/fixtures/v1_oci.tar",
+			"svc-b": "oci-archive:../../testdata/fixtures/v1_oci.tar",
 		},
-		OutputPath:   outDir,
-		OutputFormat: "oci-archive",
+		Outputs: map[string]string{
+			"svc-a": "oci-archive:" + filepath.Join(outDir, "svc-a.tar"),
+			"svc-b": "oci-archive:" + filepath.Join(outDir, "svc-b.tar"),
+		},
 	}
 	err := Import(h.ctx, opts)
 	require.NoError(t, err)
@@ -355,11 +361,10 @@ func TestIntegration_MultiImageBundle_PartialSkip(t *testing.T) {
 	outDir := filepath.Join(h.tmpDir, "out")
 	var buf bytes.Buffer
 	opts := Options{
-		DeltaPath:    h.bundlePath,
-		Baselines:    map[string]string{"svc-a": "../../testdata/fixtures/v1_oci.tar"},
-		OutputPath:   outDir,
-		OutputFormat: "oci-archive",
-		Progress:     &buf,
+		DeltaPath: h.bundlePath,
+		Baselines: map[string]string{"svc-a": "oci-archive:../../testdata/fixtures/v1_oci.tar"},
+		Outputs:   map[string]string{"svc-a": "oci-archive:" + filepath.Join(outDir, "svc-a.tar")},
+		Progress:  &buf,
 	}
 	err := Import(h.ctx, opts)
 	require.NoError(t, err)
@@ -376,7 +381,7 @@ func TestDryRun_PopulatesAllFields(t *testing.T) {
 	}
 	h := newMultiImageBundleHarness(t)
 	opts := h.importOpts(map[string]string{
-		"svc-a": "../../testdata/fixtures/v1_oci.tar",
+		"svc-a": "oci-archive:../../testdata/fixtures/v1_oci.tar",
 	}, false)
 	report, err := DryRun(h.ctx, opts)
 	require.NoError(t, err)
@@ -411,36 +416,12 @@ func TestDryRun_PopulatesAllFields(t *testing.T) {
 	require.Contains(t, b.SkipReason, "no baseline provided")
 }
 
-func TestIntegration_Import_OutputMustBeDirectory(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-	h := newBundleHarness(t, []exporter.Pair{{
-		Name:         "svc-a",
-		BaselinePath: "../../testdata/fixtures/v1_oci.tar",
-		TargetPath:   "../../testdata/fixtures/v2_oci.tar",
-	}})
-	preExisting := filepath.Join(h.tmpDir, "not-a-dir")
-	require.NoError(t, os.WriteFile(preExisting, []byte("file not dir"), 0o600))
-	opts := Options{
-		DeltaPath:    h.bundlePath,
-		Baselines:    map[string]string{"default": "../../testdata/fixtures/v1_oci.tar"},
-		OutputPath:   preExisting,
-		OutputFormat: "oci-archive",
-	}
-	err := Import(h.ctx, opts)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "must be a directory")
-}
-
 func fixtureImageName(_ *testing.T) string {
 	return "svc-a"
 }
 
 // fixturePair returns the canonical v1_oci → v2_oci pair used by integration
-// tests in this package. Originally defined in importer_test.go, moved here
-// after that file's shared-state helpers were removed; kept in test scope to
-// avoid library-side coupling.
+// tests in this package.
 func fixturePair(t *testing.T) exporter.Pair {
 	t.Helper()
 	return exporter.Pair{
@@ -450,8 +431,8 @@ func fixturePair(t *testing.T) exporter.Pair {
 	}
 }
 
-func fixtureBaselinePath(t *testing.T) string {
-	return fixturePair(t).BaselinePath
+func fixtureBaselinePath(_ *testing.T) string {
+	return "../../testdata/fixtures/v1_oci.tar"
 }
 
 func TestIntegration_AutoDowngradesUnderReducedPATH(t *testing.T) {
@@ -482,10 +463,9 @@ func TestIntegration_AutoDowngradesUnderReducedPATH(t *testing.T) {
 	outDir := filepath.Join(tmp, "out")
 	require.NoError(t, os.MkdirAll(outDir, 0o755))
 	err = Import(context.Background(), Options{
-		DeltaPath:    bundlePath,
-		Baselines:    map[string]string{fixtureImageName(t): fixtureBaselinePath(t)},
-		OutputPath:   outDir,
-		OutputFormat: "oci-archive",
+		DeltaPath: bundlePath,
+		Baselines: map[string]string{fixtureImageName(t): "oci-archive:" + fixtureBaselinePath(t)},
+		Outputs:   map[string]string{fixtureImageName(t): "oci-archive:" + filepath.Join(outDir, fixtureImageName(t)+".tar")},
 	})
 	require.NoError(t, err)
 }

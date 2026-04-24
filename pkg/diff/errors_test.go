@@ -55,6 +55,40 @@ func TestErrShippedBlobDigestMismatch_Message(t *testing.T) {
 	require.Contains(t, e.Error(), "sha256:bb")
 }
 
+func TestErrRegistryAuth_Classify(t *testing.T) {
+	err := &ErrRegistryAuth{Registry: "ghcr.io"}
+	cat, hint := errs.Classify(err)
+	require.Equal(t, errs.CategoryUser, cat)
+	require.Equal(t, "verify --authfile or --creds for this registry", hint)
+	require.Contains(t, err.Error(), "ghcr.io")
+	require.Contains(t, err.Error(), "authentication")
+}
+
+func TestErrRegistryNetwork_Classify(t *testing.T) {
+	err := &ErrRegistryNetwork{Op: "GET manifest", Cause: errors.New("connection refused")}
+	cat, hint := errs.Classify(err)
+	require.Equal(t, errs.CategoryEnvironment, cat)
+	require.Contains(t, hint, "retry")
+	require.Contains(t, err.Error(), "GET manifest")
+	require.Contains(t, err.Error(), "connection refused")
+}
+
+func TestErrRegistryManifestMissing_Classify(t *testing.T) {
+	err := &ErrRegistryManifestMissing{Ref: "docker://ghcr.io/org/app:v1"}
+	cat, hint := errs.Classify(err)
+	require.Equal(t, errs.CategoryContent, cat)
+	require.Contains(t, hint, "tag or repository")
+	require.Contains(t, err.Error(), "docker://ghcr.io/org/app:v1")
+}
+
+func TestErrRegistryManifestInvalid_Classify(t *testing.T) {
+	err := &ErrRegistryManifestInvalid{Ref: "docker://x/y:z", Reason: "unsupported schema"}
+	cat, hint := errs.Classify(err)
+	require.Equal(t, errs.CategoryContent, cat)
+	require.Contains(t, hint, "corrupt or uses an unsupported schema")
+	require.Contains(t, err.Error(), "unsupported schema")
+}
+
 func TestEveryErrorType_IsCategorized(t *testing.T) {
 	instances := []any{
 		&ErrManifestListUnselected{},
@@ -77,6 +111,10 @@ func TestEveryErrorType_IsCategorized(t *testing.T) {
 		&ErrBaselineMissing{},
 		&ErrInvalidBundleSpec{},
 		&ErrDuplicateBundleName{},
+		&ErrRegistryAuth{},
+		&ErrRegistryNetwork{},
+		&ErrRegistryManifestMissing{},
+		&ErrRegistryManifestInvalid{},
 	}
 	for _, v := range instances {
 		cz, ok := v.(errs.Categorized)

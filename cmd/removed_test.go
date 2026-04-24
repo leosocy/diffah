@@ -45,7 +45,7 @@ func TestRemovedCommand_ImportRedirects(t *testing.T) {
 	out := stderr.String()
 	require.Contains(t, out, "unknown command 'import'")
 	require.Contains(t, out, "diffah apply")
-	require.Contains(t, out, "DELTA-IN BASELINE-IMAGE TARGET-OUT")
+	require.Contains(t, out, "DELTA-IN BASELINE-IMAGE TARGET-IMAGE")
 	require.Contains(t, out, "diffah unbundle")
 	require.Contains(t, out, "BASELINE-SPEC")
 }

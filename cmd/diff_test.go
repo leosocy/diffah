@@ -43,7 +43,7 @@ func TestDiffCommand_RejectsMissingTransportPrefix(t *testing.T) {
 func TestDiffCommand_RejectsReservedTransport(t *testing.T) {
 	var stderr bytes.Buffer
 	code := Run(nil, &stderr, "diff",
-		"docker://registry/img:v1",
+		"docker-daemon:registry/img:v1",
 		"docker-archive:/tmp/new.tar",
 		"/tmp/delta.tar")
 	require.Equal(t, 2, code)

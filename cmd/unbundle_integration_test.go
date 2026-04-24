@@ -37,7 +37,7 @@ func TestUnbundleCommand_BundleRoundTrip(t *testing.T) {
 
 	baselineSpec := map[string]any{
 		"baselines": map[string]string{
-			"app": filepath.Join(root, "testdata/fixtures/v1_oci.tar"),
+			"app": "oci-archive:" + filepath.Join(root, "testdata/fixtures/v1_oci.tar"),
 		},
 	}
 	baselinePath := filepath.Join(tmp, "baselines.json")
@@ -45,32 +45,25 @@ func TestUnbundleCommand_BundleRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(baselinePath, raw, 0o600))
 
-	restored := filepath.Join(tmp, "restored")
-	require.NoError(t, os.MkdirAll(restored, 0o755))
-	cmd = exec.Command(bin, "unbundle", bundleOut, baselinePath, restored)
+	// Build outputs.json: map each image to an oci-archive destination.
+	restoredArchive := filepath.Join(tmp, "app.tar")
+	outputsSpec := map[string]any{
+		"outputs": map[string]string{
+			"app": "oci-archive:" + restoredArchive,
+		},
+	}
+	outputsPath := filepath.Join(tmp, "outputs.json")
+	raw, err = json.Marshal(outputsSpec)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(outputsPath, raw, 0o600))
+
+	cmd = exec.Command(bin, "unbundle", bundleOut, baselinePath, outputsPath)
 	cmd.Dir = root
 	out, err = cmd.CombinedOutput()
 	require.NoError(t, err, string(out))
-	require.Contains(t, string(out), "wrote images to "+restored)
+	require.Contains(t, string(out), "wrote 1 images per "+outputsPath)
 
-	// Artifact discovery: "app" (dir form) or "app.tar" (archive form).
-	var appPath string
-	for _, name := range []string{"app", "app.tar"} {
-		candidate := filepath.Join(restored, name)
-		if _, statErr := os.Stat(candidate); statErr == nil {
-			appPath = candidate
-			break
-		}
-	}
-	require.NotEmpty(t, appPath, "expected reconstructed 'app' artifact under %s", restored)
-
-	info, err := os.Stat(appPath)
+	info, err := os.Stat(restoredArchive)
 	require.NoError(t, err)
-	if info.IsDir() {
-		inner, err := os.ReadDir(appPath)
-		require.NoError(t, err)
-		require.NotEmpty(t, inner, "expected 'app' directory to have contents")
-	} else {
-		require.Greater(t, info.Size(), int64(0))
-	}
+	require.Greater(t, info.Size(), int64(0))
 }
