@@ -145,7 +145,13 @@ func defaultAuthFile() string {
 	return ""
 }
 
+// fileExists returns true when path names an existing filesystem entry.
+// The path comes from environment-variable-driven config discovery
+// ($REGISTRY_AUTH_FILE / $XDG_RUNTIME_DIR / $HOME); we only need to
+// learn whether a candidate exists before handing it to the upstream
+// containers-image library. Stat is side-effect-free, so gosec G703's
+// path-traversal concern does not apply to this lookup site.
 func fileExists(path string) bool {
-	_, err := os.Stat(path)
+	_, err := os.Stat(path) //nolint:gosec // G703: env-derived config path; stat-only, no content read
 	return err == nil
 }
