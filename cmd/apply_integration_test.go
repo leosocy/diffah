@@ -17,7 +17,8 @@ func TestApplyCommand_RoundTrip(t *testing.T) {
 	bin := integrationBinary(t)
 	tmp := t.TempDir()
 	delta := filepath.Join(tmp, "delta.tar")
-	restored := filepath.Join(tmp, "restored.tar")
+	restoredArchive := filepath.Join(tmp, "restored.tar")
+	restoredRef := "oci-archive:" + restoredArchive
 
 	{
 		cmd := exec.Command(bin,
@@ -36,17 +37,17 @@ func TestApplyCommand_RoundTrip(t *testing.T) {
 			"apply",
 			delta,
 			"oci-archive:"+filepath.Join(root, "testdata/fixtures/v1_oci.tar"),
-			restored,
+			restoredRef,
 		)
 		cmd.Dir = root
 		var stderr bytes.Buffer
 		cmd.Stderr = &stderr
 		out, err := cmd.Output()
 		require.NoError(t, err, "stderr: %s", stderr.String())
-		require.Contains(t, string(out), "wrote "+restored)
+		require.Contains(t, string(out), "wrote "+restoredRef)
 	}
 
-	info, err := os.Stat(restored)
+	info, err := os.Stat(restoredArchive)
 	require.NoError(t, err)
 	require.Greater(t, info.Size(), int64(0))
 }

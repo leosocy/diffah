@@ -3,49 +3,46 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"os"
 
 	"github.com/spf13/cobra"
 
-	"github.com/leosocy/diffah/pkg/diff/errs"
 	"github.com/leosocy/diffah/pkg/importer"
 )
 
 var applyFlags = struct {
-	imageFormat  string
-	allowConvert bool
-	dryRun       bool
+	allowConvert       bool
+	dryRun             bool
+	buildSystemContext registryContextBuilder
 }{}
 
-const applyExample = `  # Reconstruct a single image from a delta + its baseline
-  diffah apply delta.tar docker-archive:/tmp/old.tar docker-archive:/tmp/restored.tar
+const applyExample = `  # Registry round-trip
+  diffah apply delta.tar docker://ghcr.io/org/app:v1 docker://ghcr.io/org/app:v2
 
-  # Write the reconstructed image as a directory (OCI layout)
-  diffah apply --image-format dir delta.tar docker-archive:/tmp/old.tar /tmp/restored-dir
+  # Registry baseline -> local OCI archive
+  diffah apply delta.tar docker://ghcr.io/org/app:v1 oci-archive:/tmp/out.tar
 
-  # Dry-run — verify baseline reachability without writing
-  diffah apply --dry-run delta.tar docker-archive:/tmp/old.tar /tmp/out.tar`
+  # Local archive baseline -> registry push
+  diffah apply delta.tar docker-archive:/tmp/old.tar docker://harbor/app:v2`
 
 func newApplyCommand() *cobra.Command {
 	c := &cobra.Command{
-		Use:   "apply DELTA-IN BASELINE-IMAGE TARGET-OUT",
+		Use:   "apply DELTA-IN BASELINE-IMAGE TARGET-IMAGE",
 		Short: "Reconstruct a single image from a delta archive and a baseline.",
 		Args: requireArgs("apply",
-			[]string{"DELTA-IN", "BASELINE-IMAGE", "TARGET-OUT"},
+			[]string{"DELTA-IN", "BASELINE-IMAGE", "TARGET-IMAGE"},
 			"diffah apply delta.tar docker-archive:/tmp/old.tar docker-archive:/tmp/restored.tar"),
 		Example: applyExample,
 		Annotations: map[string]string{
 			"arguments": "  DELTA-IN         path to the delta archive produced by 'diffah diff'\n" +
 				"  BASELINE-IMAGE   image to apply the delta on top of (transport:path)\n" +
-				"  TARGET-OUT       filesystem path to write the reconstructed image",
+				"  TARGET-IMAGE     where to write the reconstructed image (transport:path)",
 		},
 		RunE: runApply,
 	}
 	f := c.Flags()
-	f.StringVar(&applyFlags.imageFormat, "image-format", "",
-		"reconstructed image format: docker-archive|oci-archive|dir (default: match baseline)")
 	f.BoolVar(&applyFlags.allowConvert, "allow-convert", false, "allow format conversion during apply")
 	f.BoolVarP(&applyFlags.dryRun, "dry-run", "n", false, "verify baseline reachability without writing")
+	applyFlags.buildSystemContext = installRegistryFlags(c)
 	installUsageTemplate(c)
 	return c
 }
@@ -58,34 +55,25 @@ func runApply(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	targetOut := args[2]
-
-	// TARGET-OUT is the final artifact path. Treat an existing regular file
-	// as overwritable (consistent with 'diff'), but refuse to cross-type
-	// clobber a directory: that is almost always a user typo.
-	if info, err := os.Stat(targetOut); err == nil && info.IsDir() {
-		return &cliErr{
-			cat:  errs.CategoryUser,
-			msg:  fmt.Sprintf("TARGET-OUT %q already exists as a directory; refusing to overwrite", targetOut),
-			hint: "remove the directory or pick a different TARGET-OUT path",
-		}
+	target, err := ParseImageRef("TARGET-IMAGE", args[2])
+	if err != nil {
+		return err
 	}
 
-	// Determine the output reference. For now, use --image-format to pick the transport;
-	// if empty, default to "oci-archive". Stage 5 will rewire TARGET-OUT to require a
-	// transport prefix directly.
-	outputTransport := applyFlags.imageFormat
-	if outputTransport == "" {
-		outputTransport = "oci-archive"
+	sc, retryTimes, retryDelay, err := applyFlags.buildSystemContext()
+	if err != nil {
+		return err
 	}
-	targetRef := outputTransport + ":" + targetOut
 
 	opts := importer.Options{
 		DeltaPath:        deltaIn,
 		Baselines:        map[string]string{"default": baseline.Raw},
-		Outputs:          map[string]string{"default": targetRef},
+		Outputs:          map[string]string{"default": target.Raw},
 		Strict:           true,
 		AllowConvert:     applyFlags.allowConvert,
+		SystemContext:    sc,
+		RetryTimes:       retryTimes,
+		RetryDelay:       retryDelay,
 		ProgressReporter: newProgressReporter(cmd.ErrOrStderr()),
 	}
 	ctx := context.Background()
@@ -104,6 +92,6 @@ func runApply(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	fmt.Fprintf(cmd.OutOrStdout(), "wrote %s\n", targetOut)
+	fmt.Fprintf(cmd.OutOrStdout(), "wrote %s\n", target.Raw)
 	return nil
 }
