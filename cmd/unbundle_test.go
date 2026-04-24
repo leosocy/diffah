@@ -67,3 +67,19 @@ func TestUnbundleCommand_RegistersRegistryFlags(t *testing.T) {
 	require.Contains(t, out, "--tls-verify")
 	require.Contains(t, out, "--retry-times")
 }
+
+func TestUnbundleCommand_OutputSpecRejectsDirectory(t *testing.T) {
+	tmp := t.TempDir()
+	dir := filepath.Join(tmp, "some-dir")
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	deltaPath := filepath.Join(tmp, "delta.tar")
+	require.NoError(t, os.WriteFile(deltaPath, []byte{}, 0o600))
+	baselinesPath := filepath.Join(tmp, "baselines.json")
+	require.NoError(t, os.WriteFile(baselinesPath,
+		[]byte(`{"baselines":{"x":"docker-archive:/tmp/a.tar"}}`), 0o600))
+
+	var stderr bytes.Buffer
+	code := Run(nil, &stderr, "unbundle", deltaPath, baselinesPath, dir)
+	require.NotEqual(t, 0, code)
+	require.Contains(t, stderr.String(), "must be a JSON file")
+}

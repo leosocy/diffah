@@ -98,6 +98,15 @@ type OutputSpec struct {
 // go.podman.io/image/v5/transports/alltransports. Returns
 // *ErrInvalidBundleSpec on any shape/content failure.
 func ParseOutputSpec(path string) (*OutputSpec, error) {
+	// Early guard: a directory here is almost always a user typo —
+	// they passed the pre-Phase-2 OUTPUT-DIR positional by mistake.
+	if info, statErr := os.Stat(path); statErr == nil && info.IsDir() {
+		return nil, &ErrInvalidBundleSpec{
+			Path: path,
+			Reason: "OUTPUT-SPEC must be a JSON file, not a directory " +
+				"(see 'diffah unbundle --help')",
+		}
+	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, &ErrInvalidBundleSpec{Path: path, Reason: err.Error()}

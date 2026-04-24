@@ -63,3 +63,15 @@ func TestApplyCommand_RegistersRegistryFlags(t *testing.T) {
 	require.Contains(t, out, "--tls-verify")
 	require.Contains(t, out, "--retry-times")
 }
+
+func TestApplyCommand_BareTargetEmitsPhase2MigrationHint(t *testing.T) {
+	var stderr bytes.Buffer
+	code := Run(nil, &stderr, "apply",
+		"delta.tar",
+		"docker-archive:/tmp/old.tar",
+		"/tmp/restored.tar",
+	)
+	require.Equal(t, 2, code)
+	require.Contains(t, stderr.String(), "missing transport prefix for TARGET-IMAGE")
+	require.Contains(t, stderr.String(), "Did you mean:")
+}

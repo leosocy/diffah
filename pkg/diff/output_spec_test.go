@@ -69,3 +69,11 @@ func TestParseOutputSpec_RejectsInvalidName(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "bad name!")
 }
+
+func TestParseOutputSpec_RejectsDirectory(t *testing.T) {
+	tmp := t.TempDir()
+
+	_, err := ParseOutputSpec(tmp)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "must be a JSON file")
+}
