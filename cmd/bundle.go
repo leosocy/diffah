@@ -48,10 +48,11 @@ func hasTransportPrefix(s string) bool {
 }
 
 var bundleFlags = struct {
-	platform   string
-	compress   string
-	intraLayer string
-	dryRun     bool
+	platform           string
+	compress           string
+	intraLayer         string
+	dryRun             bool
+	buildSystemContext registryContextBuilder
 }{}
 
 const bundleExample = `  # Bundle multiple images using a spec file
@@ -79,6 +80,7 @@ func newBundleCommand() *cobra.Command {
 	f.StringVar(&bundleFlags.compress, "compress", "", "compression algorithm")
 	f.StringVar(&bundleFlags.intraLayer, "intra-layer", "auto", "intra-layer diff mode (auto|off|required)")
 	f.BoolVarP(&bundleFlags.dryRun, "dry-run", "n", false, "plan without writing the bundle")
+	bundleFlags.buildSystemContext = installRegistryFlags(c)
 	installUsageTemplate(c)
 	return c
 }
@@ -102,6 +104,11 @@ func runBundle(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	sc, retryTimes, retryDelay, err := bundleFlags.buildSystemContext()
+	if err != nil {
+		return err
+	}
+
 	opts := exporter.Options{
 		Pairs:            pairs,
 		Platform:         bundleFlags.platform,
@@ -109,6 +116,9 @@ func runBundle(cmd *cobra.Command, args []string) error {
 		IntraLayer:       bundleFlags.intraLayer,
 		OutputPath:       deltaOut,
 		ToolVersion:      version,
+		SystemContext:    sc,
+		RetryTimes:       retryTimes,
+		RetryDelay:       retryDelay,
 		ProgressReporter: newProgressReporter(cmd.ErrOrStderr()),
 	}
 	ctx := context.Background()

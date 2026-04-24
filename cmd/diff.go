@@ -10,10 +10,11 @@ import (
 )
 
 var diffFlags = struct {
-	platform   string
-	compress   string
-	intraLayer string
-	dryRun     bool
+	platform           string
+	compress           string
+	intraLayer         string
+	dryRun             bool
+	buildSystemContext registryContextBuilder
 }{}
 
 const diffExample = `  # Compute a single-image delta
@@ -45,6 +46,7 @@ func newDiffCommand() *cobra.Command {
 	f.StringVar(&diffFlags.compress, "compress", "", "compression algorithm")
 	f.StringVar(&diffFlags.intraLayer, "intra-layer", "auto", "intra-layer diff mode (auto|off|required)")
 	f.BoolVarP(&diffFlags.dryRun, "dry-run", "n", false, "plan without writing the delta")
+	diffFlags.buildSystemContext = installRegistryFlags(c)
 	installUsageTemplate(c)
 	return c
 }
@@ -62,6 +64,11 @@ func runDiff(cmd *cobra.Command, args []string) error {
 	}
 	deltaOut := args[2]
 
+	sc, retryTimes, retryDelay, err := diffFlags.buildSystemContext()
+	if err != nil {
+		return err
+	}
+
 	opts := exporter.Options{
 		Pairs: []exporter.Pair{{
 			Name:        "default",
@@ -73,6 +80,9 @@ func runDiff(cmd *cobra.Command, args []string) error {
 		IntraLayer:       diffFlags.intraLayer,
 		OutputPath:       deltaOut,
 		ToolVersion:      version,
+		SystemContext:    sc,
+		RetryTimes:       retryTimes,
+		RetryDelay:       retryDelay,
 		ProgressReporter: newProgressReporter(cmd.ErrOrStderr()),
 	}
 
