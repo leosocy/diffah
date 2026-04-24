@@ -51,13 +51,10 @@ func TestParseImageRef_MissingTransportNoHintForNonTarExt(t *testing.T) {
 
 func TestParseImageRef_ReservedTransports(t *testing.T) {
 	cases := []string{
-		"docker://registry/img:v1",
-		"oci:/tmp/layout",
-		"dir:/tmp/raw",
 		"docker-daemon:img:v1",
 		"containers-storage:img:v1",
 		"ostree:/tmp/ostree",
-		"sif:/tmp/image.sif",
+		"sif:/tmp/img.sif",
 		"tarball:/tmp/archive.tar",
 	}
 	for _, raw := range cases {
@@ -70,6 +67,45 @@ func TestParseImageRef_ReservedTransports(t *testing.T) {
 			require.Contains(t, msg, "oci-archive:PATH")
 		})
 	}
+}
+
+func TestParseImageRef_AcceptsRegistryTransports(t *testing.T) {
+	// oci: and dir: transports require the path to exist on disk during parse;
+	// use a temp dir so the test is hermetic.
+	tmp := t.TempDir()
+
+	cases := []struct {
+		name  string
+		raw   string
+		wantT string
+		wantP string
+	}{
+		{"docker", "docker://ghcr.io/org/app:v1", "docker", "//ghcr.io/org/app:v1"},
+		{"oci", "oci:" + tmp, "oci", tmp},
+		{"dir", "dir:" + tmp, "dir", tmp},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ref, err := ParseImageRef("BASELINE-IMAGE", tc.raw)
+			require.NoError(t, err)
+			require.Equal(t, tc.wantT, ref.Transport)
+			require.Equal(t, tc.wantP, ref.Path)
+			require.Equal(t, tc.raw, ref.Raw)
+		})
+	}
+}
+
+func TestParseImageRef_RejectsInvalidSyntaxForSupportedTransport(t *testing.T) {
+	// "docker://" has an empty path component — alltransports.ParseImageName will reject it.
+	_, err := ParseImageRef("BASELINE-IMAGE", "docker://")
+	require.Error(t, err)
+	msg := err.Error()
+	require.True(t,
+		strings.Contains(msg, "transport reference syntax") ||
+			strings.Contains(msg, "invalid BASELINE-IMAGE"),
+		"expected syntax error hint, got: %s", msg)
+	cat, _ := errs.Classify(err)
+	require.Equal(t, errs.CategoryUser, cat)
 }
 
 func TestParseImageRef_EmptyPath(t *testing.T) {
@@ -122,7 +158,7 @@ func TestParseImageRef_MissingTransportNextAction(t *testing.T) {
 }
 
 func TestParseImageRef_ReservedTransportNextAction(t *testing.T) {
-	_, err := ParseImageRef("BASELINE-IMAGE", "oci:/tmp/layout")
+	_, err := ParseImageRef("BASELINE-IMAGE", "docker-daemon:img:v1")
 	require.Error(t, err)
 	_, hint := errs.Classify(err)
 	require.NotEmpty(t, hint)

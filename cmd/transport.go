@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 
+	"go.podman.io/image/v5/transports/alltransports"
+
 	"github.com/leosocy/diffah/pkg/diff/errs"
 )
 
@@ -16,12 +18,12 @@ type ImageRef struct {
 var supportedInputTransports = map[string]bool{
 	"docker-archive": true,
 	"oci-archive":    true,
+	"docker":         true,
+	"oci":            true,
+	"dir":            true,
 }
 
 var reservedInputTransports = map[string]bool{
-	"oci":                true,
-	"dir":                true,
-	"docker":             true,
 	"docker-daemon":      true,
 	"containers-storage": true,
 	"ostree":             true,
@@ -42,6 +44,13 @@ func ParseImageRef(argName, raw string) (ImageRef, error) {
 	}
 	if rest == "" {
 		return ImageRef{}, newEmptyTransportPathErr(argName, prefix, raw)
+	}
+	if _, err := alltransports.ParseImageName(raw); err != nil {
+		return ImageRef{}, &cliErr{
+			cat:  errs.CategoryUser,
+			msg:  fmt.Sprintf("invalid %s %q: %v", argName, raw, err),
+			hint: "check the transport reference syntax (e.g. docker://host/repo:tag)",
+		}
 	}
 	return ImageRef{Transport: prefix, Path: rest, Raw: raw}, nil
 }
@@ -70,6 +79,9 @@ func (e *cliErr) NextAction() string      { return e.hint }
 func writeSupportedTransports(sb *strings.Builder) {
 	sb.WriteString("  docker-archive:PATH     # Docker tar archive (docker save)\n")
 	sb.WriteString("  oci-archive:PATH        # OCI tar archive (skopeo copy ... oci-archive:...)\n")
+	sb.WriteString("  docker://HOST/REPO:TAG  # Pull/push from an OCI registry\n")
+	sb.WriteString("  oci:PATH                # OCI image layout directory\n")
+	sb.WriteString("  dir:PATH                # raw Docker image directory layout\n")
 }
 
 func newMissingTransportErr(argName, raw string) error {
