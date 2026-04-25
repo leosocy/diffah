@@ -340,6 +340,7 @@ func verifySignature(ctx context.Context, deltaPath string, sidecarBytes []byte,
 	if err != nil {
 		return err
 	}
+	opts.reporter().Phase("verifying")
 	return signer.Verify(ctx, opts.VerifyPubKeyPath, payload[:], sig, opts.VerifyRekorURL)
 }
 

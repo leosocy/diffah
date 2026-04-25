@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/leosocy/diffah/pkg/diff"
 )
 
 func TestWithRetry_SucceedsAfterRetries(t *testing.T) {
@@ -55,7 +57,7 @@ func TestRetryable_Matrix(t *testing.T) {
 		{"404", errors.New("not found"), false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			require.Equal(t, tc.want, retryable(tc.err))
+			require.Equal(t, tc.want, diff.IsRetryableRegistryErr(tc.err))
 		})
 	}
 }
