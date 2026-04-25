@@ -95,12 +95,12 @@ func TestEncode_PreCancelledCtx_ReturnsErrorIsCanceled(t *testing.T) {
 	require.ErrorIs(t, err, context.Canceled, "Encode must surface ctx cancellation")
 }
 
-// TestEncodeOptsDefaultsAreByteIdenticalToPhase3 — zero-valued
-// EncodeOpts must round-trip cleanly via Decode (proxy for the more
-// expensive byte-identical-to-historical-fixture assertion: today's
+// TestEncodeOptsDefaults_RoundTripsViaDecode — zero-valued EncodeOpts
+// must round-trip cleanly via Decode. The argv-identity claim (today's
 // argv is `-3 --long=27`, which is exactly what `EncodeOpts{}.levelArg()`
-// and `windowArg()` produce).
-func TestEncodeOptsDefaultsAreByteIdenticalToPhase3(t *testing.T) {
+// and `windowArg()` produce) is asserted separately at the helper layer
+// in TestEncodeOpts_ArgvDefaults.
+func TestEncodeOptsDefaults_RoundTripsViaDecode(t *testing.T) {
 	skipWithoutZstd(t)
 	ref := bytes.Repeat([]byte("rrrr"), 1024)
 	target := append(append([]byte{}, ref...), bytes.Repeat([]byte("nnnn"), 256)...)
@@ -161,5 +161,32 @@ func TestEncodeOptsLevelAndWindowAreApplied(t *testing.T) {
 		back, err := Decode(context.Background(), ref, p)
 		require.NoErrorf(t, err, "decode %s", label)
 		require.Truef(t, bytes.Equal(back, target), "%s round-trip mismatch", label)
+	}
+}
+
+// TestEncodeOpts_ArgvDefaults — anchors spec §6.2 byte-identical guarantee
+// at the argv layer: zero-valued EncodeOpts must yield exactly "-3" /
+// "--long=27", which is the literal Phase-3 argv. Explicit values must
+// pass through unchanged.
+func TestEncodeOpts_ArgvDefaults(t *testing.T) {
+	tests := []struct {
+		name   string
+		opts   EncodeOpts
+		level  string
+		window string
+	}{
+		{"zero defaults to -3 --long=27", EncodeOpts{}, "-3", "--long=27"},
+		{"explicit level=22 window=30", EncodeOpts{Level: 22, WindowLog: 30}, "-22", "--long=30"},
+		{"explicit level=12 window=27", EncodeOpts{Level: 12, WindowLog: 27}, "-12", "--long=27"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.opts.levelArg(); got != tc.level {
+				t.Errorf("levelArg() = %q, want %q", got, tc.level)
+			}
+			if got := tc.opts.windowArg(); got != tc.window {
+				t.Errorf("windowArg() = %q, want %q", got, tc.window)
+			}
+		})
 	}
 }

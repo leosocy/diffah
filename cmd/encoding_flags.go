@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"strconv"
 
 	"github.com/spf13/cobra"
 
@@ -64,8 +65,8 @@ func installEncodingFlags(cmd *cobra.Command) encodingOptsBuilder {
 		if windowLog == "auto" {
 			o.ZstdWindowLog = 0 // 0 sentinel = auto
 		} else {
-			var n int
-			if _, err := fmt.Sscanf(windowLog, "%d", &n); err != nil || n < 10 || n > 31 {
+			n, err := strconv.Atoi(windowLog)
+			if err != nil || n < 10 || n > 31 {
 				return encodingOpts{}, &cliErr{
 					cat: errs.CategoryUser,
 					msg: fmt.Sprintf("--zstd-window-log must be 'auto' or in [10,31], got %q", windowLog),

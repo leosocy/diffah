@@ -50,6 +50,7 @@ func TestEncodingFlags_Validation(t *testing.T) {
 		{"window log low", []string{"--zstd-window-log=9"}, "--zstd-window-log must be 'auto' or in [10,31]"},
 		{"window log high", []string{"--zstd-window-log=32"}, "--zstd-window-log must be 'auto' or in [10,31]"},
 		{"window log non-numeric", []string{"--zstd-window-log=foo"}, "--zstd-window-log must be 'auto' or in [10,31]"},
+		{"window log trailing garbage", []string{"--zstd-window-log=27foo"}, "--zstd-window-log must be 'auto' or in [10,31]"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
