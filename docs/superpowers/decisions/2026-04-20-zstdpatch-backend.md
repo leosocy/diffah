@@ -11,8 +11,8 @@ Diffah v2 Phase 1 needs a zstd patch-from encoder and decoder for
 1. `github.com/klauspost/compress/zstd` with raw dictionaries — pure Go.
 2. `os/exec` against the `zstd` CLI (≥ 1.5) — external runtime dependency.
 
-Spike ran against two layer pairs from the service-A 5.2→5.3 image
-(`analysisbase-old` → `analysisbase-new`).
+Spike ran against two layer pairs from a representative service image
+upgrade (`baseline` → `target`).
 
 ## Measurements
 

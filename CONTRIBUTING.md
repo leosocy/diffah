@@ -1,0 +1,152 @@
+# Contributing to diffah
+
+Thanks for your interest in `diffah`. This document describes the
+development workflow, the conventions the codebase follows, and the
+quality bar a pull request needs to clear before merge.
+
+By participating in this project you agree to abide by the
+[Code of Conduct](CODE_OF_CONDUCT.md).
+
+## Reporting issues
+
+- **Bugs:** open a [bug report](https://github.com/leosocy/diffah/issues/new?template=bug.yml).
+  Include the failing command, the diffah version (`diffah version`),
+  and — when possible — a minimal reproduction archive.
+- **Feature requests:** open a
+  [feature request](https://github.com/leosocy/diffah/issues/new?template=feature.yml).
+  Describe the workflow you can't accomplish today and why an existing
+  flag combination isn't enough.
+- **Security vulnerabilities:** see [`SECURITY.md`](SECURITY.md). Do
+  **not** open a public issue.
+
+## Development environment
+
+| Requirement | Why                                              |
+|-------------|--------------------------------------------------|
+| Go ≥ 1.25.4 | matches the version in `.tool-versions` and CI   |
+| `zstd` ≥ 1.5 on `$PATH` | required by integration tests for intra-layer patching |
+| `golangci-lint` v2.11+ | matches the version pinned in CI         |
+| `make`, `git` | standard developer tooling                     |
+
+We use [asdf](https://asdf-vm.com/) to pin the Go version locally; the
+file is `.tool-versions`. Other version managers work the same way.
+
+```sh
+git clone https://github.com/leosocy/diffah.git
+cd diffah
+make build              # → ./bin/diffah
+make test               # unit tests with -race -cover
+make test-integration   # adds the `integration` build tag
+make lint               # golangci-lint
+make fixtures           # rebuild test image fixtures (occasionally needed)
+```
+
+## Workflow
+
+1. **Fork and branch.** Branch from `master`; use a short topical name
+   like `feat/registry-token` or `fix/sidecar-version-check`. We
+   ship pre-`v1.0.0`, so master is the integration branch.
+2. **Write a failing test first.** Every change to behavior needs a
+   test that fails before the change and passes after. Bug fixes
+   include a regression test that reproduces the bug.
+3. **Implement.** Keep the change focused. If a refactor is needed,
+   land it as its own PR before the feature change.
+4. **Run the full quality gate locally** (formatter + linter + tests +
+   integration tests if you touched I/O). All four must pass.
+5. **Update the changelog and docs.** Add a bullet under the relevant
+   `[Unreleased]` section in `CHANGELOG.md`. Update `README.md`,
+   `docs/compat.md`, or `docs/performance.md` when behavior the
+   README claims changes.
+6. **Open a PR.** Title and body should explain the *why*; reviewers
+   can read the diff for the *what*. Reference any linked issues.
+
+## Commit message convention
+
+We follow [Conventional Commits](https://www.conventionalcommits.org/):
+
+```
+<type>(<optional scope>): <imperative-mood description>
+
+<optional body — explain WHY, not just WHAT>
+
+<optional footer — refs / breaking-change notes>
+```
+
+Allowed types: `feat`, `fix`, `refactor`, `perf`, `test`, `docs`,
+`style`, `chore`, `build`, `ci`. The body should describe the
+motivation; the diff already shows the code change.
+
+Examples (drawn from this repo's history):
+
+```
+feat(exporter): top-K candidate selection with deterministic tie-break
+
+style(imageio): scope gosec G703 nolint on fileExists stat call
+```
+
+We do **not** require DCO sign-off and do not use a CLA. Please don't
+add `Co-authored-by: Claude` or other AI-attribution trailers — the
+project tracks human contributors only.
+
+## Code style
+
+- Run `make fmt` before committing. It applies `gofmt -s` and
+  `goimports -local github.com/leosocy/diffah`.
+- The project follows
+  [Effective Go](https://go.dev/doc/effective_go) and the
+  [Go Code Review Comments](https://github.com/golang/go/wiki/CodeReviewComments).
+- Public packages live under `pkg/...`; internal helpers under
+  `internal/...`. The `cmd` package is the CLI shim and is allowed to
+  reach into `internal/...`.
+- Errors at the user-facing surface use the `pkg/diff/errs` category
+  helpers so the `Execute()` exit-code classifier maps them
+  correctly. Adding a new error path? Pick the right
+  `errs.Category` (user / environment / content / internal).
+- Prefer composition over interface inheritance. Keep functions
+  short — the reviewer should be able to hold the whole function in
+  working memory.
+
+## Testing standards
+
+| Layer        | Convention                                                     |
+|--------------|----------------------------------------------------------------|
+| Unit tests   | `*_test.go` next to the package; table-driven preferred.        |
+| Integration  | gated by the `integration` build tag; live in `cmd/*_integration_test.go`. |
+| Fixtures     | regenerated by `scripts/build_fixtures` (`make fixtures`).      |
+| Determinism  | byte-equality assertions on archive output where applicable.    |
+
+Mock at boundaries only (filesystem, registry, signer key material) —
+do **not** mock the unit under test. If a test needs more than 3-4
+mocks, the production code should usually be split.
+
+The `integration` build tag is required for any test that exercises
+the CLI binary, the in-process registry harness, or `zstd` itself.
+
+## Pull request checklist
+
+- [ ] Tests added (or updated) and passing locally.
+- [ ] `make lint` is clean.
+- [ ] `make test` is clean (and `make test-integration` if touched).
+- [ ] `CHANGELOG.md` updated under the relevant `[Unreleased]` section.
+- [ ] `README.md` / `docs/compat.md` / `docs/performance.md` updated
+      when behavior the docs claim changes.
+- [ ] Commit messages follow Conventional Commits.
+
+## Releasing
+
+Releases are cut by tagging `vX.Y.Z` on `master`. The
+[`release.yml`](.github/workflows/release.yml) workflow builds
+cross-platform binaries via [goreleaser](https://goreleaser.com/),
+emits SBOMs, signs the artifacts with `cosign` (keyless / Sigstore),
+and publishes a multi-arch container image to
+`ghcr.io/leosocy/diffah`.
+
+If you are not a maintainer you do not need to do anything for a
+release — your `[Unreleased]` CHANGELOG entry is enough.
+
+## Architecture pointer
+
+The full design history (per-phase specs and ADRs) is under
+[`docs/superpowers/`](docs/superpowers/). Stable user-facing contracts
+(exit codes, sidecar schema, transports, JSON envelope) are in
+[`docs/compat.md`](docs/compat.md).

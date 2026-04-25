@@ -32,6 +32,81 @@ archives:
 checksum:
   name_template: "checksums.txt"
 
+sboms:
+  - id: archive
+    artifacts: archive
+    documents:
+      - "{{ .ArtifactName }}.sbom.json"
+    cmd: syft
+    args:
+      - "${artifact}"
+      - "--output"
+      - "cyclonedx-json={{ .Document }}"
+
+signs:
+  - id: cosign-archives
+    cmd: cosign
+    artifacts: archive
+    output: true
+    args:
+      - "sign-blob"
+      - "--yes"
+      - "--output-signature=${signature}"
+      - "--output-certificate=${certificate}"
+      - "${artifact}"
+
+docker_signs:
+  - id: cosign-images
+    cmd: cosign
+    artifacts: manifests
+    output: true
+    args:
+      - "sign"
+      - "--yes"
+      - "${artifact}@${digest}"
+
+dockers:
+  - id: linux-amd64
+    goos: linux
+    goarch: amd64
+    image_templates:
+      - "ghcr.io/leosocy/diffah:{{ .Version }}-amd64"
+      - "ghcr.io/leosocy/diffah:latest-amd64"
+    dockerfile: Dockerfile.release
+    use: buildx
+    build_flag_templates:
+      - "--platform=linux/amd64"
+      - "--label=org.opencontainers.image.title={{.ProjectName}}"
+      - "--label=org.opencontainers.image.version={{.Version}}"
+      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
+      - "--label=org.opencontainers.image.source=https://github.com/leosocy/diffah"
+      - "--label=org.opencontainers.image.licenses=Apache-2.0"
+  - id: linux-arm64
+    goos: linux
+    goarch: arm64
+    image_templates:
+      - "ghcr.io/leosocy/diffah:{{ .Version }}-arm64"
+      - "ghcr.io/leosocy/diffah:latest-arm64"
+    dockerfile: Dockerfile.release
+    use: buildx
+    build_flag_templates:
+      - "--platform=linux/arm64"
+      - "--label=org.opencontainers.image.title={{.ProjectName}}"
+      - "--label=org.opencontainers.image.version={{.Version}}"
+      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
+      - "--label=org.opencontainers.image.source=https://github.com/leosocy/diffah"
+      - "--label=org.opencontainers.image.licenses=Apache-2.0"
+
+docker_manifests:
+  - name_template: "ghcr.io/leosocy/diffah:{{ .Version }}"
+    image_templates:
+      - "ghcr.io/leosocy/diffah:{{ .Version }}-amd64"
+      - "ghcr.io/leosocy/diffah:{{ .Version }}-arm64"
+  - name_template: "ghcr.io/leosocy/diffah:latest"
+    image_templates:
+      - "ghcr.io/leosocy/diffah:latest-amd64"
+      - "ghcr.io/leosocy/diffah:latest-arm64"
+
 snapshot:
   version_template: "{{ incpatch .Version }}-next"
 

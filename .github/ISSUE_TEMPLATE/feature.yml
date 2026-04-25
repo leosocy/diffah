@@ -1,0 +1,49 @@
+name: Feature request
+description: Propose a new capability or change in behavior
+title: "feat: <short description>"
+labels: ["enhancement", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the workflow you can't accomplish today and why an
+        existing flag combination isn't enough. Concrete user stories
+        get prioritized faster than abstract ideas.
+  - type: textarea
+    id: motivation
+    attributes:
+      label: Problem / motivation
+      description: What are you trying to do, and what currently blocks it?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: |
+        How should diffah behave? CLI flags, sidecar fields, exit codes,
+        and any compatibility implications.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Workarounds you've tried, related tools, prior art.
+    validations:
+      required: false
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Scope
+      options:
+        - CLI / user-facing flags
+        - Library API (`pkg/...`)
+        - Archive / sidecar format
+        - Registry / transport handling
+        - Signing / verification
+        - Performance / throughput
+        - Documentation
+        - Other
+    validations:
+      required: true

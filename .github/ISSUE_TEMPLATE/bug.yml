@@ -1,0 +1,72 @@
+name: Bug report
+description: A reproducible defect in diffah
+title: "bug: <short description>"
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug. Please fill the
+        sections below — incomplete reports are slower to triage.
+        For security vulnerabilities, do **not** open a public issue;
+        see [SECURITY.md](../SECURITY.md).
+  - type: input
+    id: version
+    attributes:
+      label: diffah version
+      description: Output of `diffah version`.
+      placeholder: "0.1.0 (commit ...)"
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - linux/amd64
+        - linux/arm64
+        - darwin/amd64
+        - darwin/arm64
+        - other (note in repro)
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Command line
+      description: The exact `diffah` invocation that failed.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include stderr, exit code, and any relevant logs.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal reproduction
+      description: |
+        Source / target image references, fixture commands, or a small
+        archive that reproduces the issue. The smaller the better.
+    validations:
+      required: false
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Confirmation
+      options:
+        - label: I searched existing issues and this is not a duplicate.
+          required: true
+        - label: This is not a security vulnerability (those go through SECURITY.md).
+          required: true
