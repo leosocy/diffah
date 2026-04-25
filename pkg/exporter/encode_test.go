@@ -98,7 +98,7 @@ func TestEncodeShipped_StreamsWrittenDuringRead(t *testing.T) {
 
 	rep := &recordingReporter{}
 	require.NoError(t,
-		encodeShipped(ctx, pool, []*pairPlan{plan}, "auto", DefaultFingerprinter{}, rep, 0, 0))
+		encodeShipped(ctx, pool, []*pairPlan{plan}, "auto", DefaultFingerprinter{}, rep, 0, 0, 0))
 
 	require.NotEmpty(t, rep.layers, "encodeShipped should have started at least one layer")
 	for _, layer := range rep.layers {
@@ -141,7 +141,7 @@ func TestEncodeShipped_WarningOnError_FallbackToFull(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err = encodeShipped(ctx, pool, []*pairPlan{plan}, "auto", DefaultFingerprinter{}, progress.NewLine(&buf), 0, 0)
+	err = encodeShipped(ctx, pool, []*pairPlan{plan}, "auto", DefaultFingerprinter{}, progress.NewLine(&buf), 0, 0, 0)
 	require.NoError(t, err, "encodeShipped must tolerate per-layer errors")
 
 	for _, s := range plan.Shipped {

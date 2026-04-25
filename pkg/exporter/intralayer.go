@@ -155,6 +155,127 @@ func (p *Planner) PlanShipped(
 	return fullEntry(s), target, nil
 }
 
+// PickTopK returns up to k candidates ordered by content-similarity
+// score (descending), with size-closest as the tie-break inside an
+// equal-score band, and digest-asc as the final tiebreak. Falls back
+// to size-closest top-k when targetFP is nil or no baseline has a
+// fingerprint. Result length is min(k, len(p.baseline)). Deterministic
+// for fixed inputs.
+//
+// PickTopK auto-primes the baseline fingerprint cache so callers may
+// invoke it before any other Planner method has run.
+func (p *Planner) PickTopK(targetFP Fingerprint, targetSize int64, k int) []BaselineLayerMeta {
+	if k <= 0 || len(p.baseline) == 0 {
+		return nil
+	}
+	p.ensureBaselineFP(context.Background())
+	type scored struct {
+		meta  BaselineLayerMeta
+		score int64
+	}
+	cands := make([]scored, 0, len(p.baseline))
+	for _, b := range p.baseline {
+		var s int64
+		if targetFP != nil {
+			s = score(targetFP, p.baselineFP[b.Digest])
+		}
+		cands = append(cands, scored{meta: b, score: s})
+	}
+	// Sort by score desc, size-closeness asc, then digest asc for stable order.
+	sort.SliceStable(cands, func(i, j int) bool {
+		if cands[i].score != cands[j].score {
+			return cands[i].score > cands[j].score
+		}
+		di := absDelta(cands[i].meta.Size, targetSize)
+		dj := absDelta(cands[j].meta.Size, targetSize)
+		if di != dj {
+			return di < dj
+		}
+		return cands[i].meta.Digest < cands[j].meta.Digest
+	})
+	if k > len(cands) {
+		k = len(cands)
+	}
+	out := make([]BaselineLayerMeta, k)
+	for i := 0; i < k; i++ {
+		out[i] = cands[i].meta
+	}
+	return out
+}
+
+// PlanShippedTopK encodes the target up to k+1 ways — once per top-k
+// baseline candidate plus one "full" encode — and returns whichever
+// produces the smallest emitted bytes. A target fingerprint is computed
+// inside this call (failure is non-fatal; PickTopK degrades to size-only
+// ranking).
+//
+// k=1 is observably equivalent to PlanShipped: same candidate selection,
+// same Encode/EncodeFull comparison, same gating (patch must strictly
+// beat both the full-zstd ceiling and the raw target bytes).
+//
+// PlanShipped stays in the file as the legacy K=1 fast path; this
+// method is the K-aware variant wired by encodeShipped behind the
+// --candidates flag.
+func (p *Planner) PlanShippedTopK(
+	ctx context.Context, s diff.BlobRef, target []byte, k int,
+) (diff.BlobRef, []byte, error) {
+	p.ensureBaselineFP(ctx)
+	fp := p.fingerprint
+	if fp == nil {
+		fp = DefaultFingerprinter{}
+	}
+	// Target fingerprint failure is non-fatal; PickTopK degrades to
+	// size-closest ranking when targetFP is nil.
+	targetFP, _ := fp.Fingerprint(ctx, s.MediaType, target)
+	cands := p.PickTopK(targetFP, s.Size, k)
+	if len(cands) == 0 {
+		return fullEntry(s), target, nil
+	}
+
+	// "full" is always the safety floor — never inflate beyond raw
+	// target bytes.
+	bestEntry := fullEntry(s)
+	bestPayload := target
+
+	for _, c := range cands {
+		refBytes, err := p.readBlob(c.Digest)
+		if err != nil {
+			return diff.BlobRef{}, nil, fmt.Errorf(
+				"read baseline reference %s: %w", c.Digest, err)
+		}
+		patch, err := zstdpatch.Encode(ctx, refBytes, target,
+			zstdpatch.EncodeOpts{Level: p.level, WindowLog: p.windowLog})
+		if err != nil {
+			return diff.BlobRef{}, nil, fmt.Errorf(
+				"encode patch %s vs %s: %w", s.Digest, c.Digest, err)
+		}
+		fullZst, err := zstdpatch.EncodeFull(target,
+			zstdpatch.EncodeOpts{Level: p.level, WindowLog: p.windowLog})
+		if err != nil {
+			return diff.BlobRef{}, nil, fmt.Errorf(
+				"encode full %s: %w", s.Digest, err)
+		}
+		// Same gating as PlanShipped: only emit a patch if it strictly
+		// beats both the full-zstd ceiling AND the raw target bytes.
+		// Additionally must beat the running best.
+		if len(patch) < len(fullZst) &&
+			int64(len(patch)) < s.Size &&
+			len(patch) < len(bestPayload) {
+			bestEntry = diff.BlobRef{
+				Digest:          s.Digest,
+				Size:            s.Size,
+				MediaType:       s.MediaType,
+				Encoding:        diff.EncodingPatch,
+				Codec:           CodecZstdPatch,
+				PatchFromDigest: c.Digest,
+				ArchiveSize:     int64(len(patch)),
+			}
+			bestPayload = patch
+		}
+	}
+	return bestEntry, bestPayload, nil
+}
+
 // pickClosest returns the baseline layer whose size is closest to want,
 // with ties broken by first-seen index (deterministic for a given input).
 func (p *Planner) pickClosest(want int64) (BaselineLayerMeta, bool) {

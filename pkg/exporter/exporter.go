@@ -119,7 +119,7 @@ func buildBundle(ctx context.Context, opts *Options) (*builtBundle, error) {
 	log().InfoContext(ctx, "planned pairs", "count", len(plans))
 
 	if err := encodeShipped(ctx, pool, plans, effectiveMode, opts.fingerprinter, opts.reporter(),
-		opts.ZstdLevel, opts.ZstdWindowLog); err != nil {
+		opts.ZstdLevel, opts.ZstdWindowLog, opts.Candidates); err != nil {
 		return nil, fmt.Errorf("encode shipped layers: %w", err)
 	}
 	log().InfoContext(ctx, "encoded blobs", "count", len(pool.entries))

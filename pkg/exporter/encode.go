@@ -13,8 +13,14 @@ import (
 func encodeShipped(
 	ctx context.Context, pool *blobPool, pairs []*pairPlan,
 	mode string, fp Fingerprinter, rep progress.Reporter,
-	level, windowLog int,
+	level, windowLog, candidates int,
 ) error {
+	// Default to single-best (K=1) so callers that haven't migrated
+	// to --candidates keep Phase-3 byte-identical output.
+	k := candidates
+	if k <= 0 {
+		k = 1
+	}
 	if rep == nil {
 		rep = progress.NewDiscard()
 	}
@@ -43,7 +49,7 @@ func encodeShipped(
 				layer.Done()
 				continue
 			}
-			entry, payload, err := planner.PlanShipped(ctx, s, layerBytes)
+			entry, payload, err := planner.PlanShippedTopK(ctx, s, layerBytes, k)
 			if err != nil {
 				log().Warn("patch encode failed, falling back to full",
 					"pair", p.Name, "digest", s.Digest, "err", err)
