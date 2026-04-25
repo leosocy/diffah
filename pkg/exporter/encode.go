@@ -101,8 +101,23 @@ func encodeTargets(
 	mode string, fp Fingerprinter, rep progress.Reporter, cache *fpCache,
 	level, windowLog, candidates, workers int,
 ) error {
+	// fingerprint snapshot taken once after Phase E1: every per-pair
+	// Planner is seeded with the same map so a baseline shared across N
+	// pairs is fingerprinted once (during E1), not N times (once per
+	// Planner.ensureBaselineFP). Spec §4.2.
+	seedFP := cache.SnapshotFingerprints()
+
 	encPool, _ := newWorkerPool(ctx, workers)
 	for _, p := range pairs {
+		// Per-pair digest → meta lookup so the readBaseline retry closure
+		// passes the real MediaType into cache.GetOrLoad. Without this map
+		// the retry path strips MediaType, which would silently produce a
+		// wrong-MediaType fingerprint if it ever survived the cache.
+		metaByDigest := make(map[digest.Digest]BaselineLayerMeta, len(p.BaselineLayerMeta))
+		for _, b := range p.BaselineLayerMeta {
+			metaByDigest[b.Digest] = b
+		}
+
 		// Each pair builds its own Planner that defers all baseline reads
 		// to the shared cache. Phase E1 has already primed every digest in
 		// p.BaselineLayerMeta, so this closure should always hit the cache;
@@ -110,15 +125,26 @@ func encodeTargets(
 		// impossible) case where a baseline digest reaches the planner
 		// without having been primed.
 		readBaseline := func(d digest.Digest) ([]byte, error) {
-			_, b, err := cache.GetOrLoad(ctx, BaselineLayerMeta{Digest: d},
+			meta, ok := metaByDigest[d]
+			if !ok {
+				meta = BaselineLayerMeta{Digest: d}
+			}
+			_, b, err := cache.GetOrLoad(ctx, meta,
 				func(d digest.Digest) ([]byte, error) {
 					return readBlobBytes(ctx, p.BaselineImageRef, p.SystemContext, d)
 				}, fp)
 			return b, err
 		}
 		planner := NewPlanner(p.BaselineLayerMeta, readBaseline, fp, level, windowLog)
+		planner.SeedBaselineFingerprints(seedFP)
 
 		for _, s := range p.Shipped {
+			// pool.has() is an early-out optimization, not a correctness
+			// gate. Two workers racing to encode the same digest is safe
+			// because addIfAbsent is first-write-wins; a missed early-out
+			// just means a duplicate encode whose output is then discarded
+			// by addIfAbsent. Determinism is preserved by the
+			// content-addressed pool, not by who arrives first.
 			if pool.has(s.Digest) {
 				continue
 			}

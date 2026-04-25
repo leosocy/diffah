@@ -321,6 +321,31 @@ func (p *Planner) pickClosest(want int64) (BaselineLayerMeta, bool) {
 	return best, true
 }
 
+// SeedBaselineFingerprints pre-populates the planner's baseline
+// fingerprint map for digests in fps that match a baseline this planner
+// owns. Used by the encoder to wire fpCache results into each per-pair
+// Planner so a baseline shared across N pairs is fingerprinted once,
+// not N times. Must be called before any concurrent PlanShipped /
+// PlanShippedTopK invocation; the encoder pool calls this during
+// per-pair planner setup, before submitting any encode job.
+//
+// A nil-valued entry in fps is treated as "fingerprint failed during
+// priming" and preserved verbatim — the planner falls back to size-only
+// matching for those baselines without retrying the fingerprint pass.
+func (p *Planner) SeedBaselineFingerprints(fps map[digest.Digest]Fingerprint) {
+	if len(fps) == 0 {
+		return
+	}
+	if p.baselineFP == nil {
+		p.baselineFP = make(map[digest.Digest]Fingerprint, len(p.baseline))
+	}
+	for _, b := range p.baseline {
+		if f, ok := fps[b.Digest]; ok {
+			p.baselineFP[b.Digest] = f
+		}
+	}
+}
+
 // ensureBaselineFP fingerprints every baseline layer exactly once per
 // Planner instance. Failures are recorded as nil entries in baselineFP
 // so callers can tell "no fingerprint available" from "empty
@@ -328,14 +353,23 @@ func (p *Planner) pickClosest(want int64) (BaselineLayerMeta, bool) {
 // pickSimilar skips entries by nil-check rather than by
 // errors.Is(err, ErrFingerprintFailed) — the error never crosses the
 // boundary; the nil-entry sentinel carries the same information.
+//
+// Pre-seeded entries (via SeedBaselineFingerprints) are honored as-is,
+// including nil sentinels. Only baselines without a cached fingerprint
+// trigger a fresh readBlob + Fingerprint call.
 func (p *Planner) ensureBaselineFP(ctx context.Context) {
 	p.fpOnce.Do(func() {
 		fp := p.fingerprint
 		if fp == nil {
 			fp = DefaultFingerprinter{}
 		}
-		p.baselineFP = make(map[digest.Digest]Fingerprint, len(p.baseline))
+		if p.baselineFP == nil {
+			p.baselineFP = make(map[digest.Digest]Fingerprint, len(p.baseline))
+		}
 		for _, b := range p.baseline {
+			if _, seeded := p.baselineFP[b.Digest]; seeded {
+				continue
+			}
 			blob, err := p.readBlob(b.Digest)
 			if err != nil {
 				p.baselineFP[b.Digest] = nil

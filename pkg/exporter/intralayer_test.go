@@ -765,3 +765,77 @@ func TestResolveWindowLog(t *testing.T) {
 		})
 	}
 }
+
+// countingFingerprinter wraps fakeFingerprinter and counts the number
+// of Fingerprint() invocations per digest, so tests can assert that
+// SeedBaselineFingerprints actually short-circuits re-fingerprinting.
+type countingFingerprinter struct {
+	inner *fakeFingerprinter
+	calls map[digest.Digest]int
+}
+
+func (c *countingFingerprinter) Fingerprint(
+	ctx context.Context, mt string, blob []byte,
+) (Fingerprint, error) {
+	c.calls[digest.FromBytes(blob)]++
+	return c.inner.Fingerprint(ctx, mt, blob)
+}
+
+func TestPlanner_SeedBaselineFingerprintsAvoidsReFingerprinting(t *testing.T) {
+	aBlob := []byte("baseline-alpha-bytes")
+	bBlob := []byte("baseline-beta-bytes")
+	aDigest := digest.FromBytes(aBlob)
+	bDigest := digest.FromBytes(bBlob)
+
+	blobs := blobMap{aDigest: aBlob, bDigest: bBlob}
+	baseline := []BaselineLayerMeta{
+		{Digest: aDigest, Size: int64(len(aBlob)), MediaType: "x"},
+		{Digest: bDigest, Size: int64(len(bBlob)), MediaType: "x"},
+	}
+
+	counter := &countingFingerprinter{
+		inner: &fakeFingerprinter{
+			fps: map[digest.Digest]Fingerprint{
+				aDigest: {"shared": 10},
+				bDigest: {"shared": 5},
+			},
+		},
+		calls: make(map[digest.Digest]int),
+	}
+
+	p := NewPlanner(baseline, blobs.read, counter, 0, 0)
+	// Seed only one of the two — exercises both paths in ensureBaselineFP.
+	p.SeedBaselineFingerprints(map[digest.Digest]Fingerprint{
+		aDigest: {"shared": 10},
+	})
+	p.ensureBaselineFP(context.Background())
+
+	require.Equal(t, 0, counter.calls[aDigest],
+		"seeded baseline a must not be re-fingerprinted")
+	require.Equal(t, 1, counter.calls[bDigest],
+		"unseeded baseline b must be fingerprinted exactly once")
+}
+
+func TestPlanner_SeedBaselineFingerprintsHonorsNilSentinel(t *testing.T) {
+	aBlob := []byte("baseline-prime-fail")
+	aDigest := digest.FromBytes(aBlob)
+	blobs := blobMap{aDigest: aBlob}
+	baseline := []BaselineLayerMeta{
+		{Digest: aDigest, Size: int64(len(aBlob)), MediaType: "x"},
+	}
+
+	counter := &countingFingerprinter{
+		inner: &fakeFingerprinter{},
+		calls: make(map[digest.Digest]int),
+	}
+
+	p := NewPlanner(baseline, blobs.read, counter, 0, 0)
+	// nil sentinel = "fingerprint failed during E1; do not retry".
+	p.SeedBaselineFingerprints(map[digest.Digest]Fingerprint{aDigest: nil})
+	p.ensureBaselineFP(context.Background())
+
+	require.Equal(t, 0, counter.calls[aDigest],
+		"nil-seeded baseline must not be re-fingerprinted")
+	require.Nil(t, p.baselineFP[aDigest],
+		"nil sentinel must be preserved in baselineFP")
+}

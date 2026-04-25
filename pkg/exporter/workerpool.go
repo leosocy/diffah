@@ -33,7 +33,11 @@ func newWorkerPool(ctx context.Context, n int) (*workerPool, context.Context) {
 
 // Submit enqueues fn. Blocks if the pool is full. If the pool's
 // context is already cancelled, Submit returns immediately without
-// running fn (the cancel error is observed by Wait).
+// running fn — that's safe because the cancellation error is still
+// observed by Wait() (errgroup.WithContext records ctx.Err on cancel),
+// so callers see the cancellation at the same point they would have
+// seen any other failure. Dropping fn silently on cancel is the
+// intended behavior.
 func (p *workerPool) Submit(fn func() error) {
 	select {
 	case <-p.ctx.Done():

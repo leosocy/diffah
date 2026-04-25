@@ -2,6 +2,7 @@ package exporter
 
 import (
 	"context"
+	"maps"
 	"sync"
 
 	"github.com/opencontainers/go-digest"
@@ -79,4 +80,18 @@ func (c *fpCache) lookupFp(d digest.Digest) Fingerprint {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.fps[d]
+}
+
+// SnapshotFingerprints returns a copy of the digest → Fingerprint map
+// for every baseline GetOrLoad has fingerprinted so far. Encoders use
+// this to seed each per-pair Planner so the same digest is not
+// re-fingerprinted across pairs — delivering the cross-pair memoization
+// promised in spec §4.2. A nil-valued entry means "fingerprint failed
+// for this baseline"; callers preserve that sentinel rather than retry.
+func (c *fpCache) SnapshotFingerprints() map[digest.Digest]Fingerprint {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	out := make(map[digest.Digest]Fingerprint, len(c.fps))
+	maps.Copy(out, c.fps)
+	return out
 }
