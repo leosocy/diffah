@@ -120,6 +120,24 @@ diffah export --bundle bundle.json ./bundle.tar
 diffah import --baseline-spec baselines.json ./bundle.tar ./output.tar
 ```
 
+### Encoding tuning
+
+Phase 4 ships four producer-side flags on `diff` and `bundle` for
+shrinking deltas at the cost of CPU and memory:
+
+```bash
+diffah diff \
+  --workers 8 --candidates 3 \
+  --zstd-level 22 --zstd-window-log auto \
+  oci-archive:v1.tar oci-archive:v2.tar delta.tar
+```
+
+The values shown above are the defaults. To match the historical Phase-3
+output bytes exactly, pin `--workers=1 --candidates=1 --zstd-level=3
+--zstd-window-log=27`. For a fixed flag tuple, the produced archive is
+byte-identical regardless of `--workers`. See `diffah diff --help` and
+[docs/performance.md](docs/performance.md) for memory characteristics.
+
 ### Output format
 
 By default `--output-format` is `auto`: the output format is chosen to

@@ -16,6 +16,26 @@ import (
 // whose encoding is patch.
 const CodecZstdPatch = "zstd-patch"
 
+// ResolveWindowLog converts the user-facing 0 sentinel into a concrete
+// log2 window size based on the layer's declared size. The bands
+// (≤128 MiB→27, ≤1 GiB→30, >1 GiB→31) match Phase-4 spec §3.4 and trade
+// encoder memory (≈ 2 × 2^N bytes per running encode) against
+// long-range match opportunity. A non-zero userWindowLog is honored
+// verbatim so explicit operator overrides bypass the per-layer pick.
+func ResolveWindowLog(userWindowLog int, layerSize int64) int {
+	if userWindowLog != 0 {
+		return userWindowLog
+	}
+	switch {
+	case layerSize <= 128<<20:
+		return 27
+	case layerSize <= 1<<30:
+		return 30
+	default:
+		return 31
+	}
+}
+
 // BaselineLayerMeta is the minimum descriptor the planner needs for each
 // baseline layer: a digest to key on, a size to match against, and a media
 // type for sanity.
@@ -131,13 +151,14 @@ func (p *Planner) PlanShipped(
 		return diff.BlobRef{}, nil, fmt.Errorf(
 			"read baseline reference %s: %w", bestRef.Digest, err)
 	}
+	wl := ResolveWindowLog(p.windowLog, s.Size)
 	patch, err := zstdpatch.Encode(ctx, refBytes, target,
-		zstdpatch.EncodeOpts{Level: p.level, WindowLog: p.windowLog})
+		zstdpatch.EncodeOpts{Level: p.level, WindowLog: wl})
 	if err != nil {
 		return diff.BlobRef{}, nil, fmt.Errorf("encode patch %s: %w", s.Digest, err)
 	}
 	fullZst, err := zstdpatch.EncodeFull(target,
-		zstdpatch.EncodeOpts{Level: p.level, WindowLog: p.windowLog})
+		zstdpatch.EncodeOpts{Level: p.level, WindowLog: wl})
 	if err != nil {
 		return diff.BlobRef{}, nil, fmt.Errorf("encode full %s: %w", s.Digest, err)
 	}
@@ -237,8 +258,9 @@ func (p *Planner) PlanShippedTopK(
 	// loop-invariant, so leaving EncodeFull inside the loop would
 	// trigger K identical compressions of the same bytes — visible cost
 	// once PR-4 raises --candidates default above 1.
+	wl := ResolveWindowLog(p.windowLog, s.Size)
 	fullZst, err := zstdpatch.EncodeFull(target,
-		zstdpatch.EncodeOpts{Level: p.level, WindowLog: p.windowLog})
+		zstdpatch.EncodeOpts{Level: p.level, WindowLog: wl})
 	if err != nil {
 		return diff.BlobRef{}, nil, fmt.Errorf(
 			"encode full %s: %w", s.Digest, err)
@@ -256,7 +278,7 @@ func (p *Planner) PlanShippedTopK(
 				"read baseline reference %s: %w", c.Digest, err)
 		}
 		patch, err := zstdpatch.Encode(ctx, refBytes, target,
-			zstdpatch.EncodeOpts{Level: p.level, WindowLog: p.windowLog})
+			zstdpatch.EncodeOpts{Level: p.level, WindowLog: wl})
 		if err != nil {
 			return diff.BlobRef{}, nil, fmt.Errorf(
 				"encode patch %s vs %s: %w", s.Digest, c.Digest, err)

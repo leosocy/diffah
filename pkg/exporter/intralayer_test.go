@@ -739,3 +739,29 @@ func TestPlanner_Run_PrefersContentMatchOverSizeClosest(t *testing.T) {
 			"content-match baseline must be picked when scores disagree with size")
 	}
 }
+
+func TestResolveWindowLog(t *testing.T) {
+	tests := []struct {
+		name      string
+		userValue int
+		layerSize int64
+		want      int
+	}{
+		{"explicit override beats auto", 30, 64 << 20, 30},
+		{"explicit override floor", 10, 1 << 30, 10},
+		{"auto small", 0, 64 << 20, 27},
+		{"auto medium boundary inclusive", 0, 128 << 20, 27},
+		{"auto medium just over", 0, (128 << 20) + 1, 30},
+		{"auto large", 0, 512 << 20, 30},
+		{"auto large boundary inclusive", 0, 1 << 30, 30},
+		{"auto huge", 0, (1 << 30) + 1, 31},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ResolveWindowLog(tc.userValue, tc.layerSize)
+			if got != tc.want {
+				t.Errorf("got %d, want %d", got, tc.want)
+			}
+		})
+	}
+}

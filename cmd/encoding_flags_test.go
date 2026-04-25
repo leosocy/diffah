@@ -17,7 +17,7 @@ func TestEncodingFlags_Defaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
-	if got.Workers != 8 || got.Candidates != 1 || got.ZstdLevel != 3 || got.ZstdWindowLog != 27 {
+	if got.Workers != 8 || got.Candidates != 3 || got.ZstdLevel != 22 || got.ZstdWindowLog != 0 {
 		t.Fatalf("unexpected defaults: %+v", got)
 	}
 }

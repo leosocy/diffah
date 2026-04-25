@@ -55,14 +55,18 @@ func TestExport_OutputIsByteIdenticalAcrossWorkerCounts(t *testing.T) {
 						TargetRef:   "oci-archive:../../testdata/fixtures/v3_oci.tar",
 					},
 				},
-				Platform:      "linux/amd64",
-				OutputPath:    out,
-				ToolVersion:   "test",
-				CreatedAt:     createdAt,
-				Workers:       w,
+				Platform:    "linux/amd64",
+				OutputPath:  out,
+				ToolVersion: "test",
+				CreatedAt:   createdAt,
+				Workers:     w,
+				// Production-tuned Phase 4 defaults — pin determinism on the
+				// path operators actually hit, not on a milder mid-tier
+				// configuration. Level 22 + window-log=auto + 3 candidates
+				// is the same combination cmd/encoding_flags.go installs.
 				Candidates:    3,
-				ZstdLevel:     12,
-				ZstdWindowLog: 0, // 0 = historical default (27); writer not under test here
+				ZstdLevel:     22,
+				ZstdWindowLog: 0,
 			}
 			require.NoError(t, exporter.Export(context.Background(), opts))
 

@@ -30,6 +30,10 @@ func newBundleCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "bundle BUNDLE-SPEC DELTA-OUT",
 		Short: "Export a multi-image delta bundle driven by a spec file.",
+		Long: `Export a multi-image delta bundle driven by a spec file. The spec lists
+{name, baseline, target} triples for every image included in the bundle.
+
+` + encodingTuningHelp,
 		Args: requireArgs("bundle",
 			[]string{"BUNDLE-SPEC", "DELTA-OUT"},
 			"diffah bundle bundle.json bundle.tar"),

@@ -32,6 +32,9 @@ func newDiffCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "diff BASELINE-IMAGE TARGET-IMAGE DELTA-OUT",
 		Short: "Compute a single-image delta archive.",
+		Long: `Compute a single-image delta archive between BASELINE-IMAGE and TARGET-IMAGE.
+
+` + encodingTuningHelp,
 		Args: requireArgs("diff",
 			[]string{"BASELINE-IMAGE", "TARGET-IMAGE", "DELTA-OUT"},
 			"diffah diff docker-archive:/tmp/old.tar docker-archive:/tmp/new.tar delta.tar"),
