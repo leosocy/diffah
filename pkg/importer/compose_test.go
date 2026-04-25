@@ -47,6 +47,7 @@ func TestBundleImageSource_GetManifest_ReturnsStoredBytes(t *testing.T) {
 		sidecar:      b.sidecar,
 		baseline:     openBaseline(t, "../../testdata/fixtures/v1_oci.tar"),
 		imageName:    img.Name,
+		cache:        newBaselineBlobCache(),
 	}
 
 	gotBytes, gotMime, err := src.GetManifest(context.Background(), nil)
@@ -84,6 +85,7 @@ func TestBundleImageSource_GetBlob_FullEncoding_ReturnsVerifiedBytes(t *testing.
 		sidecar:      b.sidecar,
 		baseline:     openBaseline(t, "../../testdata/fixtures/v1_oci.tar"),
 		imageName:    img.Name,
+		cache:        newBaselineBlobCache(),
 	}
 
 	rc, size, err := src.GetBlob(context.Background(), types.BlobInfo{Digest: fullDigest}, nil)
@@ -139,6 +141,7 @@ func TestBundleImageSource_GetBlob_PatchEncoding_DecodesAndVerifies(t *testing.T
 		sidecar:      b.sidecar,
 		baseline:     openBaseline(t, "../../testdata/fixtures/v1_oci.tar"),
 		imageName:    img.Name,
+		cache:        newBaselineBlobCache(),
 	}
 
 	rc, size, err := src.GetBlob(context.Background(), types.BlobInfo{Digest: patchDigest}, nil)
@@ -197,6 +200,7 @@ func TestBundleImageSource_GetBlob_PatchEncoding_CorruptedBlob_RaisesAssemblyMis
 		sidecar:      b.sidecar,
 		baseline:     openBaseline(t, "../../testdata/fixtures/v1_oci.tar"),
 		imageName:    img.Name,
+		cache:        newBaselineBlobCache(),
 	}
 	_, _, err = src.GetBlob(context.Background(), types.BlobInfo{Digest: patchDigest}, nil)
 	require.Error(t, err)
@@ -253,6 +257,7 @@ func TestBundleImageSource_GetBlob_BaselineDelegation_Verified(t *testing.T) {
 		sidecar:      b.sidecar,
 		baseline:     openBaseline(t, "../../testdata/fixtures/v1_oci.tar"),
 		imageName:    img.Name,
+		cache:        newBaselineBlobCache(),
 	}
 	rc, size, err := src.GetBlob(context.Background(), types.BlobInfo{Digest: requiredDigest}, nil)
 	require.NoError(t, err)

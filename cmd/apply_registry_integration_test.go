@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/google/go-containerregistry/pkg/crane"
+	"github.com/opencontainers/go-digest"
 	"github.com/stretchr/testify/require"
 	"go.podman.io/image/v5/types"
 
@@ -310,4 +311,49 @@ func TestApplyCLI_MissingManifestExit4(t *testing.T) {
 	manifestOrNotFound := strings.Contains(lowerStderr, "manifest") ||
 		strings.Contains(lowerStderr, "not found")
 	require.True(t, manifestOrNotFound, "expected manifest-related error in stderr; got: %s", stderr)
+}
+
+// TestApplyCLI_BaselineBlobsFetchedExactlyOnce_SingleImage runs the
+// standard v1→v2 fixture through the apply path against a docker://
+// baseline and asserts every distinct baseline blob digest was
+// fetched at most once. This is forward-protection: even if the
+// current fixture happens not to expose duplicate baseline-blob
+// fetches (it depends on which target layers reduce against which
+// baseline layers), the assertion locks in the per-Import cache
+// guarantee for any future fixture evolution that might reintroduce
+// the regression.
+func TestApplyCLI_BaselineBlobsFetchedExactlyOnce_SingleImage(t *testing.T) {
+	root := findRepoRoot(t)
+	bin := integrationBinary(t)
+	srv := registrytest.New(t)
+	seedOCIIntoRegistry(t, srv, "app/v1", filepath.Join(root, "testdata/fixtures/v1_oci.tar"), nil)
+
+	tmp := t.TempDir()
+	deltaPath := filepath.Join(tmp, "delta.tar")
+	buildDelta(t, bin, root, deltaPath)
+
+	before := len(srv.BlobHits())
+
+	_, stderr, exit := runDiffahBin(t, bin,
+		"apply",
+		deltaPath,
+		registryDockerURL(t, srv, "app/v1"),
+		"oci-archive:"+filepath.Join(tmp, "restored.tar"),
+		"--tls-verify=false",
+	)
+	require.Equal(t, 0, exit, "apply failed: %s", stderr)
+
+	hits := make(map[digest.Digest]int)
+	for _, h := range srv.BlobHits()[before:] {
+		if h.Repo == "app/v1" {
+			hits[h.Digest]++
+		}
+	}
+	require.NotEmptyf(t, hits,
+		"expected at least one baseline-blob fetch from app/v1 — fixture must exercise the baseline-fetch path")
+	for d, n := range hits {
+		t.Logf("baseline blob %s hits=%d", d, n)
+		require.Equalf(t, 1, n,
+			"baseline blob %s fetched %d times; want exactly 1 — dedup regression", d, n)
+	}
 }

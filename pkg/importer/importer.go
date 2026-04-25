@@ -101,7 +101,8 @@ func Import(ctx context.Context, opts Options) error {
 		resolvedByName[r.Name] = r
 	}
 
-	imported, skipped, err := importEachImage(ctx, bundle, resolvedByName, outputs, opts)
+	cache := newBaselineBlobCache()
+	imported, skipped, err := importEachImage(ctx, bundle, resolvedByName, outputs, opts, cache)
 	if err != nil {
 		return err
 	}
@@ -115,13 +116,16 @@ func Import(ctx context.Context, opts Options) error {
 // baseline was resolved. Images without a resolved baseline are recorded in
 // the skipped list and not composed; --strict is enforced earlier by
 // resolveBaselines, so reaching here with an unresolved image implies the
-// caller opted into non-strict mode.
+// caller opted into non-strict mode. cache is the per-Import baselineBlobCache
+// shared across every image so distinct baseline blob digests are fetched
+// at most once per Import() call.
 func importEachImage(
 	ctx context.Context,
 	bundle *extractedBundle,
 	resolvedByName map[string]resolvedBaseline,
 	outputs map[string]string,
 	opts Options,
+	cache *baselineBlobCache,
 ) (int, []string, error) {
 	imported := 0
 	skipped := make([]string, 0)
@@ -144,7 +148,7 @@ func importEachImage(
 			return 0, nil, fmt.Errorf("parse output reference for image %q: %w", img.Name, err)
 		}
 		if err := composeImage(ctx, img, bundle, rb, destRef,
-			opts.SystemContext, opts.AllowConvert, opts.reporter()); err != nil {
+			opts.SystemContext, opts.AllowConvert, opts.reporter(), cache); err != nil {
 			return 0, nil, err
 		}
 		imported++
