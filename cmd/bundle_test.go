@@ -35,12 +35,30 @@ func TestBundleCommand_RejectsMissingSpecFile(t *testing.T) {
 	require.Contains(t, stderr.String(), "bundle spec")
 }
 
+func TestBundle_BarePathEmitsMigrationHint(t *testing.T) {
+	dir := t.TempDir()
+	specPath := filepath.Join(dir, "bundle.json")
+	require.NoError(t, os.WriteFile(specPath,
+		[]byte(`{"pairs":[{"name":"a","baseline":"v1.tar","target":"v2.tar"}]}`),
+		0o644))
+
+	var stdout, stderr bytes.Buffer
+	code := Run(&stdout, &stderr, "bundle", specPath, filepath.Join(dir, "out.tar"))
+	require.NotEqual(t, 0, code, "expected error exit")
+
+	combined := stdout.String() + stderr.String()
+	require.Contains(t, combined, "missing transport prefix",
+		"stderr missing 'missing transport prefix': %s", combined)
+	require.Contains(t, combined, "sed -E",
+		"stderr missing sed migration hint: %s", combined)
+}
+
 func TestBundleCommand_AcceptsSpecFile(t *testing.T) {
 	tmp := t.TempDir()
 	specPath := filepath.Join(tmp, "spec.json")
 	spec := map[string]any{
 		"pairs": []map[string]string{
-			{"name": "app", "baseline": "b.tar", "target": "t.tar"},
+			{"name": "app", "baseline": "docker-archive:b.tar", "target": "docker-archive:t.tar"},
 		},
 	}
 	raw, _ := json.Marshal(spec)

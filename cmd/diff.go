@@ -10,10 +10,12 @@ import (
 )
 
 var diffFlags = struct {
-	platform   string
-	compress   string
-	intraLayer string
-	dryRun     bool
+	platform           string
+	compress           string
+	intraLayer         string
+	dryRun             bool
+	buildSystemContext registryContextBuilder
+	buildSignRequest   signRequestBuilder
 }{}
 
 const diffExample = `  # Compute a single-image delta
@@ -45,6 +47,8 @@ func newDiffCommand() *cobra.Command {
 	f.StringVar(&diffFlags.compress, "compress", "", "compression algorithm")
 	f.StringVar(&diffFlags.intraLayer, "intra-layer", "auto", "intra-layer diff mode (auto|off|required)")
 	f.BoolVarP(&diffFlags.dryRun, "dry-run", "n", false, "plan without writing the delta")
+	diffFlags.buildSystemContext = installRegistryFlags(c)
+	diffFlags.buildSignRequest = installSigningFlags(c)
 	installUsageTemplate(c)
 	return c
 }
@@ -62,33 +66,41 @@ func runDiff(cmd *cobra.Command, args []string) error {
 	}
 	deltaOut := args[2]
 
+	sc, retryTimes, retryDelay, err := diffFlags.buildSystemContext()
+	if err != nil {
+		return err
+	}
+	signReq, signing, err := diffFlags.buildSignRequest()
+	if err != nil {
+		return err
+	}
+
 	opts := exporter.Options{
 		Pairs: []exporter.Pair{{
-			Name:         "default",
-			BaselinePath: baseline.Path,
-			TargetPath:   target.Path,
+			Name:        "default",
+			BaselineRef: baseline.Raw,
+			TargetRef:   target.Raw,
 		}},
 		Platform:         diffFlags.platform,
 		Compress:         diffFlags.compress,
 		IntraLayer:       diffFlags.intraLayer,
 		OutputPath:       deltaOut,
 		ToolVersion:      version,
+		SystemContext:    sc,
+		RetryTimes:       retryTimes,
+		RetryDelay:       retryDelay,
 		ProgressReporter: newProgressReporter(cmd.ErrOrStderr()),
+	}
+	if signing {
+		opts.SignKeyPath = signReq.KeyPath
+		opts.SignKeyPassphrase = signReq.PassphraseBytes
+		opts.RekorURL = signReq.RekorURL
 	}
 
 	ctx := context.Background()
 	if diffFlags.dryRun {
-		stats, err := exporter.DryRun(ctx, opts)
-		if err != nil {
-			return err
-		}
-		if outputFormat == outputJSON {
-			return writeJSON(cmd.OutOrStdout(), exportDryRunJSON(stats))
-		}
-		fmt.Fprintf(cmd.OutOrStdout(),
-			"delta would ship %d blobs across %d images (%d bytes archive)\n",
-			stats.TotalBlobs, stats.TotalImages, stats.ArchiveSize)
-		return nil
+		return runExportDryRun(ctx, cmd, opts, signing, signReq,
+			"delta would ship %d blobs across %d images (%d bytes archive)\n")
 	}
 	if err := exporter.Export(ctx, opts); err != nil {
 		return err

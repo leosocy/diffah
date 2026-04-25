@@ -19,7 +19,7 @@ func encodeShipped(
 	}
 	for _, p := range pairs {
 		readBaseline := func(d digest.Digest) ([]byte, error) {
-			return readBlobBytes(ctx, p.BaselineRef, d)
+			return readBlobBytes(ctx, p.BaselineImageRef, p.SystemContext, d)
 		}
 		planner := NewPlanner(p.BaselineLayerMeta, readBaseline, fp)
 		for _, s := range p.Shipped {
@@ -31,7 +31,7 @@ func encodeShipped(
 			// layers on GetBlob, so the streamed byte count can exceed the
 			// manifest-declared s.Size. Cap progress reports to s.Size so the
 			// bar stops at 100 % instead of overshooting.
-			layerBytes, err := streamBlobBytes(ctx, p.TargetRef, s.Digest,
+			layerBytes, err := streamBlobBytes(ctx, p.TargetImageRef, p.SystemContext, s.Digest,
 				cappedWriter(s.Size, layer.Written))
 			if err != nil {
 				layer.Fail(err)

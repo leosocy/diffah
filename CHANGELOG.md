@@ -1,5 +1,84 @@
 # Changelog
 
+## [Unreleased] — Phase 3: Registry-native export + signing
+
+### Breaking changes
+
+- **`BundleSpec` JSON**: `baseline` / `target` values must now carry a
+  transport prefix. Bare-path values (`"baseline": "v1/svc.tar"`) fail
+  with a migration hint. One-liner fix:
+
+  ```
+  sed -E -i '' 's|(\"baseline\"\|\"target\"): \"([^:\"]*\.tar[a-z]*)\"|\1: \"docker-archive:\2\"|g' bundle.json
+  ```
+
+### Additions
+
+- **Registry sources on `diff` and `bundle`**: both verbs now accept
+  `docker://`, `oci:`, `dir:`, and the archive transports on
+  BASELINE-IMAGE / TARGET-IMAGE (and in BundleSpec values). The
+  Phase 2 registry & transport flag block (`--authfile`, `--creds`,
+  `--username`/`--password`, `--no-creds`, `--registry-token`,
+  `--tls-verify`, `--cert-dir`, `--retry-times`, `--retry-delay`) is
+  installed on both `diff` and `bundle`.
+- **Signing on `diff` and `bundle`**: `--sign-key PATH` writes a
+  cosign-compatible `.sig` sidecar next to the archive. Supports plain
+  PEM and cosign-boxed (scrypt + nacl/secretbox) private keys.
+  Passphrase via `--sign-key-password-stdin`.
+- **Rekor transparency opt-in**: `--rekor-url URL` is registered on
+  both verbs but Rekor upload is not yet implemented in this Phase 3
+  slice; passing `--rekor-url` currently errors with a
+  "not yet implemented" hint pointing at a follow-on PR.
+- **Verification on `apply` and `unbundle`**: `--verify PATH`
+  (ECDSA-P256 PEM public key) requires the archive's signature to
+  match. Absent `--verify` preserves today's behavior — signed
+  archives are processed byte-identically. When `--verify` is supplied
+  and the archive is unsigned, exit code is 4 (content error).
+- **Rekor proof verification**: `--verify-rekor-url URL` checks the
+  Rekor inclusion proof when a `.rekor.json` sidecar is present.
+  Missing `.rekor.json` only warns — it does not fail.
+- **`docs/performance.md`** documents bandwidth and memory
+  characteristics — chiefly that content-similarity matching reads
+  (but does not retain) every baseline and target layer.
+
+### Internal
+
+- `pkg/exporter.Options` fields: `SystemContext *types.SystemContext`,
+  `RetryTimes int`, `RetryDelay time.Duration`, `SignKeyPath string`,
+  `SignKeyPassphrase []byte`, `RekorURL string` added.
+- `pkg/exporter.Pair` renames `BaselinePath`/`TargetPath` →
+  `BaselineRef`/`TargetRef`; values now carry a transport prefix.
+- `planPair` swaps `imageio.OpenArchiveRef` for
+  `alltransports.ParseImageName`.
+- New `pkg/signer` package built on `github.com/gowebpki/jcs` +
+  `golang.org/x/crypto/nacl/secretbox` + `golang.org/x/crypto/scrypt`.
+  Public API: `Sign`, `Verify`, `WriteSidecars`, `LoadSidecars`,
+  `JCSCanonical`, `JCSCanonicalFromBytes`, `ProbeKey`. Typed errors:
+  `ErrKeyEncrypted`, `ErrKeyPassphraseIncorrect`,
+  `ErrKeyUnsupportedKDF`, `ErrSignatureInvalid`, `ErrArchiveUnsigned`.
+- New `cmd/sign_flags.go` (`installSigningFlags`) and
+  `cmd/verify_flags.go` (`installVerifyFlags`).
+- New bandwidth integration test in `cmd/bandwidth_integration_test.go`
+  gates runaway per-blob fetch regressions.
+
+### Non-goals / deferred
+
+- **Keyless signing** (Fulcio / OIDC / ephemeral certs). `--keyless`
+  and `cosign://` URIs are registered but return a
+  "reserved but not yet implemented" error.
+- **KMS signing** (`cosign://kms-uri` private-key references).
+- **Inline-embedded signatures** (`--sign-inline`) — sidecars always
+  land adjacent to the archive in Phase 3.
+- **Attaching pre-existing x509 certs** (`--sign-cert`).
+- **Rekor upload implementation** — the flag is wired but posting to
+  Rekor is deferred to a follow-on PR.
+- **Per-baseline-blob lazy-fetch on export** — `diff`/`bundle` today
+  read every baseline layer for content-similarity fingerprinting
+  (each blob hit a small constant number of times). Tightening to
+  "exactly once" is Phase 4 scale work.
+- The `docker-daemon:`, `containers-storage:`, `ostree:`, `sif:`,
+  `tarball:` transports remain "reserved but not yet implemented."
+
 ## [Unreleased] — Phase 2: Registry-native import
 
 ### Breaking changes

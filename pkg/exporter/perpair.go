@@ -8,17 +8,24 @@ import (
 
 	"github.com/opencontainers/go-digest"
 	"go.podman.io/image/v5/manifest"
+	"go.podman.io/image/v5/pkg/blobinfocache/none"
+	"go.podman.io/image/v5/transports/alltransports"
 	"go.podman.io/image/v5/types"
 
-	"github.com/leosocy/diffah/internal/imageio"
 	"github.com/leosocy/diffah/pkg/diff"
 )
 
 type pairPlan struct {
-	Name              string
-	BaselinePath      string
-	BaselineRef       types.ImageReference
-	TargetRef         types.ImageReference
+	Name             string
+	BaselineRef      string
+	BaselineImageRef types.ImageReference
+	TargetImageRef   types.ImageReference
+	// SystemContext carries the transport/registry knobs — auth files,
+	// TLS verification, mirror rewriting, etc. — from opts.SystemContext.
+	// It is forwarded to every NewImageSource call in encodeShipped so
+	// each ref's transport receives the same credentials planPair used.
+	// Nil is acceptable for archive-only paths.
+	SystemContext     *types.SystemContext
 	TargetManifest    []byte
 	TargetMediaType   string
 	TargetLayerDescs  []diff.BlobRef
@@ -32,23 +39,27 @@ type pairPlan struct {
 	Required          []diff.BlobRef
 }
 
-func planPair(ctx context.Context, p Pair, platform string) (*pairPlan, error) {
-	baseRef, err := imageio.OpenArchiveRef(p.BaselinePath)
+func planPair(ctx context.Context, p Pair, opts *Options) (*pairPlan, error) {
+	baseRef, err := alltransports.ParseImageName(p.BaselineRef)
 	if err != nil {
-		return nil, fmt.Errorf("open baseline %s: %w", p.BaselinePath, err)
+		return nil, fmt.Errorf("parse baseline ref %q: %w", p.BaselineRef, err)
 	}
-	tgtRef, err := imageio.OpenArchiveRef(p.TargetPath)
+	tgtRef, err := alltransports.ParseImageName(p.TargetRef)
 	if err != nil {
-		return nil, fmt.Errorf("open target %s: %w", p.TargetPath, err)
+		return nil, fmt.Errorf("parse target ref %q: %w", p.TargetRef, err)
 	}
 
-	_, baseDigests, baseMeta, baseMfBytes, baseMime, err := readManifestBundle(ctx, baseRef, platform)
+	_, baseDigests, baseMeta, baseMfBytes, baseMime, err := readManifestBundle(
+		ctx, baseRef, opts.SystemContext, opts.Platform)
 	if err != nil {
-		return nil, fmt.Errorf("read baseline manifest %s: %w", p.BaselinePath, err)
+		return nil, fmt.Errorf("read baseline manifest %s: %w",
+			p.BaselineRef, diff.ClassifyRegistryErr(err, p.BaselineRef))
 	}
-	tgtParsed, _, _, tgtMfBytes, tgtMime, err := readManifestBundle(ctx, tgtRef, platform)
+	tgtParsed, _, _, tgtMfBytes, tgtMime, err := readManifestBundle(
+		ctx, tgtRef, opts.SystemContext, opts.Platform)
 	if err != nil {
-		return nil, fmt.Errorf("read target manifest %s: %w", p.TargetPath, err)
+		return nil, fmt.Errorf("read target manifest %s: %w",
+			p.TargetRef, diff.ClassifyRegistryErr(err, p.TargetRef))
 	}
 
 	tgtLayers := make([]diff.BlobRef, 0, len(tgtParsed.LayerInfos()))
@@ -60,13 +71,15 @@ func planPair(ctx context.Context, p Pair, platform string) (*pairPlan, error) {
 	plan := diff.ComputePlan(tgtLayers, baseDigests)
 
 	tgtConfigDesc := tgtParsed.ConfigInfo()
-	cfgBytes, err := readBlobBytes(ctx, tgtRef, tgtConfigDesc.Digest)
+	cfgBytes, err := readBlobBytes(ctx, tgtRef, opts.SystemContext, tgtConfigDesc.Digest)
 	if err != nil {
-		return nil, fmt.Errorf("read target config: %w", err)
+		return nil, fmt.Errorf("read target config: %w",
+			diff.ClassifyRegistryErr(err, p.TargetRef))
 	}
 
 	return &pairPlan{
-		Name: p.Name, BaselinePath: p.BaselinePath, BaselineRef: baseRef, TargetRef: tgtRef,
+		Name: p.Name, BaselineRef: p.BaselineRef, BaselineImageRef: baseRef, TargetImageRef: tgtRef,
+		SystemContext:  opts.SystemContext,
 		TargetManifest: tgtMfBytes, TargetMediaType: tgtMime,
 		TargetLayerDescs: tgtLayers,
 		TargetConfigRaw:  cfgBytes,
@@ -84,9 +97,9 @@ func planPair(ctx context.Context, p Pair, platform string) (*pairPlan, error) {
 }
 
 func readManifestBundle(
-	ctx context.Context, ref types.ImageReference, platform string,
+	ctx context.Context, ref types.ImageReference, sys *types.SystemContext, platform string,
 ) (manifest.Manifest, []digest.Digest, []BaselineLayerMeta, []byte, string, error) {
-	src, err := ref.NewImageSource(ctx, nil)
+	src, err := ref.NewImageSource(ctx, sys)
 	if err != nil {
 		return nil, nil, nil, nil, "", err
 	}
@@ -117,8 +130,10 @@ func readManifestBundle(
 	return parsed, digests, meta, raw, mime, nil
 }
 
-func readBlobBytes(ctx context.Context, ref types.ImageReference, d digest.Digest) ([]byte, error) {
-	return streamBlobBytes(ctx, ref, d, nil)
+func readBlobBytes(
+	ctx context.Context, ref types.ImageReference, sys *types.SystemContext, d digest.Digest,
+) ([]byte, error) {
+	return streamBlobBytes(ctx, ref, sys, d, nil)
 }
 
 // streamBlobBytes reads a blob and, if onChunk is non-nil, reports each chunk's
@@ -126,15 +141,19 @@ func readBlobBytes(ctx context.Context, ref types.ImageReference, d digest.Diges
 // Encoders wire onChunk to progress.Layer.Written so the bar animates during
 // the read instead of jumping 0→100 % at Done().
 func streamBlobBytes(
-	ctx context.Context, ref types.ImageReference, d digest.Digest,
-	onChunk func(int64),
+	ctx context.Context, ref types.ImageReference, sys *types.SystemContext,
+	d digest.Digest, onChunk func(int64),
 ) ([]byte, error) {
-	src, err := ref.NewImageSource(ctx, nil)
+	src, err := ref.NewImageSource(ctx, sys)
 	if err != nil {
 		return nil, err
 	}
 	defer src.Close()
-	r, _, err := src.GetBlob(ctx, types.BlobInfo{Digest: d}, nil)
+	// NoCache is the canonical "don't record/consult the BIC" sentinel.
+	// Passing a literal nil here panics on the docker transport because
+	// go.podman.io/image/v5/docker calls RecordKnownLocation on the cache
+	// unconditionally inside dockerClient.getBlob.
+	r, _, err := src.GetBlob(ctx, types.BlobInfo{Digest: d}, none.NoCache)
 	if err != nil {
 		return nil, err
 	}

@@ -2,12 +2,31 @@ package exporter
 
 import (
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/opencontainers/go-digest"
 
 	"github.com/leosocy/diffah/pkg/diff"
 )
+
+// sourceHintFor derives a compact provenance string from a transport
+// reference. For archive transports it returns the file basename; for
+// registry transports it returns the canonical repo:tag form. The
+// result is informational — it shows up in the sidecar so consumers can
+// tell where each blob "came from" — so registry refs should land as
+// "host/repo:tag" rather than filepath.Base's unhelpful "tag".
+func sourceHintFor(ref string) string {
+	for _, prefix := range []string{"docker-archive:", "oci-archive:", "oci:", "dir:"} {
+		if rest, ok := strings.CutPrefix(ref, prefix); ok {
+			return filepath.Base(rest)
+		}
+	}
+	if rest, ok := strings.CutPrefix(ref, "docker://"); ok {
+		return rest
+	}
+	return ref
+}
 
 func assembleSidecar(
 	pool *blobPool, pairs []*pairPlan, platform string, toolVersion string, createdAt time.Time,
@@ -32,7 +51,7 @@ func assembleSidecar(
 			Baseline: diff.BaselineRef{
 				ManifestDigest: digest.FromBytes(p.BaselineManifest),
 				MediaType:      p.BaselineMediaType,
-				SourceHint:     filepath.Base(p.BaselinePath),
+				SourceHint:     sourceHintFor(p.BaselineRef),
 			},
 			Target: diff.TargetRef{
 				ManifestDigest: mfDigest,

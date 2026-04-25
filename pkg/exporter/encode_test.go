@@ -84,10 +84,10 @@ func TestEncodeShipped_StreamsWrittenDuringRead(t *testing.T) {
 	ctx := context.Background()
 
 	plan, err := planPair(ctx, Pair{
-		Name:         "svc-a",
-		BaselinePath: "../../testdata/fixtures/v1_oci.tar",
-		TargetPath:   "../../testdata/fixtures/v2_oci.tar",
-	}, "linux/amd64")
+		Name:        "svc-a",
+		BaselineRef: "oci-archive:../../testdata/fixtures/v1_oci.tar",
+		TargetRef:   "oci-archive:../../testdata/fixtures/v2_oci.tar",
+	}, &Options{Platform: "linux/amd64"})
 	require.NoError(t, err)
 
 	pool := newBlobPool()
@@ -123,10 +123,10 @@ func TestEncodeShipped_WarningOnError_FallbackToFull(t *testing.T) {
 	ctx := context.Background()
 
 	plan, err := planPair(ctx, Pair{
-		Name:         "svc-a",
-		BaselinePath: "../../testdata/fixtures/v1_oci.tar",
-		TargetPath:   "../../testdata/fixtures/v2_oci.tar",
-	}, "linux/amd64")
+		Name:        "svc-a",
+		BaselineRef: "oci-archive:../../testdata/fixtures/v1_oci.tar",
+		TargetRef:   "oci-archive:../../testdata/fixtures/v2_oci.tar",
+	}, &Options{Platform: "linux/amd64"})
 	require.NoError(t, err)
 
 	fakeDigest := digest.Digest("sha256:0000000000000000000000000000000000000000000000000000000000000000")

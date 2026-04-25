@@ -34,9 +34,9 @@ func TestImporter_PullsBaselineAnonymously(t *testing.T) {
 	deltaPath := filepath.Join(tmp, "delta.tar")
 	require.NoError(t, exporter.Export(ctx, exporter.Options{
 		Pairs: []exporter.Pair{{
-			Name:         "default",
-			BaselinePath: testdataPath(t, "v1_oci.tar"),
-			TargetPath:   testdataPath(t, "v2_oci.tar"),
+			Name:        "default",
+			BaselineRef: "oci-archive:" + testdataPath(t, "v1_oci.tar"),
+			TargetRef:   "oci-archive:" + testdataPath(t, "v2_oci.tar"),
 		}},
 		OutputPath:  deltaPath,
 		Platform:    "linux/amd64",
@@ -74,9 +74,9 @@ func TestImporter_PullsBaselineWithBasicAuth(t *testing.T) {
 	deltaPath := filepath.Join(tmp, "delta.tar")
 	require.NoError(t, exporter.Export(ctx, exporter.Options{
 		Pairs: []exporter.Pair{{
-			Name:         "default",
-			BaselinePath: testdataPath(t, "v1_oci.tar"),
-			TargetPath:   testdataPath(t, "v2_oci.tar"),
+			Name:        "default",
+			BaselineRef: "oci-archive:" + testdataPath(t, "v1_oci.tar"),
+			TargetRef:   "oci-archive:" + testdataPath(t, "v2_oci.tar"),
 		}},
 		OutputPath:  deltaPath,
 		Platform:    "linux/amd64",
@@ -111,9 +111,9 @@ func TestImporter_PushesOutputToRegistry(t *testing.T) {
 	deltaPath := filepath.Join(tmp, "delta.tar")
 	require.NoError(t, exporter.Export(ctx, exporter.Options{
 		Pairs: []exporter.Pair{{
-			Name:         "default",
-			BaselinePath: testdataPath(t, "v1_oci.tar"),
-			TargetPath:   testdataPath(t, "v2_oci.tar"),
+			Name:        "default",
+			BaselineRef: "oci-archive:" + testdataPath(t, "v1_oci.tar"),
+			TargetRef:   "oci-archive:" + testdataPath(t, "v2_oci.tar"),
 		}},
 		OutputPath:  deltaPath,
 		Platform:    "linux/amd64",
@@ -152,9 +152,9 @@ func TestImporter_LazyBaselineFetch_OnlyReferencedBlobsPulled(t *testing.T) {
 	deltaPath := filepath.Join(tmp, "delta.tar")
 	require.NoError(t, exporter.Export(ctx, exporter.Options{
 		Pairs: []exporter.Pair{{
-			Name:         "default",
-			BaselinePath: testdataPath(t, "v1_oci.tar"),
-			TargetPath:   testdataPath(t, "v2_oci.tar"),
+			Name:        "default",
+			BaselineRef: "oci-archive:" + testdataPath(t, "v1_oci.tar"),
+			TargetRef:   "oci-archive:" + testdataPath(t, "v2_oci.tar"),
 		}},
 		OutputPath:  deltaPath,
 		Platform:    "linux/amd64",
@@ -223,9 +223,9 @@ func TestImporter_RetriesOn503(t *testing.T) {
 	deltaPath := filepath.Join(tmp, "delta.tar")
 	require.NoError(t, exporter.Export(ctx, exporter.Options{
 		Pairs: []exporter.Pair{{
-			Name:         "default",
-			BaselinePath: testdataPath(t, "v1_oci.tar"),
-			TargetPath:   testdataPath(t, "v2_oci.tar"),
+			Name:        "default",
+			BaselineRef: "oci-archive:" + testdataPath(t, "v1_oci.tar"),
+			TargetRef:   "oci-archive:" + testdataPath(t, "v2_oci.tar"),
 		}},
 		OutputPath:  deltaPath,
 		Platform:    "linux/amd64",
@@ -259,9 +259,9 @@ func TestImporter_NoRetryWhenRetryTimesIsZero(t *testing.T) {
 	deltaPath := filepath.Join(tmp, "delta.tar")
 	require.NoError(t, exporter.Export(ctx, exporter.Options{
 		Pairs: []exporter.Pair{{
-			Name:         "default",
-			BaselinePath: testdataPath(t, "v1_oci.tar"),
-			TargetPath:   testdataPath(t, "v2_oci.tar"),
+			Name:        "default",
+			BaselineRef: "oci-archive:" + testdataPath(t, "v1_oci.tar"),
+			TargetRef:   "oci-archive:" + testdataPath(t, "v2_oci.tar"),
 		}},
 		OutputPath:  deltaPath,
 		Platform:    "linux/amd64",

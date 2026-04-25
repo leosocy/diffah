@@ -5,9 +5,15 @@ import (
 )
 
 type Pair struct {
-	Name         string
-	BaselinePath string
-	TargetPath   string
+	Name string
+	// BaselineRef / TargetRef carry transport-prefixed references that
+	// planPair feeds directly to alltransports.ParseImageName. Supported
+	// forms include "docker-archive:/tmp/old.tar",
+	// "oci-archive:/tmp/new.tar", "oci:/tmp/layout", "dir:/tmp/dir",
+	// and "docker://host/repo:tag". Bare paths are rejected; cmd/
+	// callers are responsible for normalizing their inputs.
+	BaselineRef string
+	TargetRef   string
 }
 
 func ValidatePairs(pairs []Pair) error {

@@ -17,6 +17,7 @@ import (
 	"github.com/leosocy/diffah/internal/zstdpatch"
 	"github.com/leosocy/diffah/pkg/diff"
 	"github.com/leosocy/diffah/pkg/progress"
+	"github.com/leosocy/diffah/pkg/signer"
 )
 
 type Options struct {
@@ -32,6 +33,17 @@ type Options struct {
 	// Deprecated: use ProgressReporter. Will be removed in v0.4.
 	Progress io.Writer
 	Probe    func(context.Context) (bool, string)
+	// VerifyPubKeyPath enables signature verification when non-empty.
+	// The file at this path must hold a PEM-encoded ECDSA-P256 PKIX
+	// public key. When empty, Import does not read any .sig / .cert /
+	// .rekor.json sidecar files — signed archives are processed
+	// byte-identically to unsigned ones.
+	VerifyPubKeyPath string
+	// VerifyRekorURL is the Rekor transparency-log URL against which
+	// an accompanying .rekor.json inclusion proof is checked. Only
+	// consulted when .rekor.json is present; missing bundle does not
+	// fail the verify.
+	VerifyRekorURL string
 }
 
 func (o *Options) reporter() progress.Reporter {
@@ -55,6 +67,12 @@ func Import(ctx context.Context, opts Options) error {
 		return err
 	}
 	defer bundle.cleanup()
+
+	if opts.VerifyPubKeyPath != "" {
+		if err := verifySignature(ctx, opts.DeltaPath, bundle.sidecarRawBytes, opts); err != nil {
+			return err
+		}
+	}
 
 	if bundle.sidecar.RequiresZstd() {
 		ok, reason := opts.probeOrDefault()(ctx)
@@ -298,6 +316,31 @@ type ImageDryRun struct {
 	ArchiveLayerCount      int
 	BaselineLayerCount     int // layers not present in the archive (sourced from baseline)
 	PatchLayerCount        int
+}
+
+// verifySignature loads the sidecar files adjacent to the archive and,
+// if the archive is signed, asserts the signature matches the public
+// key at opts.VerifyPubKeyPath. Called only when VerifyPubKeyPath is
+// set. Returns signer.ErrArchiveUnsigned (CategoryContent) when
+// --verify was supplied but no .sig file exists.
+//
+// The canonical digest is computed from sidecarBytes — the on-disk
+// diffah.json tar entry bytes — not a re-serialized sidecar struct,
+// so the digest matches what the exporter signed byte-for-byte even
+// if the parsed struct drops unknown fields.
+func verifySignature(ctx context.Context, deltaPath string, sidecarBytes []byte, opts Options) error {
+	sig, err := signer.LoadSidecars(deltaPath)
+	if err != nil {
+		return err
+	}
+	if sig == nil {
+		return signer.ErrArchiveUnsigned
+	}
+	payload, err := signer.PayloadDigestFromSidecar(sidecarBytes)
+	if err != nil {
+		return err
+	}
+	return signer.Verify(ctx, opts.VerifyPubKeyPath, payload[:], sig, opts.VerifyRekorURL)
 }
 
 // ensureOutputParent creates the parent directory for file-based output

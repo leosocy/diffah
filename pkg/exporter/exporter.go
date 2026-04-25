@@ -6,8 +6,12 @@ import (
 	"io"
 	"time"
 
+	"go.podman.io/image/v5/types"
+
+	"github.com/leosocy/diffah/internal/archive"
 	"github.com/leosocy/diffah/internal/zstdpatch"
 	"github.com/leosocy/diffah/pkg/progress"
+	"github.com/leosocy/diffah/pkg/signer"
 )
 
 type Options struct {
@@ -18,6 +22,20 @@ type Options struct {
 	ToolVersion string
 	IntraLayer  string
 	CreatedAt   time.Time
+
+	// Registry & transport — threaded into every types.ImageReference
+	// call. Nil is acceptable; it behaves the same as today's path-only
+	// flow.
+	SystemContext *types.SystemContext
+	RetryTimes    int
+	RetryDelay    time.Duration
+
+	// Signing. A zero SignKeyPath skips signing altogether; the archive
+	// is written without a sidecar. SignKeyPassphrase is consumed
+	// (zeroed in place) by signer.Sign after the key is decrypted.
+	SignKeyPath       string
+	SignKeyPassphrase []byte
+	RekorURL          string
 
 	ProgressReporter progress.Reporter
 	// Deprecated: use ProgressReporter. Will be removed in v0.4.
@@ -79,7 +97,7 @@ func buildBundle(ctx context.Context, opts *Options) (*builtBundle, error) {
 	pool := newBlobPool()
 
 	for _, p := range opts.Pairs {
-		plan, err := planPair(ctx, p, opts.Platform)
+		plan, err := planPair(ctx, p, opts)
 		if err != nil {
 			return nil, fmt.Errorf("plan pair %q: %w", p.Name, err)
 		}
@@ -116,8 +134,40 @@ func Export(ctx context.Context, opts Options) error {
 		archiveSize += e.ArchiveSize
 	}
 	log().InfoContext(ctx, "exported bundle", "path", opts.OutputPath, "archive_bytes", archiveSize)
+	if opts.SignKeyPath != "" {
+		if err := signArchive(ctx, &opts); err != nil {
+			return err
+		}
+	}
 	opts.reporter().Phase("done")
 	return nil
+}
+
+// signArchive re-reads diffah.json from the just-written archive,
+// canonicalizes it, hashes it, and emits the three cosign-format
+// sidecar files alongside the output. Called only when SignKeyPath is
+// set.
+func signArchive(ctx context.Context, opts *Options) error {
+	sidecarBytes, err := archive.ReadSidecar(opts.OutputPath)
+	if err != nil {
+		return err
+	}
+	digest, err := signer.PayloadDigestFromSidecar(sidecarBytes)
+	if err != nil {
+		return err
+	}
+
+	opts.reporter().Phase("signing")
+	sig, err := signer.Sign(ctx, signer.SignRequest{
+		KeyPath:         opts.SignKeyPath,
+		PassphraseBytes: opts.SignKeyPassphrase,
+		RekorURL:        opts.RekorURL,
+		Payload:         digest[:],
+	})
+	if err != nil {
+		return err
+	}
+	return signer.WriteSidecars(opts.OutputPath, sig)
 }
 
 func DryRun(ctx context.Context, opts Options) (DryRunStats, error) {

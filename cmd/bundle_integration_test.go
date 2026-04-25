@@ -20,8 +20,8 @@ func TestBundleCommand_WithSpec(t *testing.T) {
 	spec := map[string]any{
 		"pairs": []map[string]string{{
 			"name":     "app",
-			"baseline": filepath.Join(root, "testdata/fixtures/v1_oci.tar"),
-			"target":   filepath.Join(root, "testdata/fixtures/v2_oci.tar"),
+			"baseline": "oci-archive:" + filepath.Join(root, "testdata/fixtures/v1_oci.tar"),
+			"target":   "oci-archive:" + filepath.Join(root, "testdata/fixtures/v2_oci.tar"),
 		}},
 	}
 	raw, err := json.MarshalIndent(spec, "", "  ")
@@ -49,8 +49,8 @@ func TestBundleCommand_MultiPair(t *testing.T) {
 	bin := integrationBinary(t)
 	tmp := t.TempDir()
 
-	v1 := filepath.Join(root, "testdata/fixtures/v1_oci.tar")
-	v2 := filepath.Join(root, "testdata/fixtures/v2_oci.tar")
+	v1 := "oci-archive:" + filepath.Join(root, "testdata/fixtures/v1_oci.tar")
+	v2 := "oci-archive:" + filepath.Join(root, "testdata/fixtures/v2_oci.tar")
 	spec := map[string]any{
 		"pairs": []map[string]string{
 			{"name": "svc-a", "baseline": v1, "target": v2},

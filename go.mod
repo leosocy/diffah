@@ -4,6 +4,7 @@ go 1.25.4
 
 require (
 	github.com/google/go-containerregistry v0.21.5
+	github.com/gowebpki/jcs v1.0.1
 	github.com/klauspost/compress v1.18.5
 	github.com/mattn/go-isatty v0.0.21
 	github.com/opencontainers/go-digest v1.0.0
@@ -12,6 +13,7 @@ require (
 	github.com/stretchr/testify v1.11.1
 	github.com/vbauerster/mpb/v8 v8.12.0
 	go.podman.io/image/v5 v5.39.2
+	golang.org/x/crypto v0.43.0
 )
 
 require (
@@ -86,7 +88,6 @@ require (
 	go.opentelemetry.io/otel/metric v1.36.0 // indirect
 	go.opentelemetry.io/otel/trace v1.36.0 // indirect
 	go.podman.io/storage v1.62.0 // indirect
-	golang.org/x/crypto v0.43.0 // indirect
 	golang.org/x/net v0.45.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
 	golang.org/x/sys v0.43.0 // indirect

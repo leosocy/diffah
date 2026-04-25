@@ -15,6 +15,7 @@ var unbundleFlags = struct {
 	strict             bool
 	dryRun             bool
 	buildSystemContext registryContextBuilder
+	buildVerify        verifyConfigBuilder
 }{}
 
 const unbundleExample = `  # Multi-image registry round-trip
@@ -43,6 +44,7 @@ func newUnbundleCommand() *cobra.Command {
 	f.BoolVar(&unbundleFlags.strict, "strict", false, "require every baseline referenced by the bundle")
 	f.BoolVarP(&unbundleFlags.dryRun, "dry-run", "n", false, "verify reachability without writing")
 	unbundleFlags.buildSystemContext = installRegistryFlags(c)
+	unbundleFlags.buildVerify = installVerifyFlags(c)
 	installUsageTemplate(c)
 	return c
 }
@@ -68,6 +70,10 @@ func runUnbundle(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	vc, err := unbundleFlags.buildVerify()
+	if err != nil {
+		return err
+	}
 
 	opts := importer.Options{
 		DeltaPath:        deltaIn,
@@ -79,6 +85,8 @@ func runUnbundle(cmd *cobra.Command, args []string) error {
 		RetryTimes:       retryTimes,
 		RetryDelay:       retryDelay,
 		ProgressReporter: newProgressReporter(cmd.ErrOrStderr()),
+		VerifyPubKeyPath: vc.PubKeyPath,
+		VerifyRekorURL:   vc.RekorURL,
 	}
 	ctx := context.Background()
 

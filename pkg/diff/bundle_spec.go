@@ -48,8 +48,21 @@ func ParseBundleSpec(path string) (*BundleSpec, error) {
 			return nil, &ErrInvalidBundleSpec{Path: path, Reason: fmt.Sprintf(
 				"pairs[%d] requires baseline and target", i)}
 		}
-		p.Baseline = resolveSpecPath(base, p.Baseline)
-		p.Target = resolveSpecPath(base, p.Target)
+		if err := validateTransportRef(p.Baseline); err != nil {
+			return nil, &ErrBundleSpecMissingTransport{
+				FieldPath: fmt.Sprintf("pairs[%d].baseline", i),
+				Value:     p.Baseline,
+			}
+		}
+		p.Baseline = resolveTransportPrefixedPath(base, p.Baseline)
+
+		if err := validateTransportRef(p.Target); err != nil {
+			return nil, &ErrBundleSpecMissingTransport{
+				FieldPath: fmt.Sprintf("pairs[%d].target", i),
+				Value:     p.Target,
+			}
+		}
+		p.Target = resolveTransportPrefixedPath(base, p.Target)
 	}
 	return &spec, nil
 }
@@ -154,9 +167,26 @@ func validateTransportRef(ref string) error {
 	return nil
 }
 
-func resolveSpecPath(base, p string) string {
-	if filepath.IsAbs(p) {
-		return p
+// resolveTransportPrefixedPath resolves relative filesystem paths inside
+// file-backed transports against the spec-file directory. Registry
+// transports (docker://) are returned unchanged.
+func resolveTransportPrefixedPath(base, ref string) string {
+	prefix, rest, ok := strings.Cut(ref, ":")
+	if !ok {
+		return ref // unreachable after validateTransportRef; belt-and-braces
 	}
-	return filepath.Join(base, p)
+	switch prefix {
+	case "docker-archive", "oci-archive", "oci", "dir":
+		pathPart := rest
+		tail := ""
+		if idx := strings.Index(rest, ":"); idx >= 0 {
+			pathPart, tail = rest[:idx], rest[idx:]
+		}
+		if !filepath.IsAbs(pathPart) {
+			pathPart = filepath.Join(base, pathPart)
+		}
+		return prefix + ":" + pathPart + tail
+	default:
+		return ref
+	}
 }

@@ -8,14 +8,14 @@ import (
 
 func TestPair_ResolveUnique(t *testing.T) {
 	pairs := []Pair{
-		{Name: "a", BaselinePath: "b1.tar", TargetPath: "t1.tar"},
-		{Name: "b", BaselinePath: "b2.tar", TargetPath: "t2.tar"},
+		{Name: "a", BaselineRef: "b1.tar", TargetRef: "t1.tar"},
+		{Name: "b", BaselineRef: "b2.tar", TargetRef: "t2.tar"},
 	}
 	require.NoError(t, ValidatePairs(pairs))
 
 	dupPairs := make([]Pair, 0, len(pairs)+1)
 	dupPairs = append(dupPairs, pairs...)
-	dupPairs = append(dupPairs, Pair{Name: "a", BaselinePath: "x", TargetPath: "y"})
+	dupPairs = append(dupPairs, Pair{Name: "a", BaselineRef: "x", TargetRef: "y"})
 	err := ValidatePairs(dupPairs)
 	require.Error(t, err)
 }

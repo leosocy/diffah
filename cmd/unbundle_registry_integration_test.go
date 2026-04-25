@@ -26,17 +26,19 @@ func TestUnbundleCLI_MixedDestinations(t *testing.T) {
 	tmp := t.TempDir()
 
 	// Build a bundle from the local v1/v2 fixture pair for both services.
+	v1Ref := "oci-archive:" + v1Path
+	v2Ref := "oci-archive:" + filepath.Join(root, "testdata/fixtures/v2_oci.tar")
 	bundleSpec := map[string]any{
 		"pairs": []map[string]string{
 			{
 				"name":     "svc-a",
-				"baseline": v1Path,
-				"target":   filepath.Join(root, "testdata/fixtures/v2_oci.tar"),
+				"baseline": v1Ref,
+				"target":   v2Ref,
 			},
 			{
 				"name":     "svc-b",
-				"baseline": v1Path,
-				"target":   filepath.Join(root, "testdata/fixtures/v2_oci.tar"),
+				"baseline": v1Ref,
+				"target":   v2Ref,
 			},
 		},
 	}

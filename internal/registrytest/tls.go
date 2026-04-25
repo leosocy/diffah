@@ -9,6 +9,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"math/big"
+	"net"
 	"os"
 	"path/filepath"
 	"testing"
@@ -40,8 +41,14 @@ func generateTLSMaterial(t *testing.T, cfg *config) tls.Certificate {
 		NotAfter:     time.Now().Add(time.Hour),
 		KeyUsage:     x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-		DNSNames:     []string{"127.0.0.1", "localhost"},
-		IsCA:         true,
+		DNSNames:     []string{"localhost"},
+		// IP SAN — required by Go's crypto/tls for IP-literal server names.
+		// CommonName fallback was deprecated; without an IP SAN, clients
+		// connecting to https://127.0.0.1:PORT reject the cert with
+		// "cannot validate certificate for 127.0.0.1 because it doesn't
+		// contain any IP SANs".
+		IPAddresses: []net.IP{net.ParseIP("127.0.0.1"), net.ParseIP("::1")},
+		IsCA:        true,
 	}
 	derBytes, err := x509.CreateCertificate(rand.Reader, &template, &template, &priv.PublicKey, priv)
 	if err != nil {

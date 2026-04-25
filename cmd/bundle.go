@@ -11,10 +11,12 @@ import (
 )
 
 var bundleFlags = struct {
-	platform   string
-	compress   string
-	intraLayer string
-	dryRun     bool
+	platform           string
+	compress           string
+	intraLayer         string
+	dryRun             bool
+	buildSystemContext registryContextBuilder
+	buildSignRequest   signRequestBuilder
 }{}
 
 const bundleExample = `  # Bundle multiple images using a spec file
@@ -42,6 +44,8 @@ func newBundleCommand() *cobra.Command {
 	f.StringVar(&bundleFlags.compress, "compress", "", "compression algorithm")
 	f.StringVar(&bundleFlags.intraLayer, "intra-layer", "auto", "intra-layer diff mode (auto|off|required)")
 	f.BoolVarP(&bundleFlags.dryRun, "dry-run", "n", false, "plan without writing the bundle")
+	bundleFlags.buildSystemContext = installRegistryFlags(c)
+	bundleFlags.buildSignRequest = installSigningFlags(c)
 	installUsageTemplate(c)
 	return c
 }
@@ -59,10 +63,19 @@ func runBundle(cmd *cobra.Command, args []string) error {
 	pairs := make([]exporter.Pair, len(spec.Pairs))
 	for i, p := range spec.Pairs {
 		pairs[i] = exporter.Pair{
-			Name:         p.Name,
-			BaselinePath: p.Baseline,
-			TargetPath:   p.Target,
+			Name:        p.Name,
+			BaselineRef: p.Baseline,
+			TargetRef:   p.Target,
 		}
+	}
+
+	sc, retryTimes, retryDelay, err := bundleFlags.buildSystemContext()
+	if err != nil {
+		return err
+	}
+	signReq, signing, err := bundleFlags.buildSignRequest()
+	if err != nil {
+		return err
 	}
 
 	opts := exporter.Options{
@@ -72,22 +85,21 @@ func runBundle(cmd *cobra.Command, args []string) error {
 		IntraLayer:       bundleFlags.intraLayer,
 		OutputPath:       deltaOut,
 		ToolVersion:      version,
+		SystemContext:    sc,
+		RetryTimes:       retryTimes,
+		RetryDelay:       retryDelay,
 		ProgressReporter: newProgressReporter(cmd.ErrOrStderr()),
+	}
+	if signing {
+		opts.SignKeyPath = signReq.KeyPath
+		opts.SignKeyPassphrase = signReq.PassphraseBytes
+		opts.RekorURL = signReq.RekorURL
 	}
 	ctx := context.Background()
 
 	if bundleFlags.dryRun {
-		stats, err := exporter.DryRun(ctx, opts)
-		if err != nil {
-			return err
-		}
-		if outputFormat == outputJSON {
-			return writeJSON(cmd.OutOrStdout(), exportDryRunJSON(stats))
-		}
-		fmt.Fprintf(cmd.OutOrStdout(),
-			"bundle would ship %d blobs across %d images (%d bytes archive)\n",
-			stats.TotalBlobs, stats.TotalImages, stats.ArchiveSize)
-		return nil
+		return runExportDryRun(ctx, cmd, opts, signing, signReq,
+			"bundle would ship %d blobs across %d images (%d bytes archive)\n")
 	}
 	if err := exporter.Export(ctx, opts); err != nil {
 		return err
