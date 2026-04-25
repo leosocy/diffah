@@ -2,13 +2,19 @@ package exporter
 
 import (
 	"sort"
+	"sync"
 
 	"github.com/opencontainers/go-digest"
 
 	"github.com/leosocy/diffah/pkg/diff"
 )
 
+// blobPool is the dedup-on-digest, first-write-wins map of payload bytes
+// the writer drains into the archive. PR-3 introduced concurrent
+// addIfAbsent traffic from the parallel encode pool, so every map
+// access is now serialized through mu.
 type blobPool struct {
+	mu       sync.RWMutex
 	bytes    map[digest.Digest][]byte
 	entries  map[digest.Digest]diff.BlobEntry
 	shipRefs map[digest.Digest]int
@@ -23,6 +29,8 @@ func newBlobPool() *blobPool {
 }
 
 func (p *blobPool) addIfAbsent(d digest.Digest, data []byte, e diff.BlobEntry) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	if _, ok := p.bytes[d]; ok {
 		return
 	}
@@ -31,20 +39,28 @@ func (p *blobPool) addIfAbsent(d digest.Digest, data []byte, e diff.BlobEntry) {
 }
 
 func (p *blobPool) has(d digest.Digest) bool {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
 	_, ok := p.bytes[d]
 	return ok
 }
 
 func (p *blobPool) get(d digest.Digest) ([]byte, bool) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
 	b, ok := p.bytes[d]
 	return b, ok
 }
 
 func (p *blobPool) countShipped(d digest.Digest) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	p.shipRefs[d]++
 }
 
 func (p *blobPool) refCount(d digest.Digest) int {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
 	return p.shipRefs[d]
 }
 
@@ -61,6 +77,8 @@ func seedManifestAndConfig(p *blobPool, plan *pairPlan) {
 }
 
 func (p *blobPool) sortedDigests() []digest.Digest {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
 	out := make([]digest.Digest, 0, len(p.bytes))
 	for d := range p.bytes {
 		out = append(out, d)

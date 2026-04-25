@@ -17,6 +17,7 @@ var bundleFlags = struct {
 	dryRun             bool
 	buildSystemContext registryContextBuilder
 	buildSignRequest   signRequestBuilder
+	buildEncodingOpts  encodingOptsBuilder
 }{}
 
 const bundleExample = `  # Bundle multiple images using a spec file
@@ -29,6 +30,10 @@ func newBundleCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "bundle BUNDLE-SPEC DELTA-OUT",
 		Short: "Export a multi-image delta bundle driven by a spec file.",
+		Long: `Export a multi-image delta bundle driven by a spec file. The spec lists
+{name, baseline, target} triples for every image included in the bundle.
+
+` + encodingTuningHelp,
 		Args: requireArgs("bundle",
 			[]string{"BUNDLE-SPEC", "DELTA-OUT"},
 			"diffah bundle bundle.json bundle.tar"),
@@ -46,11 +51,25 @@ func newBundleCommand() *cobra.Command {
 	f.BoolVarP(&bundleFlags.dryRun, "dry-run", "n", false, "plan without writing the bundle")
 	bundleFlags.buildSystemContext = installRegistryFlags(c)
 	bundleFlags.buildSignRequest = installSigningFlags(c)
+	bundleFlags.buildEncodingOpts = installEncodingFlags(c)
 	installUsageTemplate(c)
 	return c
 }
 
 func init() { rootCmd.AddCommand(newBundleCommand()) }
+
+// pairsFromSpec lifts each diff.BundlePair into exporter.Pair 1:1.
+func pairsFromSpec(spec *diff.BundleSpec) []exporter.Pair {
+	pairs := make([]exporter.Pair, len(spec.Pairs))
+	for i, p := range spec.Pairs {
+		pairs[i] = exporter.Pair{
+			Name:        p.Name,
+			BaselineRef: p.Baseline,
+			TargetRef:   p.Target,
+		}
+	}
+	return pairs
+}
 
 func runBundle(cmd *cobra.Command, args []string) error {
 	specPath := args[0]
@@ -60,20 +79,17 @@ func runBundle(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("parse bundle spec: %w", err)
 	}
-	pairs := make([]exporter.Pair, len(spec.Pairs))
-	for i, p := range spec.Pairs {
-		pairs[i] = exporter.Pair{
-			Name:        p.Name,
-			BaselineRef: p.Baseline,
-			TargetRef:   p.Target,
-		}
-	}
+	pairs := pairsFromSpec(spec)
 
 	sc, retryTimes, retryDelay, err := bundleFlags.buildSystemContext()
 	if err != nil {
 		return err
 	}
 	signReq, signing, err := bundleFlags.buildSignRequest()
+	if err != nil {
+		return err
+	}
+	encOpts, err := bundleFlags.buildEncodingOpts()
 	if err != nil {
 		return err
 	}
@@ -85,6 +101,10 @@ func runBundle(cmd *cobra.Command, args []string) error {
 		IntraLayer:       bundleFlags.intraLayer,
 		OutputPath:       deltaOut,
 		ToolVersion:      version,
+		Workers:          encOpts.Workers,
+		Candidates:       encOpts.Candidates,
+		ZstdLevel:        encOpts.ZstdLevel,
+		ZstdWindowLog:    encOpts.ZstdWindowLog,
 		SystemContext:    sc,
 		RetryTimes:       retryTimes,
 		RetryDelay:       retryDelay,

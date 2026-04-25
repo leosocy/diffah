@@ -21,7 +21,7 @@ func skipWithoutZstd(t *testing.T) {
 func TestRoundTrip_Empty(t *testing.T) {
 	skipWithoutZstd(t)
 	ref := []byte("unused reference bytes")
-	patch, err := Encode(context.Background(), ref, nil)
+	patch, err := Encode(context.Background(), ref, nil, EncodeOpts{})
 	require.NoError(t, err)
 	got, err := Decode(context.Background(), ref, patch)
 	require.NoError(t, err)
@@ -37,7 +37,7 @@ func TestRoundTrip_SmallDelta(t *testing.T) {
 	target := append([]byte(nil), ref...)
 	target[len(target)/2] ^= 0xFF
 
-	patch, err := Encode(context.Background(), ref, target)
+	patch, err := Encode(context.Background(), ref, target, EncodeOpts{})
 	require.NoError(t, err)
 	require.Less(t, len(patch), len(target)/2,
 		"patch of a 1-byte delta should be far smaller than half the target")
@@ -61,7 +61,7 @@ func TestDecode_WrongReference(t *testing.T) {
 	target := append([]byte(nil), refA...)
 	target[0] ^= 0xFF
 
-	patch, err := Encode(context.Background(), refA, target)
+	patch, err := Encode(context.Background(), refA, target, EncodeOpts{})
 	require.NoError(t, err)
 
 	got, err := Decode(context.Background(), refB, patch)
@@ -91,6 +91,102 @@ func TestEncode_PreCancelledCtx_ReturnsErrorIsCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err := Encode(ctx, ref, target)
+	_, err := Encode(ctx, ref, target, EncodeOpts{})
 	require.ErrorIs(t, err, context.Canceled, "Encode must surface ctx cancellation")
+}
+
+// TestEncodeOptsDefaults_RoundTripsViaDecode — zero-valued EncodeOpts
+// must round-trip cleanly via Decode. The argv-identity claim (today's
+// argv is `-3 --long=27`, which is exactly what `EncodeOpts{}.levelArg()`
+// and `windowArg()` produce) is asserted separately at the helper layer
+// in TestEncodeOpts_ArgvDefaults.
+func TestEncodeOptsDefaults_RoundTripsViaDecode(t *testing.T) {
+	skipWithoutZstd(t)
+	ref := bytes.Repeat([]byte("rrrr"), 1024)
+	target := append(append([]byte{}, ref...), bytes.Repeat([]byte("nnnn"), 256)...)
+
+	got, err := Encode(context.Background(), ref, target, EncodeOpts{})
+	require.NoError(t, err)
+	require.NotEmpty(t, got, "encode returned empty patch")
+
+	back, err := Decode(context.Background(), ref, got)
+	require.NoError(t, err)
+	require.True(t, bytes.Equal(back, target), "round-trip mismatch")
+}
+
+// TestEncodeDecode_LargeWindowRoundTrip — exercises a window > 27 to
+// prove the lifted decode cap (--long=31) admits Phase-4 frames whose
+// matches sit beyond the historical 128 MiB window.
+func TestEncodeDecode_LargeWindowRoundTrip(t *testing.T) {
+	if testing.Short() {
+		t.Skip("large fixture (200 MiB ref/target); run with -short=false")
+	}
+	skipWithoutZstd(t)
+	const sz = 200 << 20 // 200 MiB
+	ref := make([]byte, sz)
+	for i := range ref {
+		ref[i] = byte(i % 251) // pseudo-random pattern, not really random
+	}
+	target := make([]byte, sz)
+	copy(target, ref)
+	// Tweak a region near the end so encoding has to find it.
+	for i := sz - 1024; i < sz; i++ {
+		target[i] ^= 0xff
+	}
+	patch, err := Encode(context.Background(), ref, target,
+		EncodeOpts{Level: 3, WindowLog: 30})
+	require.NoError(t, err)
+	back, err := Decode(context.Background(), ref, patch)
+	require.NoError(t, err)
+	require.True(t, bytes.Equal(back, target), "round-trip mismatch")
+}
+
+// TestEncodeOptsLevelAndWindowAreApplied — level=22 must produce a
+// patch no larger than level=1 for any non-trivial payload.
+func TestEncodeOptsLevelAndWindowAreApplied(t *testing.T) {
+	skipWithoutZstd(t)
+	ref := bytes.Repeat([]byte("aaaa"), 4096)
+	target := append(append([]byte{}, ref...), bytes.Repeat([]byte("bbbb"), 1024)...)
+
+	low, err := Encode(context.Background(), ref, target,
+		EncodeOpts{Level: 1, WindowLog: 27})
+	require.NoError(t, err)
+	high, err := Encode(context.Background(), ref, target,
+		EncodeOpts{Level: 22, WindowLog: 27})
+	require.NoError(t, err)
+	require.LessOrEqual(t, len(high), len(low),
+		"level=22 patch (%d) should be <= level=1 patch (%d)", len(high), len(low))
+
+	for label, p := range map[string][]byte{"low": low, "high": high} {
+		back, err := Decode(context.Background(), ref, p)
+		require.NoErrorf(t, err, "decode %s", label)
+		require.Truef(t, bytes.Equal(back, target), "%s round-trip mismatch", label)
+	}
+}
+
+// TestEncodeOpts_ArgvDefaults — anchors spec §6.2 byte-identical guarantee
+// at the argv layer: zero-valued EncodeOpts must yield exactly "-3" /
+// "--long=27", which is the literal Phase-3 argv. Explicit values must
+// pass through unchanged.
+func TestEncodeOpts_ArgvDefaults(t *testing.T) {
+	tests := []struct {
+		name   string
+		opts   EncodeOpts
+		level  string
+		window string
+	}{
+		{"zero defaults to -3 --long=27", EncodeOpts{}, "-3", "--long=27"},
+		{"explicit level=22 window=30", EncodeOpts{Level: 22, WindowLog: 30}, "-22", "--long=30"},
+		{"explicit level=12 window=27", EncodeOpts{Level: 12, WindowLog: 27}, "-12", "--long=27"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.opts.levelArg(); got != tc.level {
+				t.Errorf("levelArg() = %q, want %q", got, tc.level)
+			}
+			if got := tc.opts.windowArg(); got != tc.window {
+				t.Errorf("windowArg() = %q, want %q", got, tc.window)
+			}
+		})
+	}
 }

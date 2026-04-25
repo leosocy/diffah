@@ -16,6 +16,7 @@ var diffFlags = struct {
 	dryRun             bool
 	buildSystemContext registryContextBuilder
 	buildSignRequest   signRequestBuilder
+	buildEncodingOpts  encodingOptsBuilder
 }{}
 
 const diffExample = `  # Compute a single-image delta
@@ -31,6 +32,9 @@ func newDiffCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "diff BASELINE-IMAGE TARGET-IMAGE DELTA-OUT",
 		Short: "Compute a single-image delta archive.",
+		Long: `Compute a single-image delta archive between BASELINE-IMAGE and TARGET-IMAGE.
+
+` + encodingTuningHelp,
 		Args: requireArgs("diff",
 			[]string{"BASELINE-IMAGE", "TARGET-IMAGE", "DELTA-OUT"},
 			"diffah diff docker-archive:/tmp/old.tar docker-archive:/tmp/new.tar delta.tar"),
@@ -49,6 +53,7 @@ func newDiffCommand() *cobra.Command {
 	f.BoolVarP(&diffFlags.dryRun, "dry-run", "n", false, "plan without writing the delta")
 	diffFlags.buildSystemContext = installRegistryFlags(c)
 	diffFlags.buildSignRequest = installSigningFlags(c)
+	diffFlags.buildEncodingOpts = installEncodingFlags(c)
 	installUsageTemplate(c)
 	return c
 }
@@ -74,6 +79,10 @@ func runDiff(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	encOpts, err := diffFlags.buildEncodingOpts()
+	if err != nil {
+		return err
+	}
 
 	opts := exporter.Options{
 		Pairs: []exporter.Pair{{
@@ -86,6 +95,10 @@ func runDiff(cmd *cobra.Command, args []string) error {
 		IntraLayer:       diffFlags.intraLayer,
 		OutputPath:       deltaOut,
 		ToolVersion:      version,
+		Workers:          encOpts.Workers,
+		Candidates:       encOpts.Candidates,
+		ZstdLevel:        encOpts.ZstdLevel,
+		ZstdWindowLog:    encOpts.ZstdWindowLog,
 		SystemContext:    sc,
 		RetryTimes:       retryTimes,
 		RetryDelay:       retryDelay,

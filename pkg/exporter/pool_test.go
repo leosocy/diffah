@@ -2,6 +2,8 @@ package exporter
 
 import (
 	"context"
+	"fmt"
+	"sync"
 	"testing"
 
 	"github.com/opencontainers/go-digest"
@@ -62,10 +64,29 @@ func TestEncodeShipped_ForcesFullOnCrossImageDup(t *testing.T) {
 			pool.countShipped(s.Digest)
 		}
 	}
-	require.NoError(t, encodeShipped(ctx, pool, []*pairPlan{p1, p2}, "off", nil, nil))
+	require.NoError(t, encodeShipped(ctx, pool, []*pairPlan{p1, p2}, "off", nil, nil, 0, 0, 0, 0))
 
 	for _, s := range p1.Shipped {
 		entry := pool.entries[s.Digest]
 		require.Equal(t, diff.EncodingFull, entry.Encoding, "shared shipped must be full")
+	}
+}
+
+func TestBlobPool_ConcurrentAddIsSafe(t *testing.T) {
+	p := newBlobPool()
+	const N = 64
+	var wg sync.WaitGroup
+	for i := 0; i < N; i++ {
+		i := i
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			d := digest.FromBytes([]byte(fmt.Sprintf("blob-%d", i)))
+			p.addIfAbsent(d, []byte("x"), diff.BlobEntry{Size: 1})
+		}()
+	}
+	wg.Wait()
+	if got := len(p.sortedDigests()); got != N {
+		t.Fatalf("digests = %d, want %d", got, N)
 	}
 }

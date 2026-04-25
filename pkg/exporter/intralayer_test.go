@@ -226,7 +226,7 @@ func TestPlanner_EagerBaselineFingerprinting(t *testing.T) {
 		{Digest: digest.FromBytes(bBlob), Size: int64(len(bBlob)), MediaType: "m"},
 	}
 
-	p := NewPlanner(baseline, blobs.read, fake)
+	p := NewPlanner(baseline, blobs.read, fake, 0, 0)
 	// Run with empty shipped list to trigger ensureBaselineFP without
 	// any per-layer work.
 	_, _, err := p.Run(context.Background(), nil)
@@ -267,7 +267,7 @@ func TestPlanner_PlanShippedReusesBaselineFingerprint(t *testing.T) {
 		{Digest: baseADigest, Size: int64(len(baseA)), MediaType: "m"},
 		{Digest: baseBDigest, Size: int64(len(baseB)), MediaType: "m"},
 	}
-	p := NewPlanner(baseline, readBlob, nil)
+	p := NewPlanner(baseline, readBlob, nil, 0, 0)
 
 	ctx := context.Background()
 	tgt1 := diff.BlobRef{
@@ -310,7 +310,7 @@ func TestPlanner_EagerFingerprinting_FailedBaselineIsNil(t *testing.T) {
 		{Digest: digest.FromBytes(aBlob), Size: int64(len(aBlob)), MediaType: "m"},
 	}
 
-	p := NewPlanner(baseline, blobs.read, fake)
+	p := NewPlanner(baseline, blobs.read, fake, 0, 0)
 	_, _, err := p.Run(context.Background(), nil)
 	require.NoError(t, err)
 
@@ -343,7 +343,7 @@ func TestPickSimilar_TargetFpFails_UsesSizeClosest(t *testing.T) {
 			digest.FromBytes(far):  {digest.FromBytes([]byte("y")): 10},
 		},
 	}
-	p := NewPlanner(baseline, blobs.read, fake)
+	p := NewPlanner(baseline, blobs.read, fake, 0, 0)
 	p.ensureBaselineFP(context.Background())
 
 	got, ok := p.pickSimilar(nil, 120)
@@ -370,7 +370,7 @@ func TestPickSimilar_AllCandidateFpFail_UsesSizeClosest(t *testing.T) {
 			digest.FromBytes(far):  ErrFingerprintFailed,
 		},
 	}
-	p := NewPlanner(baseline, blobs.read, fake)
+	p := NewPlanner(baseline, blobs.read, fake, 0, 0)
 	p.ensureBaselineFP(context.Background())
 
 	targetFP := Fingerprint{digest.FromBytes([]byte("z")): 10}
@@ -401,7 +401,7 @@ func TestPickSimilar_AllScoresZero_UsesSizeClosest(t *testing.T) {
 			digest.FromBytes(far):  {yFile: 10},
 		},
 	}
-	p := NewPlanner(baseline, blobs.read, fake)
+	p := NewPlanner(baseline, blobs.read, fake, 0, 0)
 	p.ensureBaselineFP(context.Background())
 
 	targetFP := Fingerprint{zFile: 100}
@@ -428,7 +428,7 @@ func TestPickSimilar_SingleWinnerByScore(t *testing.T) {
 			digest.FromBytes(far):  {sharedFile: 1_000_000},
 		},
 	}
-	p := NewPlanner(baseline, blobs.read, fake)
+	p := NewPlanner(baseline, blobs.read, fake, 0, 0)
 	p.ensureBaselineFP(context.Background())
 
 	targetFP := Fingerprint{sharedFile: 1_000_000}
@@ -456,7 +456,7 @@ func TestPickSimilar_TiedScore_BrokenBySize(t *testing.T) {
 			digest.FromBytes(farCorrect):  {shared: 500},
 		},
 	}
-	p := NewPlanner(baseline, blobs.read, fake)
+	p := NewPlanner(baseline, blobs.read, fake, 0, 0)
 	p.ensureBaselineFP(context.Background())
 
 	targetFP := Fingerprint{shared: 500}
@@ -493,7 +493,7 @@ func TestPickSimilar_TiedScoreAndSize_BrokenByDigestOrder(t *testing.T) {
 			dB: {shared: 500},
 		},
 	}
-	p := NewPlanner(baseline, blobs.read, fake)
+	p := NewPlanner(baseline, blobs.read, fake, 0, 0)
 	p.ensureBaselineFP(context.Background())
 
 	targetFP := Fingerprint{shared: 500}
@@ -503,10 +503,198 @@ func TestPickSimilar_TiedScoreAndSize_BrokenByDigestOrder(t *testing.T) {
 }
 
 func TestPickSimilar_EmptyBaseline_ReturnsFalse(t *testing.T) {
-	p := NewPlanner(nil, func(_ digest.Digest) ([]byte, error) { return nil, nil }, &fakeFingerprinter{})
+	p := NewPlanner(nil, func(_ digest.Digest) ([]byte, error) { return nil, nil }, &fakeFingerprinter{}, 0, 0)
 	p.ensureBaselineFP(context.Background())
 	_, ok := p.pickSimilar(Fingerprint{digest.FromBytes([]byte("x")): 1}, 100)
 	require.False(t, ok)
+}
+
+// TestPlanShippedTopK_PicksSmallestOfKPatches asserts that with k=2
+// and two baselines — one nearly identical to the target, one totally
+// foreign — the planner emits the smaller of the two encoded patches
+// and labels PatchFromDigest with the better baseline.
+func TestPlanShippedTopK_PicksSmallestOfKPatches(t *testing.T) {
+	skipWithoutZstdCLI(t)
+	target := pseudoRandom(50, 1<<15)
+	closeRef := append([]byte(nil), target...) // tiny 2-byte diff
+	closeRef[0] ^= 0xAA
+	closeRef[1] ^= 0xBB
+	farRef := pseudoRandom(51, 1<<15) // unrelated bytes
+
+	dClose := digest.FromBytes(closeRef)
+	dFar := digest.FromBytes(farRef)
+	dT := digest.FromBytes(target)
+
+	baseline := []BaselineLayerMeta{
+		{Digest: dClose, Size: int64(len(closeRef)), MediaType: "m"},
+		{Digest: dFar, Size: int64(len(farRef)), MediaType: "m"},
+	}
+	blobs := blobMap{dClose: closeRef, dFar: farRef, dT: target}
+	shared := digest.FromBytes([]byte("shared-content"))
+	foreign := digest.FromBytes([]byte("foreign"))
+	fake := &fakeFingerprinter{
+		fps: map[digest.Digest]Fingerprint{
+			dClose: {shared: 4096},
+			dFar:   {foreign: 4096},
+			dT:     {shared: 4096},
+		},
+	}
+
+	p := NewPlanner(baseline, blobs.read, fake, 0, 0)
+	br := diff.BlobRef{Digest: dT, Size: int64(len(target)), MediaType: "m"}
+	entry, payload, err := p.PlanShippedTopK(context.Background(), br, target, 2)
+	require.NoError(t, err)
+	require.Equal(t, diff.EncodingPatch, entry.Encoding)
+	require.Equal(t, dClose, entry.PatchFromDigest, "smaller patch comes from closeRef")
+	require.Less(t, int64(len(payload)), int64(len(target)),
+		"patch payload (%d) should be smaller than target (%d)", len(payload), len(target))
+}
+
+// TestPlanShippedTopK_FallsBackToFullWhenAllPatchesExceedFull asserts
+// that when no candidate produces a patch smaller than the full-zstd
+// ceiling, the planner emits encoding=full with the target verbatim.
+func TestPlanShippedTopK_FallsBackToFullWhenAllPatchesExceedFull(t *testing.T) {
+	skipWithoutZstdCLI(t)
+	// Two unrelated random blobs — no patch will beat full encoding.
+	ref := pseudoRandom(60, 1<<15)
+	target := pseudoRandom(61, 1<<15)
+	dRef := digest.FromBytes(ref)
+	dT := digest.FromBytes(target)
+
+	baseline := []BaselineLayerMeta{
+		{Digest: dRef, Size: int64(len(ref)), MediaType: "m"},
+	}
+	blobs := blobMap{dRef: ref, dT: target}
+	fake := &fakeFingerprinter{
+		fps: map[digest.Digest]Fingerprint{
+			dRef: {digest.FromBytes([]byte("x")): 8},
+			dT:   {digest.FromBytes([]byte("y")): 8},
+		},
+	}
+
+	p := NewPlanner(baseline, blobs.read, fake, 0, 0)
+	br := diff.BlobRef{Digest: dT, Size: int64(len(target)), MediaType: "m"}
+	entry, _, err := p.PlanShippedTopK(context.Background(), br, target, 1)
+	require.NoError(t, err)
+	require.Equal(t, diff.EncodingFull, entry.Encoding,
+		"unrelated random pair should fall back to full encoding")
+}
+
+// TestPlanShippedTopK_K1MatchesPlanShipped asserts byte-identical
+// output between PlanShipped (legacy K=1) and PlanShippedTopK with k=1
+// — the byte-identical-Phase-3 invariant for default --candidates=1.
+func TestPlanShippedTopK_K1MatchesPlanShipped(t *testing.T) {
+	skipWithoutZstdCLI(t)
+	ref := pseudoRandom(70, 1<<15)
+	target := append([]byte(nil), ref...)
+	target[0] ^= 0x42
+	dRef := digest.FromBytes(ref)
+	dT := digest.FromBytes(target)
+
+	baseline := []BaselineLayerMeta{
+		{Digest: dRef, Size: int64(len(ref)), MediaType: "m"},
+	}
+	blobs := blobMap{dRef: ref, dT: target}
+	shared := digest.FromBytes([]byte("shared"))
+	fake := &fakeFingerprinter{
+		fps: map[digest.Digest]Fingerprint{
+			dRef: {shared: 16384},
+			dT:   {shared: 16384},
+		},
+	}
+
+	pa := NewPlanner(baseline, blobs.read, fake, 0, 0)
+	pb := NewPlanner(baseline, blobs.read, fake, 0, 0)
+
+	br := diff.BlobRef{Digest: dT, Size: int64(len(target)), MediaType: "m"}
+	entryA, payloadA, err := pa.PlanShipped(context.Background(), br, target)
+	require.NoError(t, err)
+	entryB, payloadB, err := pb.PlanShippedTopK(context.Background(), br, target, 1)
+	require.NoError(t, err)
+
+	require.Equal(t, entryA.Encoding, entryB.Encoding)
+	require.Equal(t, entryA.PatchFromDigest, entryB.PatchFromDigest)
+	require.Equal(t, entryA.ArchiveSize, entryB.ArchiveSize)
+	require.True(t, bytes.Equal(payloadA, payloadB),
+		"payloads differ (lenA=%d, lenB=%d) — K=1 must match PlanShipped byte-for-byte",
+		len(payloadA), len(payloadB))
+}
+
+// TestPickTopK_PrefersHighestScoreThenSizeClosest verifies that
+// PickTopK orders candidates by content-similarity score (desc), with
+// size-closest as the tie-break. Uses the existing blobMap +
+// fakeFingerprinter helpers because they key fingerprints off
+// digest.FromBytes(blob) — the same contract Planner.ensureBaselineFP
+// honors when reading baselines through readBlob.
+func TestPickTopK_PrefersHighestScoreThenSizeClosest(t *testing.T) {
+	a := makeBlob("baseline-a")
+	b := makeBlob("baseline-b")
+	c := makeBlob("baseline-c")
+	dA := digest.FromBytes(a)
+	dB := digest.FromBytes(b)
+	dC := digest.FromBytes(c)
+
+	baseline := []BaselineLayerMeta{
+		{Digest: dA, Size: 100, MediaType: "m"},
+		{Digest: dB, Size: 200, MediaType: "m"},
+		{Digest: dC, Size: 300, MediaType: "m"},
+	}
+	blobs := blobMap{dA: a, dB: b, dC: c}
+	shared := digest.FromBytes([]byte("shared"))
+	foreign := digest.FromBytes([]byte("foreign"))
+	fake := &fakeFingerprinter{
+		fps: map[digest.Digest]Fingerprint{
+			dA: {shared: 50},                         // score 50
+			dB: {shared: 80, foreign: 40},            // score 80 (highest)
+			dC: {digest.FromBytes([]byte("x")): 100}, // score 0 (no overlap)
+		},
+	}
+	p := NewPlanner(baseline, blobs.read, fake, 0, 0)
+	target := Fingerprint{shared: 100}
+
+	got := p.PickTopK(context.Background(), target, 150, 2)
+	require.Len(t, got, 2)
+	require.Equal(t, dB, got[0].Digest, "got[0] should be highest score")
+	require.Equal(t, dA, got[1].Digest, "got[1] should be next-highest score")
+}
+
+// TestPickTopK_FallsBackToSizeClosestWhenNoFingerprint asserts that with
+// targetFP=nil the planner ranks by size-closest only.
+func TestPickTopK_FallsBackToSizeClosestWhenNoFingerprint(t *testing.T) {
+	a := makeBlob("baseline-a")
+	b := makeBlob("baseline-b")
+	dA := digest.FromBytes(a)
+	dB := digest.FromBytes(b)
+
+	baseline := []BaselineLayerMeta{
+		{Digest: dA, Size: 100, MediaType: "m"},
+		{Digest: dB, Size: 250, MediaType: "m"},
+	}
+	blobs := blobMap{dA: a, dB: b}
+	p := NewPlanner(baseline, blobs.read, &fakeFingerprinter{}, 0, 0)
+
+	got := p.PickTopK(context.Background(), nil, 240, 2) // target size 240 → dB (250) is closer
+	require.Len(t, got, 2)
+	require.Equal(t, dB, got[0].Digest, "got[0] should be size-closest")
+	require.Equal(t, dA, got[1].Digest)
+}
+
+// TestPickTopK_ClampsAtAvailableCount asserts that requesting more
+// candidates than available returns whatever is present (no padding,
+// no panic).
+func TestPickTopK_ClampsAtAvailableCount(t *testing.T) {
+	a := makeBlob("baseline-a")
+	dA := digest.FromBytes(a)
+	baseline := []BaselineLayerMeta{{Digest: dA, Size: 100, MediaType: "m"}}
+	blobs := blobMap{dA: a}
+	shared := digest.FromBytes([]byte("shared"))
+	fake := &fakeFingerprinter{
+		fps: map[digest.Digest]Fingerprint{dA: {shared: 50}},
+	}
+	p := NewPlanner(baseline, blobs.read, fake, 0, 0)
+
+	got := p.PickTopK(context.Background(), Fingerprint{shared: 50}, 100, 5)
+	require.Len(t, got, 1)
 }
 
 // TestPlanner_Run_PrefersContentMatchOverSizeClosest verifies the full
@@ -538,7 +726,7 @@ func TestPlanner_Run_PrefersContentMatchOverSizeClosest(t *testing.T) {
 		},
 	}
 
-	p := NewPlanner(baseline, blobs.read, fake)
+	p := NewPlanner(baseline, blobs.read, fake, 0, 0)
 	entries, _, err := p.Run(context.Background(), []diff.BlobRef{
 		{Digest: digest.FromBytes(target), Size: int64(len(target)), MediaType: "m"},
 	})
@@ -550,4 +738,104 @@ func TestPlanner_Run_PrefersContentMatchOverSizeClosest(t *testing.T) {
 		require.Equal(t, digest.FromBytes(far), entries[0].PatchFromDigest,
 			"content-match baseline must be picked when scores disagree with size")
 	}
+}
+
+func TestResolveWindowLog(t *testing.T) {
+	tests := []struct {
+		name      string
+		userValue int
+		layerSize int64
+		want      int
+	}{
+		{"explicit override beats auto", 30, 64 << 20, 30},
+		{"explicit override floor", 10, 1 << 30, 10},
+		{"auto small", 0, 64 << 20, 27},
+		{"auto medium boundary inclusive", 0, 128 << 20, 27},
+		{"auto medium just over", 0, (128 << 20) + 1, 30},
+		{"auto large", 0, 512 << 20, 30},
+		{"auto large boundary inclusive", 0, 1 << 30, 30},
+		{"auto huge", 0, (1 << 30) + 1, 31},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ResolveWindowLog(tc.userValue, tc.layerSize)
+			if got != tc.want {
+				t.Errorf("got %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+// countingFingerprinter wraps fakeFingerprinter and counts the number
+// of Fingerprint() invocations per digest, so tests can assert that
+// SeedBaselineFingerprints actually short-circuits re-fingerprinting.
+type countingFingerprinter struct {
+	inner *fakeFingerprinter
+	calls map[digest.Digest]int
+}
+
+func (c *countingFingerprinter) Fingerprint(
+	ctx context.Context, mt string, blob []byte,
+) (Fingerprint, error) {
+	c.calls[digest.FromBytes(blob)]++
+	return c.inner.Fingerprint(ctx, mt, blob)
+}
+
+func TestPlanner_SeedBaselineFingerprintsAvoidsReFingerprinting(t *testing.T) {
+	aBlob := []byte("baseline-alpha-bytes")
+	bBlob := []byte("baseline-beta-bytes")
+	aDigest := digest.FromBytes(aBlob)
+	bDigest := digest.FromBytes(bBlob)
+
+	blobs := blobMap{aDigest: aBlob, bDigest: bBlob}
+	baseline := []BaselineLayerMeta{
+		{Digest: aDigest, Size: int64(len(aBlob)), MediaType: "x"},
+		{Digest: bDigest, Size: int64(len(bBlob)), MediaType: "x"},
+	}
+
+	counter := &countingFingerprinter{
+		inner: &fakeFingerprinter{
+			fps: map[digest.Digest]Fingerprint{
+				aDigest: {"shared": 10},
+				bDigest: {"shared": 5},
+			},
+		},
+		calls: make(map[digest.Digest]int),
+	}
+
+	p := NewPlanner(baseline, blobs.read, counter, 0, 0)
+	// Seed only one of the two — exercises both paths in ensureBaselineFP.
+	p.SeedBaselineFingerprints(map[digest.Digest]Fingerprint{
+		aDigest: {"shared": 10},
+	})
+	p.ensureBaselineFP(context.Background())
+
+	require.Equal(t, 0, counter.calls[aDigest],
+		"seeded baseline a must not be re-fingerprinted")
+	require.Equal(t, 1, counter.calls[bDigest],
+		"unseeded baseline b must be fingerprinted exactly once")
+}
+
+func TestPlanner_SeedBaselineFingerprintsHonorsNilSentinel(t *testing.T) {
+	aBlob := []byte("baseline-prime-fail")
+	aDigest := digest.FromBytes(aBlob)
+	blobs := blobMap{aDigest: aBlob}
+	baseline := []BaselineLayerMeta{
+		{Digest: aDigest, Size: int64(len(aBlob)), MediaType: "x"},
+	}
+
+	counter := &countingFingerprinter{
+		inner: &fakeFingerprinter{},
+		calls: make(map[digest.Digest]int),
+	}
+
+	p := NewPlanner(baseline, blobs.read, counter, 0, 0)
+	// nil sentinel = "fingerprint failed during E1; do not retry".
+	p.SeedBaselineFingerprints(map[digest.Digest]Fingerprint{aDigest: nil})
+	p.ensureBaselineFP(context.Background())
+
+	require.Equal(t, 0, counter.calls[aDigest],
+		"nil-seeded baseline must not be re-fingerprinted")
+	require.Nil(t, p.baselineFP[aDigest],
+		"nil sentinel must be preserved in baselineFP")
 }

@@ -1,5 +1,66 @@
 # Changelog
 
+## [Unreleased] — Phase 4: Delta quality & throughput
+
+### Behavior changes
+
+- **Default zstd level: `3 → 22`.** `diff` and `bundle` produce
+  noticeably smaller patches by default. Level 22 ('ultra') is
+  significantly slower per layer than the historical level 3 — the
+  cost is largely absorbed by the new `--workers=8` parallelism on
+  hosts with multiple cores. Operators wanting Phase-3 output speed
+  can pin `--zstd-level=3 --candidates=1 --workers=1 --zstd-window-log=27`
+  to reproduce the historical behavior.
+- **Default zstd window: `--long=27 → auto`.** The producer now picks
+  per-layer: ≤128 MiB → 27, ≤1 GiB → 30, >1 GiB → 31. Smaller patches
+  on multi-GiB layers at the cost of encoder memory
+  (≈ 2 × 2^N bytes per running encode).
+- **Default top-K: `1 → 3`.** Each shipped target layer is patched
+  against the top-3 most content-similar baseline layers and the
+  smallest patch wins.
+- **Default workers: `1 → 8`.** Encode parallelism on the per-layer
+  axis. Output bytes are byte-identical to `--workers=1` for a fixed
+  flag tuple.
+
+### Additions
+
+- New flags on `diff` and `bundle`: `--workers`, `--candidates`,
+  `--zstd-level`, `--zstd-window-log` (accepts `auto` or 10..31).
+- Long-help (`diff --help`, `bundle --help`) now documents the
+  encoding-tuning flags, the determinism guarantee, and the Phase-3
+  override path.
+
+### Backward compat
+
+- Phase 4 archives encoded with `--zstd-window-log ≥ 28` cannot be
+  decoded by Phase 3 or earlier importers — the decoder rejects them
+  with `Frame requires too much memory for decoding`. Operators
+  serving older consumers should pin `--zstd-window-log=27`.
+- Phase 3 archives apply byte-identically through Phase 4 importer
+  (decoder cap was raised, never lowered).
+- Sidecar schema unchanged.
+
+### Internal
+
+- New `pkg/exporter/workerpool.go` (errgroup-based bounded pool).
+- New `pkg/exporter/fpcache.go` (singleflight-coordinated baseline
+  byte + fingerprint cache; each baseline blob fetched at most once
+  per `Export()` call).
+- New `ResolveWindowLog(userValue, layerSize)` helper threading
+  per-layer window choice through `PlanShipped` and `PlanShippedTopK`.
+- `internal/zstdpatch.Encode` and `EncodeFull` accept
+  `EncodeOpts{Level, WindowLog}`; zero values reproduce historical
+  defaults.
+- Decoder side window cap raised from `1<<27` to `1<<31`.
+
+### Deferred to a follow-up PR
+
+- GB-scale benchmark gated on `DIFFAH_BIG_TEST=1` and the CI
+  regression gate that consumes its output. The synthesized fixture
+  needs registrytest helpers (`LayersFromRNG`, `MutateLayersBitFlip`)
+  that don't yet exist; landing them under their own scoped PR keeps
+  the defaults flip merge unit small.
+
 ## [Unreleased] — Phase 3: Registry-native export + signing
 
 ### Breaking changes

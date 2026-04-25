@@ -14,6 +14,7 @@ require (
 	github.com/vbauerster/mpb/v8 v8.12.0
 	go.podman.io/image/v5 v5.39.2
 	golang.org/x/crypto v0.43.0
+	golang.org/x/sync v0.20.0
 )
 
 require (
@@ -89,7 +90,6 @@ require (
 	go.opentelemetry.io/otel/trace v1.36.0 // indirect
 	go.podman.io/storage v1.62.0 // indirect
 	golang.org/x/net v0.45.0 // indirect
-	golang.org/x/sync v0.20.0 // indirect
 	golang.org/x/sys v0.43.0 // indirect
 	golang.org/x/term v0.36.0 // indirect
 	golang.org/x/text v0.30.0 // indirect
