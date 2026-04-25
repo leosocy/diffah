@@ -1,5 +1,15 @@
 # diffah — Design Spec (v1)
 
+> **⚠ HISTORICAL — superseded.** This document captures the v1 `export`
+> / `import` CLI shape. The user-facing CLI was redesigned in
+> [`2026-04-23-cli-redesign-skopeo-inspired-design.md`](2026-04-23-cli-redesign-skopeo-inspired-design.md);
+> the registry-native, multi-image-bundle, signing, and Phase 4
+> capabilities are documented in their own per-phase specs in this
+> directory. The library architecture, sidecar schema philosophy, and
+> the goals/non-goals captured below are still the load-bearing
+> reference. Read this for the *why* — read the per-phase specs for
+> the current *what*.
+
 - **Status**: Approved (brainstorming → ready for implementation plan)
 - **Date**: 2026-04-20
 - **Repository**: https://github.com/leosocy/diffah

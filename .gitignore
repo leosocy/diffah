@@ -115,3 +115,6 @@ build_fixtures
 # Local config backups and machine-local tooling files
 *.bck.yaml
 .tool-versions
+
+# macOS Finder metadata
+.DS_Store
