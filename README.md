@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/diffah-logo-dark.svg">
+    <img alt="diffah — only what changed" src="docs/assets/diffah-logo.svg" width="420">
+  </picture>
+</p>
+
 # diffah
 
 [![test](https://github.com/leosocy/diffah/actions/workflows/test.yml/badge.svg)](https://github.com/leosocy/diffah/actions/workflows/test.yml)

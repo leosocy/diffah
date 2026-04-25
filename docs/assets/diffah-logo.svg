@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 140" role="img" aria-label="diffah — container image deltas">
+  <title>diffah</title>
+  <desc>Layered triangle glyph: three ghosted base slabs and one solid rust apex, representing the small delta that ships on top of layers the consumer already has. Beside it, the diffah wordmark in monospace and a tagline reading: only · what · changed.</desc>
+
+  <!-- Symbol: stacked-layer delta -->
+  <g transform="translate(24, 18)">
+    <!-- Slab 4 (base — most stable, fully ghosted) -->
+    <path d="M 12.5 75 L 87.5 75 L 100 100 L 0 100 Z"
+          fill="#1a1a1a" fill-opacity="0.05"
+          stroke="#1a1a1a" stroke-width="2" stroke-linejoin="miter"/>
+    <!-- Slab 3 -->
+    <path d="M 25 50 L 75 50 L 87.5 75 L 12.5 75 Z"
+          fill="#1a1a1a" fill-opacity="0.09"
+          stroke="#1a1a1a" stroke-width="2" stroke-linejoin="miter"/>
+    <!-- Slab 2 -->
+    <path d="M 37.5 25 L 62.5 25 L 75 50 L 25 50 Z"
+          fill="#1a1a1a" fill-opacity="0.14"
+          stroke="#1a1a1a" stroke-width="2" stroke-linejoin="miter"/>
+    <!-- Slab 1 (apex — the delta that ships) -->
+    <path d="M 50 0 L 62.5 25 L 37.5 25 Z"
+          fill="#c5482e" stroke="#c5482e" stroke-width="2" stroke-linejoin="miter"/>
+    <!-- Hairline ground -->
+    <line x1="-6" y1="106" x2="106" y2="106" stroke="#1a1a1a" stroke-width="0.75" stroke-opacity="0.3"/>
+  </g>
+
+  <!-- Wordmark -->
+  <text x="146" y="78"
+        font-family="ui-monospace, 'JetBrains Mono', 'IBM Plex Mono', 'SF Mono', Menlo, Consolas, monospace"
+        font-size="46"
+        font-weight="600"
+        letter-spacing="-1"
+        fill="#1a1a1a">diffah</text>
+
+  <!-- Tagline -->
+  <text x="148" y="103"
+        font-family="ui-monospace, 'JetBrains Mono', 'IBM Plex Mono', 'SF Mono', Menlo, Consolas, monospace"
+        font-size="9.5"
+        font-weight="500"
+        letter-spacing="2.6"
+        fill="#6b6b6b">ONLY · WHAT · CHANGED</text>
+</svg>
