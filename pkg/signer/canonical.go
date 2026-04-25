@@ -1,6 +1,7 @@
 package signer
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 
@@ -32,4 +33,16 @@ func JCSCanonicalFromBytes(raw []byte) ([]byte, error) {
 		return nil, fmt.Errorf("jcs transform: %w", err)
 	}
 	return out, nil
+}
+
+// PayloadDigestFromSidecar canonicalizes the on-disk sidecar JSON
+// bytes via JCS and returns sha256 of the result. This is the exact
+// byte sequence that diffah signs and verifies — encapsulating the
+// two-step pipeline here means the producer and consumer cannot drift.
+func PayloadDigestFromSidecar(sidecarBytes []byte) ([32]byte, error) {
+	canon, err := JCSCanonicalFromBytes(sidecarBytes)
+	if err != nil {
+		return [32]byte{}, err
+	}
+	return sha256.Sum256(canon), nil
 }

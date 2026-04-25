@@ -2,7 +2,6 @@ package importer
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -337,12 +336,11 @@ func verifySignature(ctx context.Context, deltaPath string, sidecarBytes []byte,
 	if sig == nil {
 		return signer.ErrArchiveUnsigned
 	}
-	canon, err := signer.JCSCanonicalFromBytes(sidecarBytes)
+	digest, err := signer.PayloadDigestFromSidecar(sidecarBytes)
 	if err != nil {
 		return err
 	}
-	sum := sha256.Sum256(canon)
-	return signer.Verify(ctx, opts.VerifyPubKeyPath, sum[:], sig, opts.VerifyRekorURL)
+	return signer.Verify(ctx, opts.VerifyPubKeyPath, digest[:], sig, opts.VerifyRekorURL)
 }
 
 // ensureOutputParent creates the parent directory for file-based output

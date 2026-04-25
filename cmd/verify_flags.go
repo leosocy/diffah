@@ -1,11 +1,7 @@
 package cmd
 
 import (
-	"strings"
-
 	"github.com/spf13/cobra"
-
-	"github.com/leosocy/diffah/pkg/diff/errs"
 )
 
 // verifyConfig carries the runtime inputs consumed by the importer's
@@ -38,11 +34,8 @@ func installVerifyFlags(cmd *cobra.Command) verifyConfigBuilder {
 		if pubKey == "" {
 			return verifyConfig{}, nil
 		}
-		if strings.HasPrefix(pubKey, "cosign://") {
-			return verifyConfig{}, &cliErr{
-				cat: errs.CategoryUser,
-				msg: "cosign:// KMS public-key URIs are reserved but not yet implemented",
-			}
+		if err := rejectKMSURI(pubKey, "public-key"); err != nil {
+			return verifyConfig{}, err
 		}
 		return verifyConfig{PubKeyPath: pubKey, RekorURL: rekor}, nil
 	}

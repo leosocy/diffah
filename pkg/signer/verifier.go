@@ -58,11 +58,12 @@ func loadPublicKey(path string) (*ecdsa.PublicKey, error) {
 	return pub, nil
 }
 
-// verifyRekorBundle is a stub. Phase 3 emits .rekor.json only on
-// explicit --rekor-url opt-in (not wired through the Phase 7 CLI yet);
-// this stub returns nil so a reader passing --verify-rekor-url against
-// an archive that happens to carry a .rekor.json does not spuriously
-// fail. A follow-on PR lands the live transparency-log verification.
+// verifyRekorBundle is a stub. Today the producer side cannot emit
+// .rekor.json (UploadEntry errors on any non-empty URL), so the
+// verifier never sees a real bundle to check. Returning nil here means
+// a future archive that does carry a .rekor.json is silently accepted
+// against the keyed-signature check alone — a follow-on PR lands the
+// live transparency-log verification.
 func verifyRekorBundle(ctx context.Context, rekorURL string, bundle, payload []byte, pub *ecdsa.PublicKey) error {
 	_ = ctx
 	_ = rekorURL

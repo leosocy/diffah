@@ -1,18 +1,15 @@
 package exporter
 
 import (
-	"archive/tar"
 	"context"
-	"crypto/sha256"
 	"fmt"
 	"io"
-	"os"
 	"time"
 
 	"go.podman.io/image/v5/types"
 
+	"github.com/leosocy/diffah/internal/archive"
 	"github.com/leosocy/diffah/internal/zstdpatch"
-	"github.com/leosocy/diffah/pkg/diff"
 	"github.com/leosocy/diffah/pkg/progress"
 	"github.com/leosocy/diffah/pkg/signer"
 )
@@ -28,15 +25,14 @@ type Options struct {
 
 	// Registry & transport — threaded into every types.ImageReference
 	// call. Nil is acceptable; it behaves the same as today's path-only
-	// paths. Populated by cmd/diff.go / cmd/bundle.go in Phase 4.
+	// flow.
 	SystemContext *types.SystemContext
 	RetryTimes    int
 	RetryDelay    time.Duration
 
-	// Signing — populated by cmd/diff.go / cmd/bundle.go in Phase 7.
-	// A zero SignKeyPath skips signing altogether; the archive is
-	// written without a sidecar. PassphraseBytes is consumed (zeroed in
-	// place) by signer.Sign after the key is decrypted.
+	// Signing. A zero SignKeyPath skips signing altogether; the archive
+	// is written without a sidecar. SignKeyPassphrase is consumed
+	// (zeroed in place) by signer.Sign after the key is decrypted.
 	SignKeyPath       string
 	SignKeyPassphrase []byte
 	RekorURL          string
@@ -140,7 +136,7 @@ func Export(ctx context.Context, opts Options) error {
 	log().InfoContext(ctx, "exported bundle", "path", opts.OutputPath, "archive_bytes", archiveSize)
 	if opts.SignKeyPath != "" {
 		if err := signArchive(ctx, &opts); err != nil {
-			return fmt.Errorf("sign archive: %w", err)
+			return err
 		}
 	}
 	opts.reporter().Phase("done")
@@ -152,15 +148,14 @@ func Export(ctx context.Context, opts Options) error {
 // sidecar files alongside the output. Called only when SignKeyPath is
 // set.
 func signArchive(ctx context.Context, opts *Options) error {
-	sidecarBytes, err := readSidecarFromArchive(opts.OutputPath)
+	sidecarBytes, err := archive.ReadSidecar(opts.OutputPath)
 	if err != nil {
 		return err
 	}
-	canon, err := signer.JCSCanonicalFromBytes(sidecarBytes)
+	digest, err := signer.PayloadDigestFromSidecar(sidecarBytes)
 	if err != nil {
 		return err
 	}
-	digest := sha256.Sum256(canon)
 
 	opts.reporter().Phase("signing")
 	sig, err := signer.Sign(ctx, signer.SignRequest{
@@ -173,29 +168,6 @@ func signArchive(ctx context.Context, opts *Options) error {
 		return err
 	}
 	return signer.WriteSidecars(opts.OutputPath, sig)
-}
-
-// readSidecarFromArchive walks the delta tar and returns the on-disk
-// bytes of the diffah.json entry.
-func readSidecarFromArchive(path string) ([]byte, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	tr := tar.NewReader(f)
-	for {
-		hdr, err := tr.Next()
-		if err == io.EOF {
-			return nil, fmt.Errorf("%s not found in archive", diff.SidecarFilename)
-		}
-		if err != nil {
-			return nil, err
-		}
-		if hdr.Name == diff.SidecarFilename {
-			return io.ReadAll(tr)
-		}
-	}
 }
 
 func DryRun(ctx context.Context, opts Options) (DryRunStats, error) {

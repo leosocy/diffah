@@ -5,7 +5,6 @@ import (
 	"errors"
 	"io"
 	"os"
-	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -46,12 +45,8 @@ func installSigningFlags(cmd *cobra.Command) signRequestBuilder {
 		if keyPath == "" {
 			return signer.SignRequest{}, false, nil
 		}
-		if strings.HasPrefix(keyPath, "cosign://") {
-			return signer.SignRequest{}, false, &cliErr{
-				cat:  errs.CategoryUser,
-				msg:  "cosign:// KMS URIs are reserved but not yet implemented (Phase 3 supports file-path keys only)",
-				hint: "use a PEM or cosign-boxed file path",
-			}
+		if err := rejectKMSURI(keyPath, "private-key"); err != nil {
+			return signer.SignRequest{}, false, err
 		}
 		req := signer.SignRequest{KeyPath: keyPath, RekorURL: rekorURL}
 		if passphraseStdin {
