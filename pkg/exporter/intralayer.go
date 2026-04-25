@@ -163,12 +163,13 @@ func (p *Planner) PlanShipped(
 // for fixed inputs.
 //
 // PickTopK auto-primes the baseline fingerprint cache so callers may
-// invoke it before any other Planner method has run.
-func (p *Planner) PickTopK(targetFP Fingerprint, targetSize int64, k int) []BaselineLayerMeta {
+// invoke it before any other Planner method has run; ctx is propagated
+// into that priming pass so caller cancellation flows through.
+func (p *Planner) PickTopK(ctx context.Context, targetFP Fingerprint, targetSize int64, k int) []BaselineLayerMeta {
 	if k <= 0 || len(p.baseline) == 0 {
 		return nil
 	}
-	p.ensureBaselineFP(context.Background())
+	p.ensureBaselineFP(ctx)
 	type scored struct {
 		meta  BaselineLayerMeta
 		score int64
@@ -227,9 +228,20 @@ func (p *Planner) PlanShippedTopK(
 	// Target fingerprint failure is non-fatal; PickTopK degrades to
 	// size-closest ranking when targetFP is nil.
 	targetFP, _ := fp.Fingerprint(ctx, s.MediaType, target)
-	cands := p.PickTopK(targetFP, s.Size, k)
+	cands := p.PickTopK(ctx, targetFP, s.Size, k)
 	if len(cands) == 0 {
 		return fullEntry(s), target, nil
+	}
+
+	// Hoisted: compute the full-zstd ceiling once. target is
+	// loop-invariant, so leaving EncodeFull inside the loop would
+	// trigger K identical compressions of the same bytes — visible cost
+	// once PR-4 raises --candidates default above 1.
+	fullZst, err := zstdpatch.EncodeFull(target,
+		zstdpatch.EncodeOpts{Level: p.level, WindowLog: p.windowLog})
+	if err != nil {
+		return diff.BlobRef{}, nil, fmt.Errorf(
+			"encode full %s: %w", s.Digest, err)
 	}
 
 	// "full" is always the safety floor — never inflate beyond raw
@@ -248,12 +260,6 @@ func (p *Planner) PlanShippedTopK(
 		if err != nil {
 			return diff.BlobRef{}, nil, fmt.Errorf(
 				"encode patch %s vs %s: %w", s.Digest, c.Digest, err)
-		}
-		fullZst, err := zstdpatch.EncodeFull(target,
-			zstdpatch.EncodeOpts{Level: p.level, WindowLog: p.windowLog})
-		if err != nil {
-			return diff.BlobRef{}, nil, fmt.Errorf(
-				"encode full %s: %w", s.Digest, err)
 		}
 		// Same gating as PlanShipped: only emit a patch if it strictly
 		// beats both the full-zstd ceiling AND the raw target bytes.

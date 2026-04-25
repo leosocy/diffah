@@ -652,7 +652,7 @@ func TestPickTopK_PrefersHighestScoreThenSizeClosest(t *testing.T) {
 	p := NewPlanner(baseline, blobs.read, fake, 0, 0)
 	target := Fingerprint{shared: 100}
 
-	got := p.PickTopK(target, 150, 2)
+	got := p.PickTopK(context.Background(), target, 150, 2)
 	require.Len(t, got, 2)
 	require.Equal(t, dB, got[0].Digest, "got[0] should be highest score")
 	require.Equal(t, dA, got[1].Digest, "got[1] should be next-highest score")
@@ -673,7 +673,7 @@ func TestPickTopK_FallsBackToSizeClosestWhenNoFingerprint(t *testing.T) {
 	blobs := blobMap{dA: a, dB: b}
 	p := NewPlanner(baseline, blobs.read, &fakeFingerprinter{}, 0, 0)
 
-	got := p.PickTopK(nil, 240, 2) // target size 240 → dB (250) is closer
+	got := p.PickTopK(context.Background(), nil, 240, 2) // target size 240 → dB (250) is closer
 	require.Len(t, got, 2)
 	require.Equal(t, dB, got[0].Digest, "got[0] should be size-closest")
 	require.Equal(t, dA, got[1].Digest)
@@ -693,7 +693,7 @@ func TestPickTopK_ClampsAtAvailableCount(t *testing.T) {
 	}
 	p := NewPlanner(baseline, blobs.read, fake, 0, 0)
 
-	got := p.PickTopK(Fingerprint{shared: 50}, 100, 5)
+	got := p.PickTopK(context.Background(), Fingerprint{shared: 50}, 100, 5)
 	require.Len(t, got, 1)
 }
 
