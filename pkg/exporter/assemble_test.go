@@ -22,7 +22,7 @@ func TestAssembleSidecar_Minimal(t *testing.T) {
 	for _, s := range p1.Shipped {
 		pool.countShipped(s.Digest)
 	}
-	require.NoError(t, encodeShipped(ctx, pool, []*pairPlan{p1}, "off", nil, nil, 0, 0, 0))
+	require.NoError(t, encodeShipped(ctx, pool, []*pairPlan{p1}, "off", nil, nil, 0, 0, 0, 0))
 
 	sc := assembleSidecar(pool, []*pairPlan{p1}, "linux/amd64", "test", time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
 	require.Equal(t, diff.SchemaVersionV1, sc.Version)

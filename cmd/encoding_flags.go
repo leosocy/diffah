@@ -31,9 +31,9 @@ func installEncodingFlags(cmd *cobra.Command) encodingOptsBuilder {
 	var windowLog string
 
 	f := cmd.Flags()
-	f.IntVar(&o.Workers, "workers", 1,
+	f.IntVar(&o.Workers, "workers", 8,
 		"layers to fingerprint and encode in parallel; "+
-			"--workers=1 reproduces Phase-3 strict-serial encode")
+			"--workers=1 reproduces Phase-3 strict-serial encode (default 8)")
 	f.IntVar(&o.Candidates, "candidates", 1,
 		"top-K baseline candidates per shipped layer; "+
 			"--candidates=1 reproduces Phase-3 single-best behavior")
