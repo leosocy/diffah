@@ -46,9 +46,14 @@ func ProbeKey(path string, passphrase []byte) error {
 
 // Sign produces an ECDSA-P256 signature over req.Payload using the key
 // at req.KeyPath. Cosign-boxed (scrypt + nacl/secretbox) keys require a
-// passphrase; plain PEM keys do not. When req.RekorURL is non-empty the
-// resulting transparency-log bundle is attached to the returned
-// Signature; otherwise RekorBundle is nil.
+// passphrase; plain PEM keys do not.
+//
+// When req.RekorURL is empty, RekorBundle on the returned Signature is
+// nil. When req.RekorURL is non-empty, Sign delegates to UploadEntry to
+// attach a transparency-log bundle. UploadEntry currently returns an
+// explicit "not yet implemented" error for any non-empty URL — Phase 3
+// keeps the flag wired so the CLI surface is stable, but the HTTP path
+// to Rekor lands in a follow-on PR.
 func Sign(ctx context.Context, req SignRequest) (*Signature, error) {
 	priv, err := loadPrivateKey(req.KeyPath, req.PassphraseBytes)
 	if err != nil {

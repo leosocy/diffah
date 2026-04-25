@@ -21,19 +21,28 @@ import (
 type signRequestBuilder func() (signer.SignRequest, bool, error)
 
 // installSigningFlags registers --sign-key, --sign-key-password-stdin,
-// --rekor-url. Returns a closure invoked in RunE after cobra parses
-// argv.
+// --rekor-url, and the hidden forward-compat --keyless flag. Returns a
+// closure invoked in RunE after cobra parses argv.
 func installSigningFlags(cmd *cobra.Command) signRequestBuilder {
 	var keyPath, rekorURL string
-	var passphraseStdin bool
+	var passphraseStdin, keyless bool
 	f := cmd.Flags()
 	f.StringVar(&keyPath, "sign-key", "", "private key for signing (PEM or cosign-boxed PEM)")
 	f.BoolVar(&passphraseStdin, "sign-key-password-stdin", false, "read key passphrase from stdin")
 	f.StringVar(&rekorURL, "rekor-url", "",
 		"upload signature to this Rekor transparency log. Do not set unless your delta "+
 			"identifiers are safe to publish.")
+	f.BoolVar(&keyless, "keyless", false, "keyless signing (reserved — not yet implemented)")
+	_ = f.MarkHidden("keyless")
 
 	return func() (signer.SignRequest, bool, error) {
+		if keyless {
+			return signer.SignRequest{}, false, &cliErr{
+				cat:  errs.CategoryUser,
+				msg:  "--keyless is reserved but not yet implemented (Phase 3 supports keyed signing only)",
+				hint: "use --sign-key with a PEM or cosign-boxed file path",
+			}
+		}
 		if keyPath == "" {
 			return signer.SignRequest{}, false, nil
 		}

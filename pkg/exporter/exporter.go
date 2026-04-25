@@ -12,6 +12,7 @@ import (
 	"go.podman.io/image/v5/types"
 
 	"github.com/leosocy/diffah/internal/zstdpatch"
+	"github.com/leosocy/diffah/pkg/diff"
 	"github.com/leosocy/diffah/pkg/progress"
 	"github.com/leosocy/diffah/pkg/signer"
 )
@@ -186,12 +187,12 @@ func readSidecarFromArchive(path string) ([]byte, error) {
 	for {
 		hdr, err := tr.Next()
 		if err == io.EOF {
-			return nil, fmt.Errorf("diffah.json not found in archive")
+			return nil, fmt.Errorf("%s not found in archive", diff.SidecarFilename)
 		}
 		if err != nil {
 			return nil, err
 		}
-		if hdr.Name == "diffah.json" {
+		if hdr.Name == diff.SidecarFilename {
 			return io.ReadAll(tr)
 		}
 	}
