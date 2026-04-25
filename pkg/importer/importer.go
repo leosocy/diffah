@@ -336,11 +336,11 @@ func verifySignature(ctx context.Context, deltaPath string, sidecarBytes []byte,
 	if sig == nil {
 		return signer.ErrArchiveUnsigned
 	}
-	digest, err := signer.PayloadDigestFromSidecar(sidecarBytes)
+	payload, err := signer.PayloadDigestFromSidecar(sidecarBytes)
 	if err != nil {
 		return err
 	}
-	return signer.Verify(ctx, opts.VerifyPubKeyPath, digest[:], sig, opts.VerifyRekorURL)
+	return signer.Verify(ctx, opts.VerifyPubKeyPath, payload[:], sig, opts.VerifyRekorURL)
 }
 
 // ensureOutputParent creates the parent directory for file-based output
