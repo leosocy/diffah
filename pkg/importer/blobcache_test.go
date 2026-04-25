@@ -88,7 +88,6 @@ func TestBlobCache_ConcurrentDistinctDigests(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(N)
 	for i := 0; i < N; i++ {
-		i := i
 		go func() {
 			defer wg.Done()
 			b, err := c.GetOrLoad(context.Background(), digests[i], fetch(digests[i]))
@@ -156,7 +155,6 @@ func TestBlobCache_FetchErrorOnConcurrentMissReturnsToAllWaiters(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(N)
 	for i := 0; i < N; i++ {
-		i := i
 		go func() {
 			defer wg.Done()
 			_, errs[i] = c.GetOrLoad(context.Background(), d, failingFetch)

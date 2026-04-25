@@ -26,13 +26,12 @@ func newBaselineBlobCache() *baselineBlobCache {
 // exactly once even under concurrent callers; on fetch error nothing
 // is cached.
 //
-// The ctx parameter is forwarded for symmetry with
-// pkg/exporter/fpCache.GetOrLoad and for future cancellation
-// propagation into fetch; today the closure does not consult it.
-//
-//nolint:revive // ctx kept intentionally; see doc above.
+// The context parameter is kept on the signature for symmetry with
+// pkg/exporter/fpCache.GetOrLoad and to allow future cancellation
+// propagation into fetch; today the singleflight closure does not
+// consult it, hence the blank name.
 func (c *baselineBlobCache) GetOrLoad(
-	ctx context.Context, d digest.Digest, fetch func() ([]byte, error),
+	_ context.Context, d digest.Digest, fetch func() ([]byte, error),
 ) ([]byte, error) {
 	if b, ok := c.lookup(d); ok {
 		return b, nil
