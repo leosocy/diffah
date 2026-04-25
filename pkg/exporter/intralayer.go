@@ -35,6 +35,12 @@ type Planner struct {
 	readBlob    func(digest.Digest) ([]byte, error)
 	fingerprint Fingerprinter
 
+	// Stage 1 of Phase 4: tunables threaded into every Encode call.
+	// Zero values reproduce historical Phase-3 behavior (level 3,
+	// windowLog 27).
+	level     int
+	windowLog int
+
 	// Lazily populated on first Run via ensureBaselineFP. A nil entry
 	// means "fingerprint failed for this baseline"; the planner treats
 	// that baseline as a size-only candidate.
@@ -46,10 +52,14 @@ type Planner struct {
 // digest. The function must handle both target and baseline digests.
 // A nil Fingerprinter defaults to DefaultFingerprinter{}. Baselines are
 // sorted by Digest at construction time for deterministic tie-breaks.
+//
+// level and windowLog are forwarded to every zstd Encode/EncodeFull
+// call; zero values reproduce Phase-3 byte-identical defaults.
 func NewPlanner(
 	baseline []BaselineLayerMeta,
 	readBlob func(digest.Digest) ([]byte, error),
 	fp Fingerprinter,
+	level, windowLog int,
 ) *Planner {
 	sorted := make([]BaselineLayerMeta, len(baseline))
 	copy(sorted, baseline)
@@ -60,6 +70,8 @@ func NewPlanner(
 		baseline:    sorted,
 		readBlob:    readBlob,
 		fingerprint: fp,
+		level:       level,
+		windowLog:   windowLog,
 	}
 }
 
@@ -119,11 +131,13 @@ func (p *Planner) PlanShipped(
 		return diff.BlobRef{}, nil, fmt.Errorf(
 			"read baseline reference %s: %w", bestRef.Digest, err)
 	}
-	patch, err := zstdpatch.Encode(ctx, refBytes, target)
+	patch, err := zstdpatch.Encode(ctx, refBytes, target,
+		zstdpatch.EncodeOpts{Level: p.level, WindowLog: p.windowLog})
 	if err != nil {
 		return diff.BlobRef{}, nil, fmt.Errorf("encode patch %s: %w", s.Digest, err)
 	}
-	fullZst, err := zstdpatch.EncodeFull(target)
+	fullZst, err := zstdpatch.EncodeFull(target,
+		zstdpatch.EncodeOpts{Level: p.level, WindowLog: p.windowLog})
 	if err != nil {
 		return diff.BlobRef{}, nil, fmt.Errorf("encode full %s: %w", s.Digest, err)
 	}

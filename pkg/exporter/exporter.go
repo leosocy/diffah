@@ -23,6 +23,13 @@ type Options struct {
 	IntraLayer  string
 	CreatedAt   time.Time
 
+	// Phase 4 tunables. Zero values map to historical defaults so
+	// callers that do not set them keep Phase-3 byte-identical output.
+	Workers       int // 0 → 1 (serial). PR-3 changes default to 8.
+	Candidates    int // 0 → 1 (single best). PR-2 changes default to 3.
+	ZstdLevel     int // 0 → 3. PR-4 changes default to 22.
+	ZstdWindowLog int // 0 → 27. PR-4 changes default to "auto" (per-layer).
+
 	// Registry & transport — threaded into every types.ImageReference
 	// call. Nil is acceptable; it behaves the same as today's path-only
 	// flow.
@@ -111,7 +118,8 @@ func buildBundle(ctx context.Context, opts *Options) (*builtBundle, error) {
 	}
 	log().InfoContext(ctx, "planned pairs", "count", len(plans))
 
-	if err := encodeShipped(ctx, pool, plans, effectiveMode, opts.fingerprinter, opts.reporter()); err != nil {
+	if err := encodeShipped(ctx, pool, plans, effectiveMode, opts.fingerprinter, opts.reporter(),
+		opts.ZstdLevel, opts.ZstdWindowLog); err != nil {
 		return nil, fmt.Errorf("encode shipped layers: %w", err)
 	}
 	log().InfoContext(ctx, "encoded blobs", "count", len(pool.entries))

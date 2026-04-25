@@ -13,6 +13,7 @@ import (
 func encodeShipped(
 	ctx context.Context, pool *blobPool, pairs []*pairPlan,
 	mode string, fp Fingerprinter, rep progress.Reporter,
+	level, windowLog int,
 ) error {
 	if rep == nil {
 		rep = progress.NewDiscard()
@@ -21,7 +22,7 @@ func encodeShipped(
 		readBaseline := func(d digest.Digest) ([]byte, error) {
 			return readBlobBytes(ctx, p.BaselineImageRef, p.SystemContext, d)
 		}
-		planner := NewPlanner(p.BaselineLayerMeta, readBaseline, fp)
+		planner := NewPlanner(p.BaselineLayerMeta, readBaseline, fp, level, windowLog)
 		for _, s := range p.Shipped {
 			if pool.has(s.Digest) {
 				continue

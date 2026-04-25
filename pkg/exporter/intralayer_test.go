@@ -226,7 +226,7 @@ func TestPlanner_EagerBaselineFingerprinting(t *testing.T) {
 		{Digest: digest.FromBytes(bBlob), Size: int64(len(bBlob)), MediaType: "m"},
 	}
 
-	p := NewPlanner(baseline, blobs.read, fake)
+	p := NewPlanner(baseline, blobs.read, fake, 0, 0)
 	// Run with empty shipped list to trigger ensureBaselineFP without
 	// any per-layer work.
 	_, _, err := p.Run(context.Background(), nil)
@@ -267,7 +267,7 @@ func TestPlanner_PlanShippedReusesBaselineFingerprint(t *testing.T) {
 		{Digest: baseADigest, Size: int64(len(baseA)), MediaType: "m"},
 		{Digest: baseBDigest, Size: int64(len(baseB)), MediaType: "m"},
 	}
-	p := NewPlanner(baseline, readBlob, nil)
+	p := NewPlanner(baseline, readBlob, nil, 0, 0)
 
 	ctx := context.Background()
 	tgt1 := diff.BlobRef{
@@ -310,7 +310,7 @@ func TestPlanner_EagerFingerprinting_FailedBaselineIsNil(t *testing.T) {
 		{Digest: digest.FromBytes(aBlob), Size: int64(len(aBlob)), MediaType: "m"},
 	}
 
-	p := NewPlanner(baseline, blobs.read, fake)
+	p := NewPlanner(baseline, blobs.read, fake, 0, 0)
 	_, _, err := p.Run(context.Background(), nil)
 	require.NoError(t, err)
 
@@ -343,7 +343,7 @@ func TestPickSimilar_TargetFpFails_UsesSizeClosest(t *testing.T) {
 			digest.FromBytes(far):  {digest.FromBytes([]byte("y")): 10},
 		},
 	}
-	p := NewPlanner(baseline, blobs.read, fake)
+	p := NewPlanner(baseline, blobs.read, fake, 0, 0)
 	p.ensureBaselineFP(context.Background())
 
 	got, ok := p.pickSimilar(nil, 120)
@@ -370,7 +370,7 @@ func TestPickSimilar_AllCandidateFpFail_UsesSizeClosest(t *testing.T) {
 			digest.FromBytes(far):  ErrFingerprintFailed,
 		},
 	}
-	p := NewPlanner(baseline, blobs.read, fake)
+	p := NewPlanner(baseline, blobs.read, fake, 0, 0)
 	p.ensureBaselineFP(context.Background())
 
 	targetFP := Fingerprint{digest.FromBytes([]byte("z")): 10}
@@ -401,7 +401,7 @@ func TestPickSimilar_AllScoresZero_UsesSizeClosest(t *testing.T) {
 			digest.FromBytes(far):  {yFile: 10},
 		},
 	}
-	p := NewPlanner(baseline, blobs.read, fake)
+	p := NewPlanner(baseline, blobs.read, fake, 0, 0)
 	p.ensureBaselineFP(context.Background())
 
 	targetFP := Fingerprint{zFile: 100}
@@ -428,7 +428,7 @@ func TestPickSimilar_SingleWinnerByScore(t *testing.T) {
 			digest.FromBytes(far):  {sharedFile: 1_000_000},
 		},
 	}
-	p := NewPlanner(baseline, blobs.read, fake)
+	p := NewPlanner(baseline, blobs.read, fake, 0, 0)
 	p.ensureBaselineFP(context.Background())
 
 	targetFP := Fingerprint{sharedFile: 1_000_000}
@@ -456,7 +456,7 @@ func TestPickSimilar_TiedScore_BrokenBySize(t *testing.T) {
 			digest.FromBytes(farCorrect):  {shared: 500},
 		},
 	}
-	p := NewPlanner(baseline, blobs.read, fake)
+	p := NewPlanner(baseline, blobs.read, fake, 0, 0)
 	p.ensureBaselineFP(context.Background())
 
 	targetFP := Fingerprint{shared: 500}
@@ -493,7 +493,7 @@ func TestPickSimilar_TiedScoreAndSize_BrokenByDigestOrder(t *testing.T) {
 			dB: {shared: 500},
 		},
 	}
-	p := NewPlanner(baseline, blobs.read, fake)
+	p := NewPlanner(baseline, blobs.read, fake, 0, 0)
 	p.ensureBaselineFP(context.Background())
 
 	targetFP := Fingerprint{shared: 500}
@@ -503,7 +503,7 @@ func TestPickSimilar_TiedScoreAndSize_BrokenByDigestOrder(t *testing.T) {
 }
 
 func TestPickSimilar_EmptyBaseline_ReturnsFalse(t *testing.T) {
-	p := NewPlanner(nil, func(_ digest.Digest) ([]byte, error) { return nil, nil }, &fakeFingerprinter{})
+	p := NewPlanner(nil, func(_ digest.Digest) ([]byte, error) { return nil, nil }, &fakeFingerprinter{}, 0, 0)
 	p.ensureBaselineFP(context.Background())
 	_, ok := p.pickSimilar(Fingerprint{digest.FromBytes([]byte("x")): 1}, 100)
 	require.False(t, ok)
@@ -538,7 +538,7 @@ func TestPlanner_Run_PrefersContentMatchOverSizeClosest(t *testing.T) {
 		},
 	}
 
-	p := NewPlanner(baseline, blobs.read, fake)
+	p := NewPlanner(baseline, blobs.read, fake, 0, 0)
 	entries, _, err := p.Run(context.Background(), []diff.BlobRef{
 		{Digest: digest.FromBytes(target), Size: int64(len(target)), MediaType: "m"},
 	})

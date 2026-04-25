@@ -62,7 +62,7 @@ func TestEncodeShipped_ForcesFullOnCrossImageDup(t *testing.T) {
 			pool.countShipped(s.Digest)
 		}
 	}
-	require.NoError(t, encodeShipped(ctx, pool, []*pairPlan{p1, p2}, "off", nil, nil))
+	require.NoError(t, encodeShipped(ctx, pool, []*pairPlan{p1, p2}, "off", nil, nil, 0, 0))
 
 	for _, s := range p1.Shipped {
 		entry := pool.entries[s.Digest]
