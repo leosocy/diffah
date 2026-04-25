@@ -23,7 +23,7 @@ By participating in this project you agree to abide by the
 
 | Requirement | Why                                              |
 |-------------|--------------------------------------------------|
-| Go ≥ 1.25.4 | matches the version in `.tool-versions` and CI   |
+| Go ≥ 1.25.9 | matches the version in `.tool-versions` and CI   |
 | `zstd` ≥ 1.5 on `$PATH` | required by integration tests for intra-layer patching |
 | `golangci-lint` v2.11+ | matches the version pinned in CI         |
 | `make`, `git` | standard developer tooling                     |

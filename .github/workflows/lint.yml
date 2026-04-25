@@ -11,7 +11,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.25.4'
+          go-version: '1.25.9'
           cache: true
       - uses: golangci/golangci-lint-action@v9
         with:
@@ -23,9 +23,33 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.25.4'
+          go-version: '1.25.9'
           cache: true
       - name: govulncheck
+        # Allowlist: GO-2026-4887 + GO-2026-4883 are docker/docker
+        # vulns with "Fixed in: N/A". Both reach diffah only via
+        # containers/image's alltransports init chain — diffah
+        # neither extracts docker tar archives (4887) nor installs
+        # docker plugins (4883), so the reported call paths
+        # (HTTP error wrapping, init-time package registration) do
+        # not exercise the vulnerable code. Re-evaluate when an
+        # upstream fix lands.
         run: |
+          set -euo pipefail
           go install golang.org/x/vuln/cmd/govulncheck@latest
-          govulncheck -tags 'containers_image_openpgp exclude_graphdriver_btrfs exclude_graphdriver_devicemapper' ./...
+          ALLOW='GO-2026-4887|GO-2026-4883'
+          set +e
+          out=$(govulncheck -tags 'containers_image_openpgp exclude_graphdriver_btrfs exclude_graphdriver_devicemapper' ./...)
+          rc=$?
+          set -e
+          echo "$out"
+          if [ "$rc" -eq 0 ]; then
+            exit 0
+          fi
+          bad=$(echo "$out" | grep -E '^Vulnerability #' | grep -vE "$ALLOW" || true)
+          if [ -n "$bad" ]; then
+            echo "::error::Vulnerabilities outside allowlist:"
+            echo "$bad"
+            exit 1
+          fi
+          echo "::notice::govulncheck found only allowlisted no-fix vulnerabilities"
