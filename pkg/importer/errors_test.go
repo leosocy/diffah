@@ -62,6 +62,32 @@ func TestErrApplyInvariantFailed_Format(t *testing.T) {
 	}
 }
 
+func TestErrApplyInvariantFailed_Error_OmitsZeroCountsSuffix(t *testing.T) {
+	err := &ErrApplyInvariantFailed{
+		ImageName: "svc-a",
+		Reason:    "layer size mismatch: sha256:abc want 100 got 999",
+	}
+	got := err.Error()
+	want := `image "svc-a" reconstructed mismatch (layer size mismatch: sha256:abc want 100 got 999)`
+	if got != want {
+		t.Errorf("Error()\n  got:  %q\n  want: %q", got, want)
+	}
+}
+
+func TestErrApplyInvariantFailed_Error_KeepsCountsWhenNonzero(t *testing.T) {
+	err := &ErrApplyInvariantFailed{
+		ImageName:  "svc-b",
+		Reason:     "layer set mismatch",
+		Missing:    []digest.Digest{"sha256:m1"},
+		Unexpected: []digest.Digest{"sha256:u1"},
+	}
+	got := err.Error()
+	want := `image "svc-b" reconstructed mismatch (layer set mismatch): missing 1 layer(s), unexpected 1 layer(s)`
+	if got != want {
+		t.Errorf("Error()\n  got:  %q\n  want: %q", got, want)
+	}
+}
+
 // TestSentinels_Categorized verifies that errs.Classify routes each new
 // importer sentinel to CategoryContent and surfaces a non-empty remediation
 // hint (proving the sentinel implements both Categorized and Advised).

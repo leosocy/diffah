@@ -63,14 +63,19 @@ func (*ErrMissingBaselineReuseLayer) NextAction() string {
 // importer correctness errors live in one file.
 type ErrApplyInvariantFailed struct {
 	ImageName  string
-	Expected   []digest.Digest
-	Got        []digest.Digest
 	Missing    []digest.Digest
 	Unexpected []digest.Digest
 	Reason     string
 }
 
 func (e *ErrApplyInvariantFailed) Error() string {
+	// Size-mismatch and manifest-digest-mismatch paths populate Reason
+	// only and leave both slices empty; suppressing the "missing 0 /
+	// unexpected 0" suffix keeps the message honest in those cases.
+	if len(e.Missing) == 0 && len(e.Unexpected) == 0 {
+		return fmt.Sprintf("image %q reconstructed mismatch (%s)",
+			e.ImageName, e.Reason)
+	}
 	return fmt.Sprintf("image %q reconstructed mismatch (%s): missing %d layer(s), unexpected %d layer(s)",
 		e.ImageName, e.Reason, len(e.Missing), len(e.Unexpected))
 }
