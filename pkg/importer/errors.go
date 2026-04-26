@@ -32,12 +32,8 @@ func (e *ErrMissingPatchSource) Error() string {
 
 func (e *ErrMissingPatchSource) Category() errs.Category { return errs.CategoryContent }
 
-func (e *ErrMissingPatchSource) NextAction() string {
-	return fmt.Sprintf(
-		"image %s: re-run 'diffah diff' against this baseline (patch source %s missing) "+
-			"or apply against the original baseline that produced this delta",
-		e.ImageName, e.PatchFromDigest,
-	)
+func (*ErrMissingPatchSource) NextAction() string {
+	return "re-run 'diffah diff' against this baseline, or apply against the original baseline that produced this delta"
 }
 
 // ErrMissingBaselineReuseLayer (B2) — baseline lacks a layer that the
@@ -57,12 +53,8 @@ func (e *ErrMissingBaselineReuseLayer) Error() string {
 
 func (e *ErrMissingBaselineReuseLayer) Category() errs.Category { return errs.CategoryContent }
 
-func (e *ErrMissingBaselineReuseLayer) NextAction() string {
-	return fmt.Sprintf(
-		"image %s: baseline must include layer %s which this delta did not ship — "+
-			"pin/add it or re-run diff with a wider baseline",
-		e.ImageName, e.LayerDigest,
-	)
+func (*ErrMissingBaselineReuseLayer) NextAction() string {
+	return "baseline must include this layer — pin/add it, or re-run diff with a wider baseline"
 }
 
 // ErrApplyInvariantFailed — Stage 3 end-to-end check rejected the dest's
@@ -84,9 +76,8 @@ func (e *ErrApplyInvariantFailed) Error() string {
 
 func (e *ErrApplyInvariantFailed) Category() errs.Category { return errs.CategoryContent }
 
-func (e *ErrApplyInvariantFailed) NextAction() string {
-	return fmt.Sprintf("image %s: dest may be partially written; manual cleanup recommended",
-		e.ImageName)
+func (*ErrApplyInvariantFailed) NextAction() string {
+	return "dest may be partially written; manual cleanup recommended"
 }
 
 // isBlobNotFound returns true when err signals "the requested blob does not
@@ -96,10 +87,19 @@ func (e *ErrApplyInvariantFailed) NextAction() string {
 //
 // Three real-world signals are matched, mirroring the existing pattern in
 // pkg/diff/classify_registry.go::ClassifyRegistryErr:
-//   - os.IsNotExist (dir:, oci:, oci-archive: surface *os.PathError ENOENT)
+//   - os.IsNotExist (dir:, oci:, oci-archive: surface *os.PathError ENOENT).
+//     Callers must wrap this around blob-only fetch paths to avoid
+//     misclassifying ENOENT on manifest/index files.
 //   - "Unknown blob" substring (docker-archive: returns this verbatim)
 //   - "blob unknown" substring (registry transport per OCI distribution
 //     spec: errcode.Error{Code: ErrorCodeBlobUnknown} → "blob unknown to registry")
+//
+// Conservative gap: registry 404s with non-JSON response bodies bypass this
+// predicate (containers-image wraps them as "error parsing HTTP 404 response
+// body: ...") and remain CategoryEnvironment. Adding a fourth needle for
+// "http 404" risks false-positives across unrelated 404s, so we keep the
+// predicate conservative; pre-flight (Phase 3) is the catch-all for any
+// transport whose 404 shape we don't recognize.
 //
 // Wired by Tasks 1.3 (servePatch) and 1.4 (GetBlob) in the same PR1 series;
 // declared here so the predicate ships and gets unit-tested (Task 1.2)
@@ -122,3 +122,12 @@ func isBlobNotFound(err error) bool {
 	}
 	return false
 }
+
+var (
+	_ errs.Categorized = (*ErrMissingPatchSource)(nil)
+	_ errs.Categorized = (*ErrMissingBaselineReuseLayer)(nil)
+	_ errs.Categorized = (*ErrApplyInvariantFailed)(nil)
+	_ errs.Advised     = (*ErrMissingPatchSource)(nil)
+	_ errs.Advised     = (*ErrMissingBaselineReuseLayer)(nil)
+	_ errs.Advised     = (*ErrApplyInvariantFailed)(nil)
+)
