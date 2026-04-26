@@ -1,5 +1,35 @@
 # Changelog
 
+## [Unreleased] — Apply correctness & resilience (Track A)
+
+### Behavior changes
+
+- **`--strict` semantic widens.** In addition to the existing "baseline
+  spec missing for image-X is an error," `--strict` now also rejects
+  baselines that are present but incomplete (missing patch sources or
+  missing reuse layers needed by the delta). Without `--strict` (default
+  partial mode), affected images are skipped and a final summary lists
+  them; the run still exits 0 if at least one image succeeded.
+
+### New invariants
+
+- Every successful `diffah apply` / `unbundle` re-reads the destination
+  manifest and proves the layer set matches the sidecar's expectation.
+  Failures produce exit 4 with explicit Missing/Unexpected diagnostics.
+
+### Categorized errors
+
+- B1 (`ErrMissingPatchSource`) and B2 (`ErrMissingBaselineReuseLayer`)
+  surface from `apply` / `unbundle` with actionable hints. Auth, TLS,
+  network, and timeout errors retain their existing classification.
+
+### Performance
+
+- Pre-flight is built into apply; failure modes for incomplete baselines
+  are now detected before the first layer body is fetched. Pre-flight
+  shares the baseline manifest fetch with apply (≤ 2 GETs per baseline
+  across the full pipeline).
+
 ## [Unreleased] — Phase 4: Delta quality & throughput
 
 ### Behavior changes
