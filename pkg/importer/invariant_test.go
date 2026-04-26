@@ -137,3 +137,30 @@ func TestVerifyApplyInvariant_LayerMissing(t *testing.T) {
 		t.Errorf("Unexpected should be empty, got %v", unexpected)
 	}
 }
+
+func TestVerifyApplyInvariant_AcrossSchemaConversion(t *testing.T) {
+	// Two manifests with the same layer set but different mediaTypes
+	// (OCI v1 vs Docker schema 2). Their bytes — and therefore their
+	// manifest digests — differ, but the invariant must still report no
+	// layer-set diff because copy.Image legitimately rewrites manifests
+	// across schema conversions; layer bytes and sizes never change.
+	ociBytes := []byte(`{"schemaVersion":2,"mediaType":"application/vnd.oci.image.manifest.v1+json","config":{"mediaType":"application/vnd.oci.image.config.v1+json","digest":"sha256:cfg","size":10},"layers":[{"mediaType":"application/vnd.oci.image.layer.v1.tar+gzip","digest":"sha256:l1","size":100}]}`)
+	dockerBytes := []byte(`{"schemaVersion":2,"mediaType":"application/vnd.docker.distribution.manifest.v2+json","config":{"mediaType":"application/vnd.docker.container.image.v1+json","digest":"sha256:cfg","size":10},"layers":[{"mediaType":"application/vnd.docker.image.rootfs.diff.tar.gzip","digest":"sha256:l1","size":100}]}`)
+
+	expectedLayers, _, err := parseManifestLayers(ociBytes,
+		"application/vnd.oci.image.manifest.v1+json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	actualLayers, _, err := parseManifestLayers(dockerBytes,
+		"application/vnd.docker.distribution.manifest.v2+json")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	missing, unexpected := layerSetDiff(expectedLayers, actualLayers)
+	if len(missing)+len(unexpected) != 0 {
+		t.Errorf("layer set must match across schema conversion; missing=%v unexpected=%v",
+			missing, unexpected)
+	}
+}
