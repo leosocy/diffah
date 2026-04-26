@@ -4,12 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/opencontainers/go-digest"
 	"go.podman.io/image/v5/types"
 
 	"github.com/leosocy/diffah/pkg/diff"
+	"github.com/leosocy/diffah/pkg/progress"
 )
 
 func TestComputeRequiredBaselineDigests(t *testing.T) {
@@ -203,4 +206,86 @@ func (f *fakeManifestSource) GetManifest(context.Context, *digest.Digest) ([]byt
 		return nil, "", err
 	}
 	return raw, mf.MediaType, nil
+}
+
+func TestRunPreflight_MultiImage_PartialFailures(t *testing.T) {
+	bundle, resolved := buildMultiImagePreflightFixture(t)
+	results, anyFail, err := RunPreflight(context.Background(), bundle, resolved, nil, progress.NewDiscard())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("len(results) = %d, want 2", len(results))
+	}
+	if !anyFail {
+		t.Error("anyFail should be true")
+	}
+	if results[0].Status != PreflightOK {
+		t.Errorf("svc-a Status = %v, want OK", results[0].Status)
+	}
+	if results[1].Status != PreflightMissingReuseLayer {
+		t.Errorf("svc-b Status = %v, want MissingReuseLayer", results[1].Status)
+	}
+}
+
+// buildMultiImagePreflightFixture extends buildPreflightFixture to produce
+// two images, each with its own target manifest blob and synthetic baseline
+// source. svc-a's baseline contains the full required digest set; svc-b's
+// baseline is missing "sha256:reuse-b".
+func buildMultiImagePreflightFixture(t *testing.T) (*extractedBundle, []resolvedBaseline) {
+	t.Helper()
+	mfA := []byte(`{"schemaVersion":2,"mediaType":"application/vnd.oci.image.manifest.v1+json","config":{"mediaType":"application/vnd.oci.image.config.v1+json","digest":"sha256:cfg-a","size":10},"layers":[{"mediaType":"application/vnd.oci.image.layer.v1.tar+gzip","digest":"sha256:reuse-a","size":100}]}`)
+	mfADigest := digest.FromBytes(mfA)
+	mfB := []byte(`{"schemaVersion":2,"mediaType":"application/vnd.oci.image.manifest.v1+json","config":{"mediaType":"application/vnd.oci.image.config.v1+json","digest":"sha256:cfg-b","size":10},"layers":[{"mediaType":"application/vnd.oci.image.layer.v1.tar+gzip","digest":"sha256:reuse-b","size":200}]}`)
+	mfBDigest := digest.FromBytes(mfB)
+
+	dir := t.TempDir()
+	algoDir := filepath.Join(dir, "sha256")
+	if err := os.MkdirAll(algoDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(algoDir, mfADigest.Encoded()), mfA, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(algoDir, mfBDigest.Encoded()), mfB, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	sidecar := &diff.Sidecar{
+		Blobs: map[digest.Digest]diff.BlobEntry{
+			mfADigest:      {Encoding: diff.EncodingFull, Size: int64(len(mfA))},
+			mfBDigest:      {Encoding: diff.EncodingFull, Size: int64(len(mfB))},
+			"sha256:cfg-a": {Encoding: diff.EncodingFull, Size: 10},
+			"sha256:cfg-b": {Encoding: diff.EncodingFull, Size: 10},
+		},
+		Images: []diff.ImageEntry{
+			{Name: "svc-a", Target: diff.TargetRef{ManifestDigest: mfADigest, MediaType: "application/vnd.oci.image.manifest.v1+json"}},
+			{Name: "svc-b", Target: diff.TargetRef{ManifestDigest: mfBDigest, MediaType: "application/vnd.oci.image.manifest.v1+json"}},
+		},
+	}
+	bundle := &extractedBundle{blobDir: dir, sidecar: sidecar}
+
+	resolved := []resolvedBaseline{
+		{Name: "svc-a", Src: &fakeManifestSource{layers: []digest.Digest{"sha256:cfg-a", "sha256:reuse-a"}}},
+		{Name: "svc-b", Src: &fakeManifestSource{layers: []digest.Digest{"sha256:cfg-b"}}},
+	}
+	return bundle, resolved
+}
+
+func TestPreflightStatusString(t *testing.T) {
+	cases := []struct {
+		s    PreflightStatus
+		want string
+	}{
+		{PreflightOK, "ok"},
+		{PreflightMissingPatchSource, "missing-patch-source"},
+		{PreflightMissingReuseLayer, "missing-reuse-layer"},
+		{PreflightError, "error"},
+		{PreflightSchemaError, "schema-error"},
+	}
+	for _, c := range cases {
+		if got := c.s.String(); got != c.want {
+			t.Errorf("PreflightStatus(%d).String() = %q, want %q", c.s, got, c.want)
+		}
+	}
 }

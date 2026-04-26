@@ -3,11 +3,13 @@ package importer
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"github.com/opencontainers/go-digest"
 	"go.podman.io/image/v5/types"
 
 	"github.com/leosocy/diffah/pkg/diff"
+	"github.com/leosocy/diffah/pkg/progress"
 )
 
 // PreflightStatus classifies the outcome of scanning a single image's
@@ -181,4 +183,79 @@ func configDigestOf(raw []byte) (digest.Digest, error) {
 		return "", err
 	}
 	return m.Config.Digest, nil
+}
+
+// RunPreflight scans every image in the bundle against its resolved baseline
+// and returns per-image results plus an aggregate failure flag. A
+// PreflightSchemaError on any image is fatal and surfaces via the err return
+// value (regardless of strict/partial mode), because an unparseable target
+// manifest indicates a corrupt or unsupported delta. Other non-OK statuses
+// are recorded in the result slice for the caller (Import) to route on.
+//
+// The reporter's Phase("preflight") signal lets progress UIs distinguish the
+// scan stage from the apply stage. Per-image events go through slog at info
+// level for streaming visibility — a structured JSON line per image matches
+// the existing import lifecycle telemetry.
+func RunPreflight(
+	ctx context.Context,
+	bundle *extractedBundle,
+	resolved []resolvedBaseline,
+	_ *types.SystemContext,
+	reporter progress.Reporter,
+) ([]PreflightResult, bool, error) {
+	resolvedByName := make(map[string]resolvedBaseline, len(resolved))
+	for _, r := range resolved {
+		resolvedByName[r.Name] = r
+	}
+	if reporter != nil {
+		reporter.Phase("preflight")
+	}
+
+	results := make([]PreflightResult, 0, len(bundle.sidecar.Images))
+	anyFail := false
+	for _, img := range bundle.sidecar.Images {
+		if err := ctx.Err(); err != nil {
+			return results, anyFail, err
+		}
+		rb, ok := resolvedByName[img.Name]
+		if !ok {
+			results = append(results, PreflightResult{
+				ImageName: img.Name, Status: PreflightError,
+				Err: fmt.Errorf("baseline not resolved for image %q", img.Name),
+			})
+			anyFail = true
+			continue
+		}
+		r := scanOneImage(ctx, bundle, img, rb.Src)
+		if r.Status == PreflightSchemaError {
+			return results, true, r.Err
+		}
+		if r.Status != PreflightOK {
+			anyFail = true
+		}
+		results = append(results, r)
+		log().InfoContext(ctx, "preflight",
+			"image", r.ImageName, "status", r.Status.String(),
+			"missing_patch_sources", len(r.MissingPatchSources),
+			"missing_reuse_layers", len(r.MissingReuseLayers))
+	}
+	return results, anyFail, nil
+}
+
+// String returns a human-readable label for the status. Used by slog
+// structured logging and the final summary renderer.
+func (s PreflightStatus) String() string {
+	switch s {
+	case PreflightOK:
+		return "ok"
+	case PreflightMissingPatchSource:
+		return "missing-patch-source"
+	case PreflightMissingReuseLayer:
+		return "missing-reuse-layer"
+	case PreflightError:
+		return "error"
+	case PreflightSchemaError:
+		return "schema-error"
+	}
+	return "unknown"
 }
