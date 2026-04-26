@@ -247,9 +247,22 @@ func stripLayerFromOCIArchive(t *testing.T, srcPath, dstPath string, omit digest
 	writeOCIArchive(t, dstPath, rewritten)
 }
 
-// writeOCIArchive writes a flat map of header-name -> bytes as a plain tar
-// archive at dstPath. Names are written in sorted order so the resulting tar
-// is deterministic — useful when tests are reused across runs.
+// writeOCIArchive writes a flat map of header-name -> file bytes as a plain
+// tar archive at dstPath. Names are written in sorted order so the resulting
+// tar is deterministic — useful when tests are reused across runs.
+//
+// Directory entries for every parent of every file are synthesized explicitly
+// (Typeflag=TypeDir, mode 0o755, UID/GID 0). They are required: the
+// oci-archive: transport extracts via go.podman.io/storage/pkg/archive.Unpack
+// which, for any tar entry whose parent directory is missing on disk, calls
+// idtools.MkdirAllAndChownNew(parent, 0o777, rootIDs) and then SafeChown to
+// (uid=0, gid=0). On Linux non-root (e.g. the GitHub Ubuntu runner where
+// uid=1001) that chown returns EPERM and the whole untar fails with
+// "operation not permitted". On macOS SafeChown's darwin branch records the
+// requested uid/gid as an xattr and rewrites uid to os.Getuid() before the
+// real os.Chown call, masking the bug locally. Emitting the dir entries
+// upfront means Unpack hits the tar.TypeDir path (plain os.Mkdir, no chown
+// when NoLchown=true) instead of the implied-directory path.
 func writeOCIArchive(t *testing.T, dstPath string, entries map[string][]byte) {
 	t.Helper()
 	out, err := os.Create(dstPath)
@@ -259,16 +272,28 @@ func writeOCIArchive(t *testing.T, dstPath string, entries map[string][]byte) {
 	tw := tar.NewWriter(out)
 	defer tw.Close()
 
-	names := make([]string, 0, len(entries))
-	for name := range entries {
-		names = append(names, name)
+	dirs := collectParentDirs(entries)
+	allNames := make([]string, 0, len(entries)+len(dirs))
+	for name := range dirs {
+		allNames = append(allNames, name)
 	}
-	sort.Strings(names)
+	for name := range entries {
+		allNames = append(allNames, name)
+	}
+	// Lexicographic sort guarantees parent dirs precede their children
+	// (e.g. "blobs/" < "blobs/sha256/" < "blobs/sha256/<hex>").
+	sort.Strings(allNames)
 
-	// Skip directory headers entirely — oci-archive does not require them and
-	// readers create parent directories implicitly when a regular file is
-	// extracted.
-	for _, name := range names {
+	for _, name := range allNames {
+		if _, isDir := dirs[name]; isDir {
+			hdr := &tar.Header{
+				Name:     name,
+				Mode:     0o755,
+				Typeflag: tar.TypeDir,
+			}
+			require.NoError(t, tw.WriteHeader(hdr), "WriteHeader dir %s", name)
+			continue
+		}
 		payload := entries[name]
 		hdr := &tar.Header{
 			Name:     name,
@@ -280,4 +305,20 @@ func writeOCIArchive(t *testing.T, dstPath string, entries map[string][]byte) {
 		_, err := tw.Write(payload)
 		require.NoErrorf(t, err, "Write %s", name)
 	}
+}
+
+// collectParentDirs returns the set of all unique parent directory names
+// (with trailing slash, as canonical for tar.TypeDir) for every file in
+// entries. The root "." / "" is excluded — readers handle the destination
+// directory implicitly.
+func collectParentDirs(entries map[string][]byte) map[string]struct{} {
+	dirs := make(map[string]struct{})
+	for name := range entries {
+		dir := filepath.Dir(name)
+		for dir != "." && dir != "/" && dir != "" {
+			dirs[dir+"/"] = struct{}{}
+			dir = filepath.Dir(dir)
+		}
+	}
+	return dirs
 }
