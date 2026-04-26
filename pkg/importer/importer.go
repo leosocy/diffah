@@ -101,7 +101,8 @@ func Import(ctx context.Context, opts Options) error {
 		resolvedByName[r.Name] = r
 	}
 
-	imported, skipped, err := importEachImage(ctx, bundle, resolvedByName, outputs, opts)
+	cache := newBaselineBlobCache()
+	imported, skipped, err := importEachImage(ctx, bundle, resolvedByName, outputs, opts, cache)
 	if err != nil {
 		return err
 	}
@@ -122,6 +123,7 @@ func importEachImage(
 	resolvedByName map[string]resolvedBaseline,
 	outputs map[string]string,
 	opts Options,
+	cache *baselineBlobCache,
 ) (int, []string, error) {
 	imported := 0
 	skipped := make([]string, 0)
@@ -144,7 +146,7 @@ func importEachImage(
 			return 0, nil, fmt.Errorf("parse output reference for image %q: %w", img.Name, err)
 		}
 		if err := composeImage(ctx, img, bundle, rb, destRef,
-			opts.SystemContext, opts.AllowConvert, opts.reporter()); err != nil {
+			opts.SystemContext, opts.AllowConvert, opts.reporter(), cache); err != nil {
 			return 0, nil, err
 		}
 		imported++

@@ -40,6 +40,10 @@
   (decoder cap was raised, never lowered).
 - Sidecar schema unchanged.
 
+### Bug fixes
+
+- **Importer baseline-blob dedup (Phase 2 Goal 4 regression).** `diffah apply` and `diffah unbundle` now fetch each distinct baseline blob digest at most once per invocation, regardless of how many shipped patches reference it or how many images in a multi-image bundle share it. Previously, a baseline layer used both as `PatchFromDigest` and as a baseline-only layer was fetched twice; in multi-image bundles, blobs shared across pairs were fetched once per pair. Backed by a per-`Import()` `singleflight`-coordinated cache mirroring the export-side `pkg/exporter/fpcache.go`. `bundleImageSource.HasThreadSafeGetBlob` now delegates to the underlying baseline source, unlocking parallel layer copy via `copy.Image` for `docker://` baselines.
+
 ### Internal
 
 - New `pkg/exporter/workerpool.go` (errgroup-based bounded pool).
