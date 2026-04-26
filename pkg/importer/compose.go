@@ -84,6 +84,12 @@ func (s *bundleImageSource) GetBlob(
 	if !ok {
 		data, err := s.fetchVerifiedBaselineBlob(ctx, info.Digest, cache)
 		if err != nil {
+			if isBlobNotFound(err) {
+				return nil, 0, &ErrMissingBaselineReuseLayer{
+					ImageName:   s.imageName,
+					LayerDigest: info.Digest,
+				}
+			}
 			return nil, 0, fmt.Errorf("baseline serve %s: %w", info.Digest, err)
 		}
 		return io.NopCloser(bytes.NewReader(data)), int64(len(data)), nil

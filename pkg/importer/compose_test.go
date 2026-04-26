@@ -341,3 +341,36 @@ func (*fakeBlobNotFoundSource) LayerInfosForCopy(context.Context, *digest.Digest
 func (*fakeBlobNotFoundSource) GetBlob(context.Context, types.BlobInfo, types.BlobInfoCache) (io.ReadCloser, int64, error) {
 	return nil, 0, fmt.Errorf("fetching blob: blob unknown to registry")
 }
+
+// TestGetBlob_BaselineOnlyMissing_WrapsB2 verifies that when GetBlob's
+// baseline-only-reuse branch (the path taken when the target manifest
+// references a layer the bundle did not ship) hits a "blob not found"
+// signal from the baseline, the error is wrapped as
+// *ErrMissingBaselineReuseLayer carrying the image name and the missing
+// layer digest. Auth/TLS/network errors keep their existing fmt.Errorf
+// wrapping (covered indirectly by classify_registry.go's
+// CategoryEnvironment classification).
+func TestGetBlob_BaselineOnlyMissing_WrapsB2(t *testing.T) {
+	missing := digest.FromBytes([]byte("missing-baseline-layer"))
+
+	src := &bundleImageSource{
+		blobDir:   t.TempDir(),
+		imageName: "svc-y",
+		baseline:  &fakeBlobNotFoundSource{},
+		cache:     newBaselineBlobCache(),
+		sidecar:   &diff.Sidecar{Blobs: map[digest.Digest]diff.BlobEntry{}},
+	}
+	_, _, err := src.GetBlob(context.Background(),
+		types.BlobInfo{Digest: missing}, nil)
+
+	var b2 *ErrMissingBaselineReuseLayer
+	if !errors.As(err, &b2) {
+		t.Fatalf("expected ErrMissingBaselineReuseLayer, got %T: %v", err, err)
+	}
+	if b2.LayerDigest != missing {
+		t.Errorf("LayerDigest = %v, want %v", b2.LayerDigest, missing)
+	}
+	if b2.ImageName != "svc-y" {
+		t.Errorf("ImageName = %v, want svc-y", b2.ImageName)
+	}
+}
