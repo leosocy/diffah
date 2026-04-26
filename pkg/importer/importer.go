@@ -149,6 +149,9 @@ func importEachImage(
 			opts.SystemContext, opts.AllowConvert, opts.reporter(), cache); err != nil {
 			return 0, nil, err
 		}
+		if err := verifyApplyInvariant(ctx, img, bundle, destRef, opts.SystemContext); err != nil {
+			return 0, nil, err
+		}
 		imported++
 	}
 	return imported, skipped, nil

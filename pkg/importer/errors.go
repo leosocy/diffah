@@ -71,6 +71,10 @@ type ErrApplyInvariantFailed struct {
 }
 
 func (e *ErrApplyInvariantFailed) Error() string {
+	if len(e.Missing) == 0 && len(e.Unexpected) == 0 {
+		return fmt.Sprintf("image %q reconstructed mismatch (%s)",
+			e.ImageName, e.Reason)
+	}
 	return fmt.Sprintf("image %q reconstructed mismatch (%s): missing %d layer(s), unexpected %d layer(s)",
 		e.ImageName, e.Reason, len(e.Missing), len(e.Unexpected))
 }
