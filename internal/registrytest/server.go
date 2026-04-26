@@ -45,14 +45,25 @@ type BlobRequest struct {
 	Digest digest.Digest
 }
 
+// ManifestRequest records a single GET/HEAD for /v2/<repo>/manifests/<reference>.
+// Reference may be a tag (e.g. "v1") or a digest ("sha256:..."). Tracked so
+// integration tests can budget how many times preflight + apply collectively
+// pull a baseline manifest.
+type ManifestRequest struct {
+	Repo      string
+	Reference string
+	Method    string
+}
+
 // Server is the in-process registry returned by New.
 type Server struct {
 	httptest *httptest.Server
 	caPEM    []byte
 	certDir  string
 
-	mu       sync.Mutex
-	blobHits []BlobRequest
+	mu           sync.Mutex
+	blobHits     []BlobRequest
+	manifestHits []ManifestRequest
 }
 
 // New starts a fresh in-process registry and registers t.Cleanup to
@@ -118,7 +129,21 @@ func (s *Server) BlobHits() []BlobRequest {
 	return out
 }
 
-var blobPathRegex = regexp.MustCompile(`^/v2/(.+)/blobs/(sha256:[0-9a-f]+)$`)
+// ManifestHits returns every /v2/<repo>/manifests/<reference> request
+// observed. Used by preflight tests to assert that pre-flight does not
+// regress baseline manifest GET counts.
+func (s *Server) ManifestHits() []ManifestRequest {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]ManifestRequest, len(s.manifestHits))
+	copy(out, s.manifestHits)
+	return out
+}
+
+var (
+	blobPathRegex     = regexp.MustCompile(`^/v2/(.+)/blobs/(sha256:[0-9a-f]+)$`)
+	manifestPathRegex = regexp.MustCompile(`^/v2/(.+)/manifests/(.+)$`)
+)
 
 func (s *Server) accessLogMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -126,6 +151,12 @@ func (s *Server) accessLogMiddleware(next http.Handler) http.Handler {
 			s.mu.Lock()
 			s.blobHits = append(s.blobHits, BlobRequest{
 				Repo: m[1], Digest: digest.Digest(m[2]),
+			})
+			s.mu.Unlock()
+		} else if m := manifestPathRegex.FindStringSubmatch(r.URL.Path); m != nil {
+			s.mu.Lock()
+			s.manifestHits = append(s.manifestHits, ManifestRequest{
+				Repo: m[1], Reference: m[2], Method: r.Method,
 			})
 			s.mu.Unlock()
 		}
