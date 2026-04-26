@@ -116,9 +116,7 @@ func Import(ctx context.Context, opts Options) error {
 // baseline was resolved. Images without a resolved baseline are recorded in
 // the skipped list and not composed; --strict is enforced earlier by
 // resolveBaselines, so reaching here with an unresolved image implies the
-// caller opted into non-strict mode. cache is the per-Import baselineBlobCache
-// shared across every image so distinct baseline blob digests are fetched
-// at most once per Import() call.
+// caller opted into non-strict mode.
 func importEachImage(
 	ctx context.Context,
 	bundle *extractedBundle,

@@ -5,7 +5,6 @@ package cmd_test
 import (
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
 
@@ -130,10 +129,8 @@ func TestUnbundleCLI_BaselineBlobsFetchedExactlyOnce_MultiImage(t *testing.T) {
 	require.NoError(t, os.WriteFile(bundleSpecPath, raw, 0o600))
 
 	bundleOut := filepath.Join(tmp, "bundle.tar")
-	cmd := exec.Command(bin, "bundle", bundleSpecPath, bundleOut)
-	cmd.Dir = root
-	out, err := cmd.CombinedOutput()
-	require.NoError(t, err, "bundle failed: %s", string(out))
+	_, stderr, exit := runDiffahBin(t, bin, "bundle", bundleSpecPath, bundleOut)
+	require.Equal(t, 0, exit, "bundle failed: %s", stderr)
 
 	baselineSpec := map[string]any{
 		"baselines": map[string]string{
@@ -159,7 +156,7 @@ func TestUnbundleCLI_BaselineBlobsFetchedExactlyOnce_MultiImage(t *testing.T) {
 
 	before := len(srv.BlobHits())
 
-	_, stderr, exit := runDiffahBin(t, bin,
+	_, stderr, exit = runDiffahBin(t, bin,
 		"unbundle", bundleOut, baselineSpecPath, outputsPath,
 		"--tls-verify=false",
 	)

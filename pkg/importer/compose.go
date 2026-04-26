@@ -212,8 +212,6 @@ func (r *staticSourceRef) DeleteImage(_ context.Context, _ *types.SystemContext)
 // composeImage assembles a single image from bundle blobs + baseline and
 // streams the result to destRef via copy.Image. rb.Src must already be open —
 // this function does not open a new baseline source and does not close rb.Src.
-// cache is the per-Import baselineBlobCache shared across every image so
-// distinct baseline blob digests are fetched at most once per Import() call.
 func composeImage(
 	ctx context.Context,
 	img diff.ImageEntry,
