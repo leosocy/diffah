@@ -108,7 +108,6 @@ func Import(ctx context.Context, opts Options) error {
 		// itself is malformed.
 		return perr
 	}
-
 	if opts.Strict && anyPreflightFail {
 		// Strict mode performs a scan-all-then-abort: every image is
 		// classified before we exit, so the operator sees the complete
@@ -117,32 +116,12 @@ func Import(ctx context.Context, opts Options) error {
 		return abortWithPreflightSummary(preflightResults)
 	}
 
-	applyList := make([]string, 0, len(preflightResults))
-	skippedByPreflight := make(map[string]PreflightResult)
-	for _, r := range preflightResults {
-		if r.Status == PreflightOK {
-			applyList = append(applyList, r.ImageName)
-		} else {
-			skippedByPreflight[r.ImageName] = r
-		}
-	}
-
+	applyList, skippedByPreflight := splitPreflightResults(preflightResults)
 	cache := newBaselineBlobCache()
 	report := importEachImage(ctx, bundle, resolvedByName, outputs, opts, cache, applyList)
 	report.Total = len(bundle.sidecar.Images)
-	for name, r := range skippedByPreflight {
-		report.Results = append(report.Results, ApplyImageResult{
-			ImageName: name,
-			Status:    ApplyImageSkippedPreflight,
-			Err:       preflightResultToErr(r),
-		})
-	}
-
-	renderSummary(os.Stderr, report)
-	log().InfoContext(ctx, "import complete",
-		"imported", report.Successful(), "total", report.Total,
-		"skipped_preflight", len(skippedByPreflight))
-	rep.Phase("done")
+	mergePreflightSkips(&report, skippedByPreflight)
+	finalizeImportReport(ctx, rep, report, len(skippedByPreflight))
 
 	// Partial-mode contract: at least one image must succeed for an
 	// exit-0 outcome. Returning the first non-OK image's error keeps
@@ -152,6 +131,47 @@ func Import(ctx context.Context, opts Options) error {
 		return firstNonOKError(report)
 	}
 	return nil
+}
+
+// mergePreflightSkips appends one ApplyImageSkippedPreflight entry per
+// preflight-rejected image into the apply-time report, mapping the
+// preflight status back to its categorized error sentinel.
+func mergePreflightSkips(report *ApplyReport, skipped map[string]PreflightResult) {
+	for name, r := range skipped {
+		report.Results = append(report.Results, ApplyImageResult{
+			ImageName: name,
+			Status:    ApplyImageSkippedPreflight,
+			Err:       preflightResultToErr(r),
+		})
+	}
+}
+
+// finalizeImportReport renders the final summary to stderr, emits the
+// completion log line, and signals the reporter's terminal "done" phase.
+// Side-effect-only — does not consult the report for return values.
+func finalizeImportReport(ctx context.Context, rep progress.Reporter, report ApplyReport, skippedCount int) {
+	renderSummary(os.Stderr, report)
+	log().InfoContext(ctx, "import complete",
+		"imported", report.Successful(), "total", report.Total,
+		"skipped_preflight", skippedCount)
+	rep.Phase("done")
+}
+
+// splitPreflightResults partitions per-image PreflightResult outcomes into
+// the apply-list (PreflightOK) and the skipped-by-preflight map (everything
+// else). Pulling this out of Import keeps the function below the
+// complexity threshold without introducing a struct.
+func splitPreflightResults(results []PreflightResult) ([]string, map[string]PreflightResult) {
+	applyList := make([]string, 0, len(results))
+	skipped := make(map[string]PreflightResult)
+	for _, r := range results {
+		if r.Status == PreflightOK {
+			applyList = append(applyList, r.ImageName)
+		} else {
+			skipped[r.ImageName] = r
+		}
+	}
+	return applyList, skipped
 }
 
 // importEachImage composes and verifies the images named in applyList,
@@ -172,80 +192,79 @@ func importEachImage(
 ) ApplyReport {
 	report := ApplyReport{}
 	for _, name := range applyList {
-		img, ok := findImageByName(bundle.sidecar.Images, name)
-		if !ok {
-			continue
+		result := applyOneImage(ctx, name, bundle, resolvedByName, outputs, opts, cache)
+		report.Results = append(report.Results, result)
+		if opts.Strict && result.Status != ApplyImageOK {
+			return report
 		}
-		rb, ok := resolvedByName[name]
-		if !ok {
-			// Pre-flight already enforced baseline presence for OK
-			// images; reaching here with no resolved baseline is a
-			// programming error — record it as compose-failed.
-			report.Results = append(report.Results, ApplyImageResult{
-				ImageName: name, Status: ApplyImageFailedCompose,
-				Err: fmt.Errorf("no resolved baseline for image %q", name),
-			})
-			if opts.Strict {
-				return report
-			}
-			continue
-		}
-		rawOut, ok := outputs[name]
-		if !ok {
-			report.Results = append(report.Results, ApplyImageResult{
-				ImageName: name, Status: ApplyImageFailedCompose,
-				Err: fmt.Errorf("no output reference in OUTPUT-SPEC for image %q", name),
-			})
-			if opts.Strict {
-				return report
-			}
-			continue
-		}
-		if err := ensureOutputParent(rawOut); err != nil {
-			report.Results = append(report.Results, ApplyImageResult{
-				ImageName: name, Status: ApplyImageFailedCompose,
-				Err: fmt.Errorf("prepare output for image %q: %w", name, err),
-			})
-			if opts.Strict {
-				return report
-			}
-			continue
-		}
-		destRef, err := imageio.ParseReference(rawOut)
-		if err != nil {
-			report.Results = append(report.Results, ApplyImageResult{
-				ImageName: name, Status: ApplyImageFailedCompose,
-				Err: fmt.Errorf("parse output reference for image %q: %w", name, err),
-			})
-			if opts.Strict {
-				return report
-			}
-			continue
-		}
-		if err := composeImage(ctx, img, bundle, rb, destRef,
-			opts.SystemContext, opts.AllowConvert, opts.reporter(), cache); err != nil {
-			report.Results = append(report.Results, ApplyImageResult{
-				ImageName: name, Status: ApplyImageFailedCompose, Err: err,
-			})
-			if opts.Strict {
-				return report
-			}
-			continue
-		}
-		if err := verifyApplyInvariant(ctx, img, bundle, destRef, opts.SystemContext); err != nil {
-			report.Results = append(report.Results, ApplyImageResult{
-				ImageName: name, Status: ApplyImageFailedInvariant, Err: err,
-			})
-			if opts.Strict {
-				return report
-			}
-			continue
-		}
-		report.Results = append(report.Results, ApplyImageResult{
-			ImageName: name, Status: ApplyImageOK,
-		})
 	}
 	return report
+}
+
+// applyOneImage runs the full per-image pipeline (resolve output, compose,
+// invariant verify) and returns the typed result. Splitting this out of
+// importEachImage keeps the loop body short and lets each failure path
+// share one append-and-record idiom.
+func applyOneImage(
+	ctx context.Context,
+	name string,
+	bundle *extractedBundle,
+	resolvedByName map[string]resolvedBaseline,
+	outputs map[string]string,
+	opts Options,
+	cache *baselineBlobCache,
+) ApplyImageResult {
+	img, ok := findImageByName(bundle.sidecar.Images, name)
+	if !ok {
+		return ApplyImageResult{
+			ImageName: name, Status: ApplyImageFailedCompose,
+			Err: fmt.Errorf("image %q not found in sidecar", name),
+		}
+	}
+	rb, ok := resolvedByName[name]
+	if !ok {
+		// Pre-flight already enforced baseline presence for OK images;
+		// reaching here with no resolved baseline is a programming error.
+		return ApplyImageResult{
+			ImageName: name, Status: ApplyImageFailedCompose,
+			Err: fmt.Errorf("no resolved baseline for image %q", name),
+		}
+	}
+	destRef, err := prepareDestRef(name, outputs)
+	if err != nil {
+		return ApplyImageResult{
+			ImageName: name, Status: ApplyImageFailedCompose, Err: err,
+		}
+	}
+	if err := composeImage(ctx, img, bundle, rb, destRef,
+		opts.SystemContext, opts.AllowConvert, opts.reporter(), cache); err != nil {
+		return ApplyImageResult{
+			ImageName: name, Status: ApplyImageFailedCompose, Err: err,
+		}
+	}
+	if err := verifyApplyInvariant(ctx, img, bundle, destRef, opts.SystemContext); err != nil {
+		return ApplyImageResult{
+			ImageName: name, Status: ApplyImageFailedInvariant, Err: err,
+		}
+	}
+	return ApplyImageResult{ImageName: name, Status: ApplyImageOK}
+}
+
+// prepareDestRef looks up the output spec for name, ensures the parent
+// directory exists for file-based transports, and parses the reference.
+func prepareDestRef(name string, outputs map[string]string) (types.ImageReference, error) {
+	rawOut, ok := outputs[name]
+	if !ok {
+		return nil, fmt.Errorf("no output reference in OUTPUT-SPEC for image %q", name)
+	}
+	if err := ensureOutputParent(rawOut); err != nil {
+		return nil, fmt.Errorf("prepare output for image %q: %w", name, err)
+	}
+	destRef, err := imageio.ParseReference(rawOut)
+	if err != nil {
+		return nil, fmt.Errorf("parse output reference for image %q: %w", name, err)
+	}
+	return destRef, nil
 }
 
 func findImageByName(imgs []diff.ImageEntry, name string) (diff.ImageEntry, bool) {
