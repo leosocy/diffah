@@ -2,7 +2,7 @@
 # The `diffah` binary is supplied by the build context — see
 # .goreleaser.yaml. zstd is baked in because intra-layer patching
 # shells out to `zstd --patch-from`.
-FROM alpine:3.20
+FROM alpine:3.23
 
 RUN apk add --no-cache zstd ca-certificates \
  && addgroup -S diffah \
