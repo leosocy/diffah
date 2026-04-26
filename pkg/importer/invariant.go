@@ -129,6 +129,7 @@ func verifyPerLayerSize(
 	return nil
 }
 
+// digestsOf flattens a layer-ref slice to its digest column, preserving order.
 func digestsOf(refs []LayerRef) []digest.Digest {
 	out := make([]digest.Digest, len(refs))
 	for i, r := range refs {
