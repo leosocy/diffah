@@ -3,6 +3,7 @@ package importer
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -13,6 +14,11 @@ import (
 
 	"github.com/leosocy/diffah/pkg/diff"
 	"github.com/leosocy/diffah/pkg/progress"
+)
+
+const (
+	testPreflightSvcA = "svc-a"
+	testPreflightSvcB = "svc-b"
 )
 
 func TestComputeRequiredBaselineDigests(t *testing.T) {
@@ -27,7 +33,7 @@ func TestComputeRequiredBaselineDigests(t *testing.T) {
 			digest.Digest("sha256:cfg"):           {Encoding: diff.EncodingFull, Size: 10},
 		},
 		Images: []diff.ImageEntry{
-			{Name: "svc-a", Target: diff.TargetRef{
+			{Name: testPreflightSvcA, Target: diff.TargetRef{
 				ManifestDigest: mfDigest,
 				MediaType:      "application/vnd.oci.image.manifest.v1+json",
 			}},
@@ -137,7 +143,7 @@ func buildPreflightFixture(t *testing.T, baselineDigests []digest.Digest) (
 			"sha256:cfg":           {Encoding: diff.EncodingFull, Size: 10},
 		},
 		Images: []diff.ImageEntry{{
-			Name:   "svc-a",
+			Name:   testPreflightSvcA,
 			Target: diff.TargetRef{ManifestDigest: mfDigest, MediaType: "application/vnd.oci.image.manifest.v1+json"},
 		}},
 	}
@@ -259,15 +265,15 @@ func buildMultiImagePreflightFixture(t *testing.T) (*extractedBundle, []resolved
 			"sha256:cfg-b": {Encoding: diff.EncodingFull, Size: 10},
 		},
 		Images: []diff.ImageEntry{
-			{Name: "svc-a", Target: diff.TargetRef{ManifestDigest: mfADigest, MediaType: "application/vnd.oci.image.manifest.v1+json"}},
-			{Name: "svc-b", Target: diff.TargetRef{ManifestDigest: mfBDigest, MediaType: "application/vnd.oci.image.manifest.v1+json"}},
+			{Name: testPreflightSvcA, Target: diff.TargetRef{ManifestDigest: mfADigest, MediaType: "application/vnd.oci.image.manifest.v1+json"}},
+			{Name: testPreflightSvcB, Target: diff.TargetRef{ManifestDigest: mfBDigest, MediaType: "application/vnd.oci.image.manifest.v1+json"}},
 		},
 	}
 	bundle := &extractedBundle{blobDir: dir, sidecar: sidecar}
 
 	resolved := []resolvedBaseline{
-		{Name: "svc-a", Src: &fakeManifestSource{layers: []digest.Digest{"sha256:cfg-a", "sha256:reuse-a"}}},
-		{Name: "svc-b", Src: &fakeManifestSource{layers: []digest.Digest{"sha256:cfg-b"}}},
+		{Name: testPreflightSvcA, Src: &fakeManifestSource{layers: []digest.Digest{"sha256:cfg-a", "sha256:reuse-a"}}},
+		{Name: testPreflightSvcB, Src: &fakeManifestSource{layers: []digest.Digest{"sha256:cfg-b"}}},
 	}
 	return bundle, resolved
 }
@@ -287,5 +293,46 @@ func TestPreflightStatusString(t *testing.T) {
 		if got := c.s.String(); got != c.want {
 			t.Errorf("PreflightStatus(%d).String() = %q, want %q", c.s, got, c.want)
 		}
+	}
+}
+
+func TestPreflightResultToErr_B1RoundTrip(t *testing.T) {
+	r := PreflightResult{
+		ImageName:           testPreflightSvcA,
+		Status:              PreflightMissingPatchSource,
+		MissingPatchSources: []digest.Digest{"sha256:patch-src", "sha256:other"},
+	}
+	err := preflightResultToErr(r)
+	var pe *ErrMissingPatchSource
+	if !errors.As(err, &pe) {
+		t.Fatalf("got %T, want *ErrMissingPatchSource", err)
+	}
+	if pe.ImageName != testPreflightSvcA {
+		t.Errorf("ImageName = %q, want svc-a", pe.ImageName)
+	}
+	if pe.PatchFromDigest != "sha256:patch-src" {
+		t.Errorf("PatchFromDigest = %q, want sha256:patch-src", pe.PatchFromDigest)
+	}
+}
+
+func TestPreflightResultToErr_B2RoundTrip(t *testing.T) {
+	r := PreflightResult{
+		ImageName:          testPreflightSvcB,
+		Status:             PreflightMissingReuseLayer,
+		MissingReuseLayers: []digest.Digest{"sha256:reuse"},
+	}
+	err := preflightResultToErr(r)
+	var be *ErrMissingBaselineReuseLayer
+	if !errors.As(err, &be) {
+		t.Fatalf("got %T, want *ErrMissingBaselineReuseLayer", err)
+	}
+	if be.ImageName != testPreflightSvcB || be.LayerDigest != "sha256:reuse" {
+		t.Errorf("got %+v, want svc-b/sha256:reuse", be)
+	}
+}
+
+func TestPreflightResultToErr_OKReturnsNil(t *testing.T) {
+	if got := preflightResultToErr(PreflightResult{Status: PreflightOK}); got != nil {
+		t.Errorf("OK should map to nil error, got %v", got)
 	}
 }

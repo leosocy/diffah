@@ -15,11 +15,20 @@ import (
 	"github.com/leosocy/diffah/pkg/diff"
 )
 
-// TestUnbundleCLI_PartialModeSkipsB2 proves that without --strict, an image
-// with an incomplete baseline (B2 — missing reuse layer) is skipped at
-// preflight and other images still apply. Exit 0; final summary reports
-// "applied 1/2 images" and names the skipped svc.
-func TestUnbundleCLI_PartialModeSkipsB2(t *testing.T) {
+// TestUnbundleCLI_PartialModeRecordsApplyTimeB2 proves that without --strict,
+// when one image's apply path raises B2 (missing baseline reuse layer), the
+// importer records the failure and continues; other images still apply.
+// Exit 0; final summary reports "applied 1/2 images" and names the failing
+// service.
+//
+// Note: this test exercises the apply-time B2 fallback rather than the
+// preflight scan. stripLayerFromOCIArchive removes the blob without
+// rewriting the manifest descriptor, so RunPreflight sees the manifest
+// still listing the layer and classifies as PreflightOK; the missing-blob
+// condition is detected at GetBlob time during composeImage. The
+// preflight-driven B1/B2 classification is covered at unit level in
+// pkg/importer/preflight_test.go (TestScanOneImage_*).
+func TestUnbundleCLI_PartialModeRecordsApplyTimeB2(t *testing.T) {
 	root := findRepoRoot(t)
 	bin := integrationBinary(t)
 	tmp := t.TempDir()
@@ -63,11 +72,18 @@ func TestUnbundleCLI_PartialModeSkipsB2(t *testing.T) {
 	}
 }
 
-// TestUnbundleCLI_StrictAbortsAfterFullScan proves --strict + a B2 image
-// scans every image, then aborts (exit 4). The summary on stderr lists the
-// failing image so the operator sees the complete picture rather than
-// learning about issues one --strict run at a time.
-func TestUnbundleCLI_StrictAbortsAfterFullScan(t *testing.T) {
+// TestUnbundleCLI_StrictAbortsOnFirstApplyFailure proves --strict + an
+// apply-time B2 produces exit 4 and prevents subsequent images from being
+// written. The summary on stderr lists the failing image.
+//
+// Note: as with TestUnbundleCLI_PartialModeRecordsApplyTimeB2, the failure
+// path here is the apply-time B2 fallback (compose-side GetBlob ENOENT)
+// rather than preflight; importEachImage's strict early-return aborts the
+// loop before svc-a's apply runs. The plan's "scan-all-then-abort" name
+// applies to PreflightStrict, which is covered by the
+// abortWithPreflightSummary code path and the unit-level scan tests in
+// preflight_test.go.
+func TestUnbundleCLI_StrictAbortsOnFirstApplyFailure(t *testing.T) {
 	root := findRepoRoot(t)
 	bin := integrationBinary(t)
 	tmp := t.TempDir()

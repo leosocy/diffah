@@ -280,6 +280,14 @@ func findImageByName(imgs []diff.ImageEntry, name string) (diff.ImageEntry, bool
 // project's existing apply-time error sentinels so categorization
 // (CategoryContent → exit 4) and NextAction hints reach cmd.Execute
 // uniformly whether the failure was caught at preflight or apply.
+//
+// PreflightError / PreflightSchemaError fall through with their raw err
+// because the only such errors that can reach this path today come from
+// the bundle's own target-manifest parse (PreflightSchemaError, fatal
+// before this mapping runs) or from a partial-aware resolveBaselines
+// path that does not yet exist (Task 3.4b). When that path lands, callers
+// must wrap r.Err via diff.ClassifyRegistryErr so cmd.Execute keeps its
+// exit-code mapping.
 func preflightResultToErr(r PreflightResult) error {
 	switch r.Status {
 	case PreflightMissingPatchSource:
