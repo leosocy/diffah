@@ -33,6 +33,12 @@ func TestParseManifestLayers_OCI(t *testing.T) {
 	if layers[0].Size != 100 {
 		t.Errorf("layers[0].Size = %d", layers[0].Size)
 	}
+	if layers[1].Digest != digest.Digest("sha256:l2") {
+		t.Errorf("layers[1].Digest = %v", layers[1].Digest)
+	}
+	if layers[1].Size != 200 {
+		t.Errorf("layers[1].Size = %d", layers[1].Size)
+	}
 }
 
 func TestParseManifestLayers_DockerSchema2(t *testing.T) {
