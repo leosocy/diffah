@@ -88,7 +88,8 @@ func (*ErrApplyInvariantFailed) NextAction() string {
 //
 // Three real-world signals are matched, mirroring the existing pattern in
 // pkg/diff/classify_registry.go::ClassifyRegistryErr:
-//   - os.IsNotExist (dir:, oci:, oci-archive: surface *os.PathError ENOENT).
+//   - errors.Is(err, os.ErrNotExist) (dir:, oci:, oci-archive: surface
+//     *os.PathError ENOENT, plus wrapped ENOENT via fmt.Errorf("...: %w", ...)).
 //     Callers must wrap this around blob-only fetch paths to avoid
 //     misclassifying ENOENT on manifest/index files.
 //   - "Unknown blob" substring (docker-archive: returns this verbatim)
