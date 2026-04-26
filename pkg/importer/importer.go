@@ -101,22 +101,66 @@ func Import(ctx context.Context, opts Options) error {
 		resolvedByName[r.Name] = r
 	}
 
-	cache := newBaselineBlobCache()
-	imported, skipped, err := importEachImage(ctx, bundle, resolvedByName, outputs, opts, cache)
-	if err != nil {
-		return err
+	preflightResults, anyPreflightFail, perr := RunPreflight(ctx, bundle, resolved, opts.SystemContext, rep)
+	if perr != nil {
+		// Schema-error: bundle-internal manifest failed to parse. Fatal in
+		// every mode — never produce a partial success when the delta
+		// itself is malformed.
+		return perr
 	}
+
+	if opts.Strict && anyPreflightFail {
+		// Strict mode performs a scan-all-then-abort: every image is
+		// classified before we exit, so the operator sees the complete
+		// failure picture rather than discovering issues one --strict
+		// run at a time.
+		return abortWithPreflightSummary(preflightResults)
+	}
+
+	applyList := make([]string, 0, len(preflightResults))
+	skippedByPreflight := make(map[string]PreflightResult)
+	for _, r := range preflightResults {
+		if r.Status == PreflightOK {
+			applyList = append(applyList, r.ImageName)
+		} else {
+			skippedByPreflight[r.ImageName] = r
+		}
+	}
+
+	cache := newBaselineBlobCache()
+	report := importEachImage(ctx, bundle, resolvedByName, outputs, opts, cache, applyList)
+	report.Total = len(bundle.sidecar.Images)
+	for name, r := range skippedByPreflight {
+		report.Results = append(report.Results, ApplyImageResult{
+			ImageName: name,
+			Status:    ApplyImageSkippedPreflight,
+			Err:       preflightResultToErr(r),
+		})
+	}
+
+	renderSummary(os.Stderr, report)
 	log().InfoContext(ctx, "import complete",
-		"imported", imported, "total", len(bundle.sidecar.Images), "skipped", skipped)
+		"imported", report.Successful(), "total", report.Total,
+		"skipped_preflight", len(skippedByPreflight))
 	rep.Phase("done")
+
+	// Partial-mode contract: at least one image must succeed for an
+	// exit-0 outcome. Returning the first non-OK image's error keeps
+	// classification (CategoryContent for B1/B2/invariant) intact for
+	// cmd.Execute's exit-code mapping.
+	if report.Successful() == 0 && report.Total > 0 {
+		return firstNonOKError(report)
+	}
 	return nil
 }
 
-// importEachImage composes and writes every image in the bundle for which a
-// baseline was resolved. Images without a resolved baseline are recorded in
-// the skipped list and not composed; --strict is enforced earlier by
-// resolveBaselines, so reaching here with an unresolved image implies the
-// caller opted into non-strict mode.
+// importEachImage composes and verifies the images named in applyList,
+// recording per-image outcomes in an ApplyReport. In strict mode the loop
+// stops at the first compose/invariant failure (preserving the "abort on
+// first error" feel for callers that opted in via --strict). In partial mode
+// the loop continues so the final summary captures every outcome. Total is
+// not set here — Import populates it from the full image list after merging
+// preflight skips.
 func importEachImage(
 	ctx context.Context,
 	bundle *extractedBundle,
@@ -124,37 +168,156 @@ func importEachImage(
 	outputs map[string]string,
 	opts Options,
 	cache *baselineBlobCache,
-) (int, []string, error) {
-	imported := 0
-	skipped := make([]string, 0)
-	for _, img := range bundle.sidecar.Images {
-		rb, ok := resolvedByName[img.Name]
+	applyList []string,
+) ApplyReport {
+	report := ApplyReport{}
+	for _, name := range applyList {
+		img, ok := findImageByName(bundle.sidecar.Images, name)
 		if !ok {
-			log().WarnContext(ctx, "skipped image: no baseline provided", "image", img.Name)
-			skipped = append(skipped, img.Name)
 			continue
 		}
-		rawOut, ok := outputs[img.Name]
+		rb, ok := resolvedByName[name]
 		if !ok {
-			return 0, nil, fmt.Errorf("no output reference in OUTPUT-SPEC for image %q", img.Name)
+			// Pre-flight already enforced baseline presence for OK
+			// images; reaching here with no resolved baseline is a
+			// programming error — record it as compose-failed.
+			report.Results = append(report.Results, ApplyImageResult{
+				ImageName: name, Status: ApplyImageFailedCompose,
+				Err: fmt.Errorf("no resolved baseline for image %q", name),
+			})
+			if opts.Strict {
+				return report
+			}
+			continue
+		}
+		rawOut, ok := outputs[name]
+		if !ok {
+			report.Results = append(report.Results, ApplyImageResult{
+				ImageName: name, Status: ApplyImageFailedCompose,
+				Err: fmt.Errorf("no output reference in OUTPUT-SPEC for image %q", name),
+			})
+			if opts.Strict {
+				return report
+			}
+			continue
 		}
 		if err := ensureOutputParent(rawOut); err != nil {
-			return 0, nil, fmt.Errorf("prepare output for image %q: %w", img.Name, err)
+			report.Results = append(report.Results, ApplyImageResult{
+				ImageName: name, Status: ApplyImageFailedCompose,
+				Err: fmt.Errorf("prepare output for image %q: %w", name, err),
+			})
+			if opts.Strict {
+				return report
+			}
+			continue
 		}
 		destRef, err := imageio.ParseReference(rawOut)
 		if err != nil {
-			return 0, nil, fmt.Errorf("parse output reference for image %q: %w", img.Name, err)
+			report.Results = append(report.Results, ApplyImageResult{
+				ImageName: name, Status: ApplyImageFailedCompose,
+				Err: fmt.Errorf("parse output reference for image %q: %w", name, err),
+			})
+			if opts.Strict {
+				return report
+			}
+			continue
 		}
 		if err := composeImage(ctx, img, bundle, rb, destRef,
 			opts.SystemContext, opts.AllowConvert, opts.reporter(), cache); err != nil {
-			return 0, nil, err
+			report.Results = append(report.Results, ApplyImageResult{
+				ImageName: name, Status: ApplyImageFailedCompose, Err: err,
+			})
+			if opts.Strict {
+				return report
+			}
+			continue
 		}
 		if err := verifyApplyInvariant(ctx, img, bundle, destRef, opts.SystemContext); err != nil {
-			return 0, nil, err
+			report.Results = append(report.Results, ApplyImageResult{
+				ImageName: name, Status: ApplyImageFailedInvariant, Err: err,
+			})
+			if opts.Strict {
+				return report
+			}
+			continue
 		}
-		imported++
+		report.Results = append(report.Results, ApplyImageResult{
+			ImageName: name, Status: ApplyImageOK,
+		})
 	}
-	return imported, skipped, nil
+	return report
+}
+
+func findImageByName(imgs []diff.ImageEntry, name string) (diff.ImageEntry, bool) {
+	for _, img := range imgs {
+		if img.Name == name {
+			return img, true
+		}
+	}
+	return diff.ImageEntry{}, false
+}
+
+// preflightResultToErr maps a non-OK PreflightResult back into the
+// project's existing apply-time error sentinels so categorization
+// (CategoryContent → exit 4) and NextAction hints reach cmd.Execute
+// uniformly whether the failure was caught at preflight or apply.
+func preflightResultToErr(r PreflightResult) error {
+	switch r.Status {
+	case PreflightMissingPatchSource:
+		return &ErrMissingPatchSource{
+			ImageName:       r.ImageName,
+			PatchFromDigest: firstOrEmptyDigest(r.MissingPatchSources),
+		}
+	case PreflightMissingReuseLayer:
+		return &ErrMissingBaselineReuseLayer{
+			ImageName:   r.ImageName,
+			LayerDigest: firstOrEmptyDigest(r.MissingReuseLayers),
+		}
+	case PreflightError, PreflightSchemaError:
+		return r.Err
+	}
+	return nil
+}
+
+func firstOrEmptyDigest(ds []digest.Digest) digest.Digest {
+	if len(ds) == 0 {
+		return ""
+	}
+	return ds[0]
+}
+
+// abortWithPreflightSummary renders the strict-mode summary and returns
+// the first non-OK image's classified sentinel so cmd.Execute exits 4.
+// The full failure picture is on stderr already; the returned error is
+// only the error code carrier.
+func abortWithPreflightSummary(results []PreflightResult) error {
+	report := ApplyReport{Total: len(results)}
+	for _, r := range results {
+		status := ApplyImageOK
+		if r.Status != PreflightOK {
+			status = ApplyImageSkippedPreflight
+		}
+		report.Results = append(report.Results, ApplyImageResult{
+			ImageName: r.ImageName, Status: status, Err: preflightResultToErr(r),
+		})
+	}
+	renderSummary(os.Stderr, report)
+	for _, r := range results {
+		if r.Status != PreflightOK {
+			return preflightResultToErr(r)
+		}
+	}
+	// Defensive: caller only invokes us when anyPreflightFail is true.
+	return fmt.Errorf("preflight rejected images (--strict)")
+}
+
+func firstNonOKError(report ApplyReport) error {
+	for _, r := range report.Results {
+		if r.Status != ApplyImageOK && r.Err != nil {
+			return r.Err
+		}
+	}
+	return fmt.Errorf("0 of %d images succeeded", report.Total)
 }
 
 func DryRun(ctx context.Context, opts Options) (DryRunReport, error) {
