@@ -138,12 +138,11 @@ Expected: FAIL with "undefined: ErrMissingPatchSource" etc.
 package importer
 
 import (
-	"errors"
 	"fmt"
-	"net/http"
+	"os"
+	"strings"
 
 	"github.com/opencontainers/go-digest"
-	"go.podman.io/image/v5/types"
 
 	"github.com/leosocy/diffah/pkg/diff/errs"
 )
@@ -215,21 +214,44 @@ func (e *ErrApplyInvariantFailed) NextAction() string {
 // exist at the source," regardless of transport. Auth, TLS, network, and
 // timeout errors return false — they are not baseline-incompleteness
 // signals and must keep their existing classification.
+//
+// Three real-world signals are matched, mirroring the existing pattern in
+// pkg/diff/classify_registry.go::ClassifyRegistryErr:
+//   - os.IsNotExist (dir:, oci:, oci-archive: surface *os.PathError ENOENT)
+//   - "Unknown blob" substring (docker-archive: returns this verbatim)
+//   - "blob unknown" substring (registry transport per OCI distribution
+//     spec: errcode.Error{Code: ErrorCodeBlobUnknown} → "blob unknown to registry")
+//
+// Wired by Tasks 1.3 (servePatch) and 1.4 (GetBlob) in the same PR1 series.
+//
+//nolint:unused // intentional: see comment above.
 func isBlobNotFound(err error) bool {
 	if err == nil {
 		return false
 	}
-	if errors.Is(err, types.ErrBlobNotFound) {
+	if os.IsNotExist(err) {
 		return true
 	}
-	type httpStatus interface{ StatusCode() int }
-	var s httpStatus
-	if errors.As(err, &s) && s.StatusCode() == http.StatusNotFound {
+	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "unknown blob") {
+		return true
+	}
+	if strings.Contains(msg, "blob unknown") {
 		return true
 	}
 	return false
 }
 ```
+
+**Predicate rationale.** The original spec assumed `types.ErrBlobNotFound`
+and a `StatusCode() int` interface, but containers-image v5 does not expose
+a stable sentinel for blob-missing — registry transports return
+`errcode.Error` (string-formatted "blob unknown to registry") and
+docker-archive returns "Unknown blob …" verbatim. Matching by string
+mirrors the existing project convention in
+`pkg/diff/classify_registry.go::ClassifyRegistryErr` (auth/missing/invalid
+needles). `os.IsNotExist` covers `dir:`, `oci:`, and `oci-archive:`
+transports which surface `*os.PathError` with ENOENT.
 
 - [ ] **Step 4: Run tests to verify they pass**
 
@@ -255,17 +277,24 @@ Refs: docs/superpowers/specs/2026-04-26-apply-correctness-resilience-design.md"
 **Files:**
 - Test: `pkg/importer/errors_test.go` (extend)
 
+> **Predicate revision (Task 1.1 implementation note).** The original spec
+> assumed an upstream `types.ErrBlobNotFound` sentinel and a `StatusCode()`
+> interface; empirical inspection of `go.podman.io/image/v5` showed neither
+> exists in a stable, machine-readable form. Task 1.1 ships a string-match
+> predicate mirroring `pkg/diff/classify_registry.go::ClassifyRegistryErr`.
+> The Task 1.2 cases below are aligned to that predicate.
+
 - [ ] **Step 1: Write failing tests for Category() and isBlobNotFound()**
 
 ```go
 // append to pkg/importer/errors_test.go
 import (
 	"errors"
-	"net/http"
+	"fmt"
 	"net/url"
+	"os"
+	"syscall"
 	"testing"
-
-	"go.podman.io/image/v5/types"
 
 	"github.com/leosocy/diffah/pkg/diff/errs"
 )
@@ -292,24 +321,31 @@ func TestSentinels_Categorized(t *testing.T) {
 	}
 }
 
-type fakeStatusErr struct{ code int }
-
-func (e *fakeStatusErr) Error() string  { return "http" }
-func (e *fakeStatusErr) StatusCode() int { return e.code }
-
 func TestIsBlobNotFound(t *testing.T) {
 	cases := []struct {
 		name string
 		err  error
 		want bool
 	}{
+		// negative cases — must NOT classify as blob-not-found.
 		{"nil", nil, false},
-		{"ErrBlobNotFound direct", types.ErrBlobNotFound, true},
-		{"ErrBlobNotFound wrapped", fmt.Errorf("ctx: %w", types.ErrBlobNotFound), true},
-		{"http 404", &fakeStatusErr{code: 404}, true},
-		{"http 401 (auth)", &fakeStatusErr{code: 401}, false},
-		{"url error", &url.Error{Op: "Get", URL: "x", Err: errors.New("dns")}, false},
 		{"plain string", errors.New("boom"), false},
+		{"url error", &url.Error{Op: "Get", URL: "x", Err: errors.New("dns")}, false},
+
+		// positive cases — three real-world transports that the predicate
+		// recognises (mirrors classify_registry.go pattern).
+		{"os.ErrNotExist direct", os.ErrNotExist, true},
+		{
+			"PathError ENOENT",
+			&os.PathError{Op: "open", Path: "x", Err: syscall.ENOENT},
+			true,
+		},
+		{"docker-archive Unknown blob", fmt.Errorf("Unknown blob sha256:abc"), true},
+		{
+			"registry blob unknown",
+			fmt.Errorf("fetching blob: blob unknown to registry"),
+			true,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
