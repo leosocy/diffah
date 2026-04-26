@@ -121,6 +121,13 @@ func (s *bundleImageSource) servePatch(
 	}
 	baseBytes, err := s.fetchVerifiedBaselineBlob(ctx, entry.PatchFromDigest, cache)
 	if err != nil {
+		if isBlobNotFound(err) {
+			return nil, 0, &ErrMissingPatchSource{
+				ImageName:       s.imageName,
+				ShippedDigest:   target,
+				PatchFromDigest: entry.PatchFromDigest,
+			}
+		}
 		return nil, 0, fmt.Errorf("fetch patch-from blob %s: %w", entry.PatchFromDigest, err)
 	}
 	out, err := zstdpatch.Decode(ctx, baseBytes, patchBytes)

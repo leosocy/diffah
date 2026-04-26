@@ -3,6 +3,8 @@ package importer
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -266,4 +268,76 @@ func TestBundleImageSource_GetBlob_BaselineDelegation_Verified(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, int64(len(got)), size)
 	require.Equal(t, requiredDigest, digest.FromBytes(got))
+}
+
+// TestServePatch_BlobNotFound_WrapsB1 verifies that when servePatch's
+// baseline fetch surfaces a "blob not found" signal (registry-shape
+// "blob unknown to registry" string here), the error is wrapped as
+// *ErrMissingPatchSource carrying the originating image, the shipped
+// patch digest, and the missing patch-from digest. Other failure modes
+// (auth/TLS/network/timeout) keep their existing fmt.Errorf wrapping —
+// covered indirectly by the existing CategoryEnvironment classification
+// in pkg/diff/classify_registry.go.
+func TestServePatch_BlobNotFound_WrapsB1(t *testing.T) {
+	patchBytes := []byte("ignored")
+	target := digest.FromBytes([]byte("target"))
+	patchSrc := digest.FromBytes([]byte("missing-source"))
+
+	dir := t.TempDir()
+	blobDir := filepath.Join(dir, "blobs")
+	if err := os.MkdirAll(filepath.Join(blobDir, target.Algorithm().String()), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	patchPath := filepath.Join(blobDir, target.Algorithm().String(), target.Encoded())
+	if err := os.WriteFile(patchPath, patchBytes, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	src := &bundleImageSource{
+		blobDir:   blobDir,
+		imageName: "svc-x",
+		baseline:  &fakeBlobNotFoundSource{},
+		cache:     newBaselineBlobCache(),
+		sidecar:   &diff.Sidecar{},
+	}
+	entry := diff.BlobEntry{
+		Encoding:        diff.EncodingPatch,
+		PatchFromDigest: patchSrc,
+	}
+	_, _, err := src.servePatch(context.Background(), target, entry, nil)
+
+	var b1 *ErrMissingPatchSource
+	if !errors.As(err, &b1) {
+		t.Fatalf("expected ErrMissingPatchSource, got %T: %v", err, err)
+	}
+	if b1.PatchFromDigest != patchSrc {
+		t.Errorf("PatchFromDigest = %v, want %v", b1.PatchFromDigest, patchSrc)
+	}
+	if b1.ShippedDigest != target {
+		t.Errorf("ShippedDigest = %v, want %v", b1.ShippedDigest, target)
+	}
+	if b1.ImageName != "svc-x" {
+		t.Errorf("ImageName = %q, want %q", b1.ImageName, "svc-x")
+	}
+}
+
+// fakeBlobNotFoundSource is a minimal types.ImageSource that always returns
+// a "blob unknown" error from GetBlob — the registry-shape error verified
+// in pkg/importer/errors_test.go::TestIsBlobNotFound.
+type fakeBlobNotFoundSource struct{}
+
+func (*fakeBlobNotFoundSource) Reference() types.ImageReference { return nil }
+func (*fakeBlobNotFoundSource) Close() error                    { return nil }
+func (*fakeBlobNotFoundSource) GetManifest(context.Context, *digest.Digest) ([]byte, string, error) {
+	return nil, "", nil
+}
+func (*fakeBlobNotFoundSource) HasThreadSafeGetBlob() bool { return true }
+func (*fakeBlobNotFoundSource) GetSignatures(context.Context, *digest.Digest) ([][]byte, error) {
+	return nil, nil
+}
+func (*fakeBlobNotFoundSource) LayerInfosForCopy(context.Context, *digest.Digest) ([]types.BlobInfo, error) {
+	return nil, nil
+}
+func (*fakeBlobNotFoundSource) GetBlob(context.Context, types.BlobInfo, types.BlobInfoCache) (io.ReadCloser, int64, error) {
+	return nil, 0, fmt.Errorf("fetching blob: blob unknown to registry")
 }
