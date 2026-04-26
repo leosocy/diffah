@@ -6,6 +6,7 @@
 package importer
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -104,13 +105,11 @@ func (*ErrApplyInvariantFailed) NextAction() string {
 // Wired by Tasks 1.3 (servePatch) and 1.4 (GetBlob) in the same PR1 series;
 // declared here so the predicate ships and gets unit-tested (Task 1.2)
 // before any caller reaches for it.
-//
-//nolint:unused // intentional: see comment above.
 func isBlobNotFound(err error) bool {
 	if err == nil {
 		return false
 	}
-	if os.IsNotExist(err) {
+	if errors.Is(err, os.ErrNotExist) {
 		return true
 	}
 	msg := strings.ToLower(err.Error())
