@@ -48,8 +48,6 @@ func verifyApplyInvariant(
 	if len(missing)+len(unexpected) > 0 {
 		return &ErrApplyInvariantFailed{
 			ImageName:  img.Name,
-			Expected:   digestsOf(expected),
-			Got:        digestsOf(actual),
 			Missing:    missing,
 			Unexpected: unexpected,
 			Reason:     "layer set mismatch",
@@ -58,16 +56,12 @@ func verifyApplyInvariant(
 	if err := verifyPerLayerSize(expected, actual, bundle.sidecar.Blobs); err != nil {
 		return &ErrApplyInvariantFailed{
 			ImageName: img.Name,
-			Expected:  digestsOf(expected),
-			Got:       digestsOf(actual),
 			Reason:    err.Error(),
 		}
 	}
 	if expectedMediaType == actualMediaType && actualManifestDigest != img.Target.ManifestDigest {
 		return &ErrApplyInvariantFailed{
 			ImageName: img.Name,
-			Expected:  []digest.Digest{img.Target.ManifestDigest},
-			Got:       []digest.Digest{actualManifestDigest},
 			Reason:    "manifest digest mismatch",
 		}
 	}
@@ -127,13 +121,4 @@ func verifyPerLayerSize(
 		}
 	}
 	return nil
-}
-
-// digestsOf flattens a layer-ref slice to its digest column, preserving order.
-func digestsOf(refs []LayerRef) []digest.Digest {
-	out := make([]digest.Digest, len(refs))
-	for i, r := range refs {
-		out[i] = r.Digest
-	}
-	return out
 }
