@@ -5,8 +5,8 @@ import (
 	"io"
 )
 
-// ApplyImageStatus is the per-image outcome categorization for the Stage-4
-// final summary. Values are mutually exclusive; one is recorded per image
+// ApplyImageStatus is the per-image outcome categorization for the final
+// import summary. Values are mutually exclusive; one is recorded per image
 // in the bundle.
 type ApplyImageStatus int
 
@@ -60,10 +60,9 @@ func (r ApplyReport) Successful() int {
 	return n
 }
 
-// renderSummary writes the Stage-4 final summary to w. The first line
-// is parseable by integration tests ("applied N/M images"). Per-image
-// rows follow, then a final advisory paragraph if any image did not
-// succeed.
+// renderSummary writes the final import summary to w. The first line is
+// parseable by integration tests ("applied N/M images"). Per-image rows
+// follow, then a final advisory paragraph if any image did not succeed.
 func renderSummary(w io.Writer, r ApplyReport) {
 	fmt.Fprintf(w, "diffah: applied %d/%d images\n", r.Successful(), r.Total)
 	for _, x := range r.Results {

@@ -25,6 +25,14 @@ type ErrMissingPatchSource struct {
 }
 
 func (e *ErrMissingPatchSource) Error() string {
+	// Preflight constructs this without a shipped digest (it tracks only
+	// the missing patch_from set); apply-time construction populates both.
+	if e.ShippedDigest == "" {
+		return fmt.Sprintf(
+			"image %q: target requires patch source %s, but baseline does not contain it",
+			e.ImageName, e.PatchFromDigest,
+		)
+	}
 	return fmt.Sprintf(
 		"image %q: shipped patch %s requires patch source %s, but baseline does not contain it",
 		e.ImageName, e.ShippedDigest, e.PatchFromDigest,

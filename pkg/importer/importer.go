@@ -101,7 +101,7 @@ func Import(ctx context.Context, opts Options) error {
 		resolvedByName[r.Name] = r
 	}
 
-	preflightResults, anyPreflightFail, perr := RunPreflight(ctx, bundle, resolved, opts.SystemContext, rep)
+	preflightResults, anyPreflightFail, perr := RunPreflight(ctx, bundle, resolved, rep)
 	if perr != nil {
 		// Schema-error: bundle-internal manifest failed to parse. Fatal in
 		// every mode — never produce a partial success when the delta
@@ -120,7 +120,7 @@ func Import(ctx context.Context, opts Options) error {
 	cache := newBaselineBlobCache()
 	report := importEachImage(ctx, bundle, resolvedByName, outputs, opts, cache, applyList)
 	report.Total = len(bundle.sidecar.Images)
-	mergePreflightSkips(&report, skippedByPreflight)
+	mergePreflightSkips(&report, bundle.sidecar.Images, skippedByPreflight)
 	finalizeImportReport(ctx, rep, report, len(skippedByPreflight))
 
 	// Partial-mode contract: at least one image must succeed for an
@@ -135,14 +135,25 @@ func Import(ctx context.Context, opts Options) error {
 
 // mergePreflightSkips appends one ApplyImageSkippedPreflight entry per
 // preflight-rejected image into the apply-time report, mapping the
-// preflight status back to its categorized error sentinel.
-func mergePreflightSkips(report *ApplyReport, skipped map[string]PreflightResult) {
-	for name, r := range skipped {
-		report.Results = append(report.Results, ApplyImageResult{
-			ImageName: name,
-			Status:    ApplyImageSkippedPreflight,
-			Err:       preflightResultToErr(r),
-		})
+// preflight status back to its categorized error sentinel. Iteration follows
+// bundle.sidecar.Images so the summary order is deterministic.
+func mergePreflightSkips(report *ApplyReport, images []diff.ImageEntry, skipped map[string]PreflightResult) {
+	for _, img := range images {
+		r, ok := skipped[img.Name]
+		if !ok {
+			continue
+		}
+		report.Results = append(report.Results, preflightSkippedResult(r))
+	}
+}
+
+// preflightSkippedResult maps a non-OK PreflightResult into the
+// ApplyImageResult shape used in the final report.
+func preflightSkippedResult(r PreflightResult) ApplyImageResult {
+	return ApplyImageResult{
+		ImageName: r.ImageName,
+		Status:    ApplyImageSkippedPreflight,
+		Err:       preflightResultToErr(r),
 	}
 }
 
@@ -159,8 +170,7 @@ func finalizeImportReport(ctx context.Context, rep progress.Reporter, report App
 
 // splitPreflightResults partitions per-image PreflightResult outcomes into
 // the apply-list (PreflightOK) and the skipped-by-preflight map (everything
-// else). Pulling this out of Import keeps the function below the
-// complexity threshold without introducing a struct.
+// else).
 func splitPreflightResults(results []PreflightResult) ([]string, map[string]PreflightResult) {
 	applyList := make([]string, 0, len(results))
 	skipped := make(map[string]PreflightResult)
@@ -178,9 +188,7 @@ func splitPreflightResults(results []PreflightResult) ([]string, map[string]Pref
 // recording per-image outcomes in an ApplyReport. In strict mode the loop
 // stops at the first compose/invariant failure (preserving the "abort on
 // first error" feel for callers that opted in via --strict). In partial mode
-// the loop continues so the final summary captures every outcome. Total is
-// not set here — Import populates it from the full image list after merging
-// preflight skips.
+// the loop continues so the final summary captures every outcome.
 func importEachImage(
 	ctx context.Context,
 	bundle *extractedBundle,
@@ -202,9 +210,7 @@ func importEachImage(
 }
 
 // applyOneImage runs the full per-image pipeline (resolve output, compose,
-// invariant verify) and returns the typed result. Splitting this out of
-// importEachImage keeps the loop body short and lets each failure path
-// share one append-and-record idiom.
+// invariant verify) and returns the typed result.
 func applyOneImage(
 	ctx context.Context,
 	name string,
@@ -281,11 +287,8 @@ func findImageByName(imgs []diff.ImageEntry, name string) (diff.ImageEntry, bool
 // (CategoryContent → exit 4) and NextAction hints reach cmd.Execute
 // uniformly whether the failure was caught at preflight or apply.
 //
-// PreflightError / PreflightSchemaError fall through with their raw err
-// because the only such errors that can reach this path today come from
-// the bundle's own target-manifest parse (PreflightSchemaError, fatal
-// before this mapping runs) or from a partial-aware resolveBaselines
-// path that does not yet exist (Task 3.4b). When that path lands, callers
+// PreflightError / PreflightSchemaError fall through with their raw err.
+// Future partial-aware resolve paths that surface registry errors here
 // must wrap r.Err via diff.ClassifyRegistryErr so cmd.Execute keeps its
 // exit-code mapping.
 func preflightResultToErr(r PreflightResult) error {
@@ -320,13 +323,13 @@ func firstOrEmptyDigest(ds []digest.Digest) digest.Digest {
 func abortWithPreflightSummary(results []PreflightResult) error {
 	report := ApplyReport{Total: len(results)}
 	for _, r := range results {
-		status := ApplyImageOK
-		if r.Status != PreflightOK {
-			status = ApplyImageSkippedPreflight
+		if r.Status == PreflightOK {
+			report.Results = append(report.Results, ApplyImageResult{
+				ImageName: r.ImageName, Status: ApplyImageOK,
+			})
+			continue
 		}
-		report.Results = append(report.Results, ApplyImageResult{
-			ImageName: r.ImageName, Status: status, Err: preflightResultToErr(r),
-		})
+		report.Results = append(report.Results, preflightSkippedResult(r))
 	}
 	renderSummary(os.Stderr, report)
 	for _, r := range results {
@@ -334,7 +337,7 @@ func abortWithPreflightSummary(results []PreflightResult) error {
 			return preflightResultToErr(r)
 		}
 	}
-	// Defensive: caller only invokes us when anyPreflightFail is true.
+	// Caller only invokes us when anyPreflightFail is true.
 	return fmt.Errorf("preflight rejected images (--strict)")
 }
 

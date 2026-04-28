@@ -143,19 +143,7 @@ func firstPatchFromDigest(t *testing.T, sc *diff.Sidecar) digest.Digest {
 func firstBaselineOnlyReuseLayer(t *testing.T, root string, sc *diff.Sidecar) digest.Digest {
 	t.Helper()
 	require.Len(t, sc.Images, 1, "test assumes single-image bundle")
-	targetDigest := sc.Images[0].Target.ManifestDigest
-
-	// Read the target manifest from the v2 fixture (it lives there in full).
-	v2Path := filepath.Join(root, "testdata/fixtures/v2_oci.tar")
-	manifest := readManifestFromOCIArchive(t, v2Path, targetDigest)
-
-	for _, layer := range manifest.Layers {
-		if _, shipped := sc.Blobs[layer.Digest]; !shipped {
-			return layer.Digest
-		}
-	}
-	t.Fatalf("v2 target manifest has no baseline-only-reuse layer; cannot exercise B2 path")
-	return ""
+	return firstBaselineOnlyReuseLayerForImage(t, root, sc, sc.Images[0].Name)
 }
 
 // ociManifest is a minimal projection of the OCI image manifest JSON for the
