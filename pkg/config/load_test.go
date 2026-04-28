@@ -19,6 +19,21 @@ func TestLoad_MissingFileReturnsDefaults(t *testing.T) {
 	require.Equal(t, Default(), cfg)
 }
 
+func TestLoad_UnknownFieldReturnsConfigError(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "unknown.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(`
+platform: linux/amd64
+nonexistent-field: value
+`), 0o644))
+
+	cfg, err := Load(path)
+
+	require.Nil(t, cfg)
+	var ce *ConfigError
+	require.ErrorAs(t, err, &ce)
+	require.Contains(t, err.Error(), "nonexistent-field")
+}
+
 func TestLoad_MalformedYAMLReturnsConfigError(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "bad.yaml")
 	require.NoError(t, os.WriteFile(path, []byte("platform: [bad nested"), 0o644))
