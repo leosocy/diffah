@@ -17,6 +17,11 @@ type resolvedBaseline struct {
 	Ref      types.ImageReference
 	Src      types.ImageSource
 	Manifest digest.Digest
+	// ManifestBytes / ManifestMime are populated by openOneBaseline so
+	// downstream consumers (preflight) can avoid a second GetManifest
+	// round-trip against the baseline source.
+	ManifestBytes []byte
+	ManifestMime  string
 }
 
 func resolveBaselines(
@@ -96,23 +101,34 @@ func openOneBaseline(
 		return resolvedBaseline{}, fmt.Errorf("open baseline source for %q: %w",
 			img.Name, diff.ClassifyRegistryErr(err, raw))
 	}
-	manifestBytes, err := withRetry(ctx, retryTimes, retryDelay, func(ctx context.Context) ([]byte, error) {
-		b, _, e := src.GetManifest(ctx, nil)
-		return b, e
+	type manifestPayload struct {
+		bytes []byte
+		mime  string
+	}
+	mf, err := withRetry(ctx, retryTimes, retryDelay, func(ctx context.Context) (manifestPayload, error) {
+		b, mime, e := src.GetManifest(ctx, nil)
+		return manifestPayload{bytes: b, mime: mime}, e
 	})
 	if err != nil {
 		_ = src.Close()
 		return resolvedBaseline{}, fmt.Errorf("read baseline manifest for %q: %w",
 			img.Name, diff.ClassifyRegistryErr(err, raw))
 	}
-	got := digest.FromBytes(manifestBytes)
+	got := digest.FromBytes(mf.bytes)
 	if got != img.Baseline.ManifestDigest {
 		_ = src.Close()
 		return resolvedBaseline{}, &diff.ErrBaselineMismatch{
 			Name: img.Name, Expected: string(img.Baseline.ManifestDigest), Got: string(got),
 		}
 	}
-	return resolvedBaseline{Name: img.Name, Ref: ref, Src: src, Manifest: got}, nil
+	return resolvedBaseline{
+		Name:          img.Name,
+		Ref:           ref,
+		Src:           src,
+		Manifest:      got,
+		ManifestBytes: mf.bytes,
+		ManifestMime:  mf.mime,
+	}, nil
 }
 
 // closeResolvedBaselines closes all held-open ImageSource instances.

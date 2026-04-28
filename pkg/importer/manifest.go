@@ -24,30 +24,38 @@ type LayerRef struct {
 // and returns the layer list plus canonical media type. Manifest lists and
 // indexes are rejected — callers must select an instance upstream.
 func parseManifestLayers(raw []byte, mediaType string) ([]LayerRef, string, error) {
+	layers, _, mt, err := parseManifest(raw, mediaType)
+	return layers, mt, err
+}
+
+// parseManifest parses raw manifest bytes and returns the layer list, the
+// config descriptor digest, and the canonical media type. Manifest lists and
+// indexes are rejected — callers must select an instance upstream.
+func parseManifest(raw []byte, mediaType string) ([]LayerRef, digest.Digest, string, error) {
 	canonical := manifest.NormalizedMIMEType(mediaType)
 	switch canonical {
 	case manifest.DockerV2Schema2MediaType:
 		m, err := manifest.Schema2FromManifest(raw)
 		if err != nil {
-			return nil, "", fmt.Errorf("parse docker schema 2 manifest: %w", err)
+			return nil, "", "", fmt.Errorf("parse docker schema 2 manifest: %w", err)
 		}
 		out := make([]LayerRef, len(m.LayersDescriptors))
 		for i, d := range m.LayersDescriptors {
 			out[i] = LayerRef{Digest: d.Digest, Size: d.Size}
 		}
-		return out, canonical, nil
+		return out, m.ConfigDescriptor.Digest, canonical, nil
 	case imgspecv1.MediaTypeImageManifest:
 		m, err := manifest.OCI1FromManifest(raw)
 		if err != nil {
-			return nil, "", fmt.Errorf("parse OCI manifest: %w", err)
+			return nil, "", "", fmt.Errorf("parse OCI manifest: %w", err)
 		}
 		out := make([]LayerRef, len(m.Layers))
 		for i, d := range m.Layers {
 			out[i] = LayerRef{Digest: d.Digest, Size: d.Size}
 		}
-		return out, canonical, nil
+		return out, m.Config.Digest, canonical, nil
 	default:
-		return nil, "", fmt.Errorf("unsupported manifest media type %q", mediaType)
+		return nil, "", "", fmt.Errorf("unsupported manifest media type %q", mediaType)
 	}
 }
 

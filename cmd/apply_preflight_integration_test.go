@@ -1,0 +1,61 @@
+//go:build integration
+
+package cmd_test
+
+import (
+	"path/filepath"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/leosocy/diffah/internal/registrytest"
+)
+
+// TestApplyCLI_PreflightManifestFetchBounded asserts that pre-flight does
+// not regress the baseline manifest GET count: the entire apply pipeline
+// (pre-flight + composeImage + invariant verify) reads each baseline
+// manifest exactly once. resolveBaselines fetches it for digest
+// verification and caches the bytes on resolvedBaseline; pre-flight
+// reuses those bytes for layer-set classification; composeImage wraps
+// the same source for blob fetches only and never re-fetches the
+// manifest; verifyApplyInvariant reads the dest manifest, not the
+// baseline.
+//
+// The test is single-image so the budget applies directly to one repo.
+func TestApplyCLI_PreflightManifestFetchBounded(t *testing.T) {
+	root := findRepoRoot(t)
+	bin := integrationBinary(t)
+	srv := registrytest.New(t)
+
+	// Seed v1 as the baseline.
+	v1Path := filepath.Join(root, "testdata/fixtures/v1_oci.tar")
+	seedOCIIntoRegistry(t, srv, "service-x/v1", v1Path, nil)
+
+	tmp := t.TempDir()
+	deltaPath := filepath.Join(tmp, "delta.tar")
+	buildDelta(t, bin, root, deltaPath)
+
+	// Apply with the registry-backed baseline, output to local oci-archive.
+	outputPath := filepath.Join(tmp, "out.tar")
+	_, stderr, exit := runDiffahBin(t, bin, "apply",
+		"--tls-verify=false",
+		deltaPath,
+		registryDockerURL(t, srv, "service-x/v1"),
+		"oci-archive:"+outputPath,
+	)
+	require.Equalf(t, 0, exit, "apply failed: %s", stderr)
+
+	// Count manifest GETs against the seeded baseline repo. Both tag
+	// resolution and digest pulls match the manifest path regex; the
+	// budget is exactly 1 — pre-flight reuses the resolveBaselines fetch.
+	hits := srv.ManifestHits()
+	baselineGETs := 0
+	for _, h := range hits {
+		if h.Repo == "service-x/v1" && h.Method == "GET" {
+			baselineGETs++
+		}
+	}
+	require.LessOrEqualf(t, baselineGETs, 1,
+		"baseline manifest GETs = %d, want <= 1 (resolve + pre-flight share bytes); hits=%v",
+		baselineGETs, hits)
+}
