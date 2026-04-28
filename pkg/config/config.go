@@ -11,7 +11,10 @@
 //  3. built-in default
 package config
 
-import "time"
+import (
+	"reflect"
+	"time"
+)
 
 // Config holds the v1 set of nine flag defaults loadable from
 // ~/.diffah/config.yaml. Field-to-flag mapping is documented per field.
@@ -19,7 +22,7 @@ import "time"
 // silently ignored at ApplyTo time.
 type Config struct {
 	Platform      string        `mapstructure:"platform"`         // diff, bundle
-	IntraLayer    string        `mapstructure:"intra-layer"`      // diff, bundle  (auto|off|required)
+	IntraLayer    string        `mapstructure:"intra-layer"`      // diff, bundle (auto|off|required)
 	Authfile      string        `mapstructure:"authfile"`         // diff, bundle, apply, unbundle
 	RetryTimes    int           `mapstructure:"retry-times"`      // apply, unbundle
 	RetryDelay    time.Duration `mapstructure:"retry-delay"`      // apply, unbundle (Go duration)
@@ -29,17 +32,18 @@ type Config struct {
 	Candidates    int           `mapstructure:"candidates"`       // diff, bundle
 }
 
-// FlagNames maps every Config field to its CLI flag name. The flag name
-// is the source of truth used by ApplyTo to look up flags in cobra's
-// FlagSet.
-var FlagNames = map[string]string{
-	"Platform":      "platform",
-	"IntraLayer":    "intra-layer",
-	"Authfile":      "authfile",
-	"RetryTimes":    "retry-times",
-	"RetryDelay":    "retry-delay",
-	"ZstdLevel":     "zstd-level",
-	"ZstdWindowLog": "zstd-window-log",
-	"Workers":       "workers",
-	"Candidates":    "candidates",
+// flagNames is the Go-field-name → CLI-flag-name lookup used by
+// ApplyTo. It is derived from mapstructure struct tags at init time
+// so the struct definition is the single source of truth.
+var flagNames map[string]string
+
+func init() {
+	flagNames = make(map[string]string)
+	t := reflect.TypeOf(Config{})
+	for i := 0; i < t.NumField(); i++ {
+		f := t.Field(i)
+		if tag := f.Tag.Get("mapstructure"); tag != "" {
+			flagNames[f.Name] = tag
+		}
+	}
 }

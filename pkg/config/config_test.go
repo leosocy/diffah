@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestDefault_ContainsAllNineFields(t *testing.T) {
+func TestDefault_ReturnsBuiltInValues(t *testing.T) {
 	d := Default()
 
 	require.Equal(t, "linux/amd64", d.Platform)

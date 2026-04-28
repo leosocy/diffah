@@ -1,5 +1,7 @@
 package config
 
+import "time"
+
 // Default returns the built-in default Config used when no config file is
 // found. These values are the single source of truth for "no flag and no
 // config" behavior; CLI flag defaults installed by individual commands
@@ -10,7 +12,7 @@ func Default() *Config {
 		IntraLayer:    "auto",
 		Authfile:      "",
 		RetryTimes:    0,
-		RetryDelay:    0,
+		RetryDelay:    time.Duration(0),
 		ZstdLevel:     22,
 		ZstdWindowLog: "auto",
 		Workers:       8,
