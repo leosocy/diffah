@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"os"
 
+	"github.com/go-viper/mapstructure/v2"
 	"github.com/spf13/viper"
 )
 
@@ -31,8 +32,20 @@ func Load(path string) (*Config, error) {
 	}
 
 	cfg := Default()
-	if err := v.Unmarshal(cfg); err != nil {
+	if err := v.Unmarshal(cfg, decodeOpts); err != nil {
 		return nil, &ConfigError{Path: path, Err: err}
 	}
 	return cfg, nil
+}
+
+// decodeOpts configures viper.Unmarshal:
+//   - ErrorUnused = true so unknown keys in the file raise an error
+//   - DecodeHook chains StringToTimeDurationHookFunc so "250ms" parses
+//     into time.Duration (extends viper's built-in hook set)
+func decodeOpts(c *mapstructure.DecoderConfig) {
+	c.ErrorUnused = true
+	c.DecodeHook = mapstructure.ComposeDecodeHookFunc(
+		mapstructure.StringToTimeDurationHookFunc(),
+		mapstructure.StringToSliceHookFunc(","),
+	)
 }
