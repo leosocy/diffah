@@ -14,10 +14,12 @@ import (
 // TestApplyCLI_PreflightManifestFetchBounded asserts that pre-flight does
 // not regress the baseline manifest GET count: the entire apply pipeline
 // (pre-flight + composeImage + invariant verify) reads each baseline
-// manifest at most twice. Pre-flight reads it once for layer-set
-// classification; copy.Image's own manifest-resolution path may issue
-// additional reads (auth probe, content-type negotiation), so the
-// budget is 2 — anything higher means pre-flight is multi-fetching.
+// manifest exactly once. resolveBaselines fetches it for digest
+// verification and caches the bytes on resolvedBaseline; pre-flight
+// reuses those bytes for layer-set classification; composeImage wraps
+// the same source for blob fetches only and never re-fetches the
+// manifest; verifyApplyInvariant reads the dest manifest, not the
+// baseline.
 //
 // The test is single-image so the budget applies directly to one repo.
 func TestApplyCLI_PreflightManifestFetchBounded(t *testing.T) {
@@ -44,8 +46,8 @@ func TestApplyCLI_PreflightManifestFetchBounded(t *testing.T) {
 	require.Equalf(t, 0, exit, "apply failed: %s", stderr)
 
 	// Count manifest GETs against the seeded baseline repo. Both tag
-	// resolution and digest pulls match the manifest path regex; we
-	// budget for ≤ 2 across pre-flight + apply.
+	// resolution and digest pulls match the manifest path regex; the
+	// budget is exactly 1 — pre-flight reuses the resolveBaselines fetch.
 	hits := srv.ManifestHits()
 	baselineGETs := 0
 	for _, h := range hits {
@@ -53,7 +55,7 @@ func TestApplyCLI_PreflightManifestFetchBounded(t *testing.T) {
 			baselineGETs++
 		}
 	}
-	require.LessOrEqualf(t, baselineGETs, 2,
-		"baseline manifest GETs = %d, want <= 2 (pre-flight + apply may share); hits=%v",
+	require.LessOrEqualf(t, baselineGETs, 1,
+		"baseline manifest GETs = %d, want <= 1 (resolve + pre-flight share bytes); hits=%v",
 		baselineGETs, hits)
 }
