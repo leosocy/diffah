@@ -40,12 +40,11 @@ func Load(path string) (*Config, error) {
 
 // decodeOpts configures viper.Unmarshal:
 //   - ErrorUnused = true so unknown keys in the file raise an error
-//   - DecodeHook chains StringToTimeDurationHookFunc so "250ms" parses
+//   - DecodeHook adds StringToTimeDurationHookFunc so "250ms" parses
 //     into time.Duration (extends viper's built-in hook set)
 func decodeOpts(c *mapstructure.DecoderConfig) {
 	c.ErrorUnused = true
 	c.DecodeHook = mapstructure.ComposeDecodeHookFunc(
 		mapstructure.StringToTimeDurationHookFunc(),
-		mapstructure.StringToSliceHookFunc(","),
 	)
 }
