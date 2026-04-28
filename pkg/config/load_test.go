@@ -19,6 +19,19 @@ func TestLoad_MissingFileReturnsDefaults(t *testing.T) {
 	require.Equal(t, Default(), cfg)
 }
 
+func TestLoad_TypeMismatchReturnsConfigError(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "wrong-type.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(`
+zstd-level: "not-a-number"
+`), 0o644))
+
+	cfg, err := Load(path)
+
+	require.Nil(t, cfg)
+	var ce *ConfigError
+	require.ErrorAs(t, err, &ce)
+}
+
 func TestLoad_UnknownFieldReturnsConfigError(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "unknown.yaml")
 	require.NoError(t, os.WriteFile(path, []byte(`
