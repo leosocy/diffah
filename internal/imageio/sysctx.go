@@ -68,7 +68,7 @@ func applyAuthFile(sc *types.SystemContext, f SystemContextFlags) {
 	case f.AuthFile != "":
 		sc.AuthFilePath = f.AuthFile
 	case !f.NoCreds && f.Creds == "" && f.Username == "" && f.RegistryToken == "":
-		sc.AuthFilePath = defaultAuthFile()
+		sc.AuthFilePath = ResolveAuthFile()
 	}
 }
 
@@ -120,11 +120,19 @@ func splitCreds(raw string) (user, pass string, ok bool) {
 	return raw[:idx], raw[idx+1:], idx > 0
 }
 
-// defaultAuthFile returns the first existing file in the standard
-// precedence chain: $REGISTRY_AUTH_FILE → $XDG_RUNTIME_DIR/containers/auth.json
-// → $HOME/.docker/config.json. Returns empty string when none exist
-// (upstream containers-image treats this as "no credentials available").
-func defaultAuthFile() string {
+// ResolveAuthFile returns the first existing file in the standard
+// containers-image precedence chain:
+//
+//	1. $REGISTRY_AUTH_FILE
+//	2. $XDG_RUNTIME_DIR/containers/auth.json
+//	3. $HOME/.docker/config.json
+//
+// Returns an empty string when none of the candidates exist (upstream
+// containers-image treats this as "no credentials available"). Callers
+// outside this package use this for diagnostic display (e.g., diffah
+// doctor's authfile check); callers inside the package use it to seed
+// SystemContext.AuthFilePath.
+func ResolveAuthFile() string {
 	if v := os.Getenv("REGISTRY_AUTH_FILE"); v != "" {
 		if fileExists(v) {
 			return v
