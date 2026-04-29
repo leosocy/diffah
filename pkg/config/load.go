@@ -28,7 +28,7 @@ func DefaultPath() string {
 // Load reads the config file at path and returns the resolved Config.
 // A non-existent path is not an error — Default() is returned. A file
 // that exists but fails to parse, or contains unknown / wrong-typed
-// fields, returns a *ConfigError (CategoryUser).
+// fields, returns a *LoadError (CategoryUser).
 //
 // Pass an empty string to skip file lookup entirely (returns defaults).
 func Load(path string) (*Config, error) {
@@ -38,18 +38,18 @@ func Load(path string) (*Config, error) {
 	if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
 		return Default(), nil
 	} else if err != nil {
-		return nil, &ConfigError{Path: path, Err: err}
+		return nil, &LoadError{Path: path, Err: err}
 	}
 
 	v := viper.New()
 	v.SetConfigFile(path)
 	if err := v.ReadInConfig(); err != nil {
-		return nil, &ConfigError{Path: path, Err: err}
+		return nil, &LoadError{Path: path, Err: err}
 	}
 
 	cfg := Default()
 	if err := v.Unmarshal(cfg, decodeOpts); err != nil {
-		return nil, &ConfigError{Path: path, Err: err}
+		return nil, &LoadError{Path: path, Err: err}
 	}
 	return cfg, nil
 }

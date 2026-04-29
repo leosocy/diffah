@@ -1,7 +1,7 @@
 package config
 
 // Validate parses the config file at path and discards the result. It
-// returns the same errors Load does (in particular *ConfigError). A
+// returns the same errors Load does (in particular *LoadError). A
 // missing file is not an error.
 //
 // Used by `diffah config validate` and by `diffah doctor`'s config

@@ -17,23 +17,23 @@ import (
 )
 
 // Config holds the v1 set of nine flag defaults loadable from
-// ~/.diffah/config.yaml. Field-to-flag mapping is documented per field.
-// Fields irrelevant to a given command (e.g., RetryTimes on `diff`) are
-// silently ignored at ApplyTo time.
+// ~/.diffah/config.yaml. Per-command applicability is documented in
+// the design spec §5.1; fields irrelevant to a given command (e.g.,
+// RetryTimes on `diff`) are silently ignored at ApplyTo time.
 //
-// Both mapstructure and yaml tags use the same kebab-case key names so
-// that `config init` output round-trips through `config validate` without
-// error (yaml.Marshal uses yaml tags; viper uses mapstructure tags).
+// All three tag families use the same kebab-case key so `config init`
+// output round-trips through `config validate` (yaml.Marshal uses yaml
+// tags; viper uses mapstructure tags; encoding/json uses json tags).
 type Config struct {
-	Platform      string        `mapstructure:"platform"        yaml:"platform"        json:"platform"`         // diff, bundle
-	IntraLayer    string        `mapstructure:"intra-layer"     yaml:"intra-layer"     json:"intra-layer"`      // diff, bundle (auto|off|required)
-	Authfile      string        `mapstructure:"authfile"        yaml:"authfile"        json:"authfile"`         // diff, bundle, apply, unbundle
-	RetryTimes    int           `mapstructure:"retry-times"     yaml:"retry-times"     json:"retry-times"`      // apply, unbundle
-	RetryDelay    time.Duration `mapstructure:"retry-delay"     yaml:"retry-delay"     json:"retry-delay"`      // apply, unbundle (Go duration)
-	ZstdLevel     int           `mapstructure:"zstd-level"      yaml:"zstd-level"      json:"zstd-level"`       // diff, bundle  (1..22)
-	ZstdWindowLog string        `mapstructure:"zstd-window-log" yaml:"zstd-window-log" json:"zstd-window-log"`  // diff, bundle  (auto | 10..31)
-	Workers       int           `mapstructure:"workers"         yaml:"workers"         json:"workers"`          // diff, bundle
-	Candidates    int           `mapstructure:"candidates"      yaml:"candidates"      json:"candidates"`       // diff, bundle
+	Platform      string        `mapstructure:"platform" yaml:"platform" json:"platform"`
+	IntraLayer    string        `mapstructure:"intra-layer" yaml:"intra-layer" json:"intra-layer"`
+	Authfile      string        `mapstructure:"authfile" yaml:"authfile" json:"authfile"`
+	RetryTimes    int           `mapstructure:"retry-times" yaml:"retry-times" json:"retry-times"`
+	RetryDelay    time.Duration `mapstructure:"retry-delay" yaml:"retry-delay" json:"retry-delay"`
+	ZstdLevel     int           `mapstructure:"zstd-level" yaml:"zstd-level" json:"zstd-level"`
+	ZstdWindowLog string        `mapstructure:"zstd-window-log" yaml:"zstd-window-log" json:"zstd-window-log"`
+	Workers       int           `mapstructure:"workers" yaml:"workers" json:"workers"`
+	Candidates    int           `mapstructure:"candidates" yaml:"candidates" json:"candidates"`
 }
 
 // flagNames is the Go-field-name → CLI-flag-name lookup used by

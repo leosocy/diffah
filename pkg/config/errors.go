@@ -6,27 +6,27 @@ import (
 	"github.com/leosocy/diffah/pkg/diff/errs"
 )
 
-// ConfigError is the sentinel error produced for any malformed config
+// LoadError is the sentinel error produced for any malformed config
 // file content (bad YAML, unknown field, type mismatch). It surfaces as
 // CategoryUser through cmd.Execute → exit code 2.
-type ConfigError struct {
+type LoadError struct {
 	Path string
 	Err  error
 }
 
-func (e *ConfigError) Error() string {
+func (e *LoadError) Error() string {
 	return fmt.Sprintf("config: %s: %v", e.Path, e.Err)
 }
 
-func (e *ConfigError) Unwrap() error { return e.Err }
+func (e *LoadError) Unwrap() error { return e.Err }
 
-func (*ConfigError) Category() errs.Category { return errs.CategoryUser }
+func (*LoadError) Category() errs.Category { return errs.CategoryUser }
 
-func (*ConfigError) NextAction() string {
+func (*LoadError) NextAction() string {
 	return "fix the config file (use 'diffah config validate' to inspect) or unset $DIFFAH_CONFIG"
 }
 
 var (
-	_ errs.Categorized = (*ConfigError)(nil)
-	_ errs.Advised     = (*ConfigError)(nil)
+	_ errs.Categorized = (*LoadError)(nil)
+	_ errs.Advised     = (*LoadError)(nil)
 )

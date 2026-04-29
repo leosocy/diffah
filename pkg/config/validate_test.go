@@ -21,6 +21,6 @@ func TestValidate_OKForValidFile(t *testing.T) {
 func TestValidate_FailsForMalformed(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "bad.yaml")
 	require.NoError(t, os.WriteFile(path, []byte("not: valid: yaml: ["), 0o644))
-	var ce *ConfigError
+	var ce *LoadError
 	require.ErrorAs(t, Validate(path), &ce)
 }
