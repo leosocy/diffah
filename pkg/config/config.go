@@ -25,15 +25,15 @@ import (
 // that `config init` output round-trips through `config validate` without
 // error (yaml.Marshal uses yaml tags; viper uses mapstructure tags).
 type Config struct {
-	Platform      string        `mapstructure:"platform"        yaml:"platform"`          // diff, bundle
-	IntraLayer    string        `mapstructure:"intra-layer"     yaml:"intra-layer"`       // diff, bundle (auto|off|required)
-	Authfile      string        `mapstructure:"authfile"        yaml:"authfile"`          // diff, bundle, apply, unbundle
-	RetryTimes    int           `mapstructure:"retry-times"     yaml:"retry-times"`       // apply, unbundle
-	RetryDelay    time.Duration `mapstructure:"retry-delay"     yaml:"retry-delay"`       // apply, unbundle (Go duration)
-	ZstdLevel     int           `mapstructure:"zstd-level"      yaml:"zstd-level"`        // diff, bundle  (1..22)
-	ZstdWindowLog string        `mapstructure:"zstd-window-log" yaml:"zstd-window-log"`   // diff, bundle  (auto | 10..31)
-	Workers       int           `mapstructure:"workers"         yaml:"workers"`           // diff, bundle
-	Candidates    int           `mapstructure:"candidates"      yaml:"candidates"`        // diff, bundle
+	Platform      string        `mapstructure:"platform"        yaml:"platform"        json:"platform"`         // diff, bundle
+	IntraLayer    string        `mapstructure:"intra-layer"     yaml:"intra-layer"     json:"intra-layer"`      // diff, bundle (auto|off|required)
+	Authfile      string        `mapstructure:"authfile"        yaml:"authfile"        json:"authfile"`         // diff, bundle, apply, unbundle
+	RetryTimes    int           `mapstructure:"retry-times"     yaml:"retry-times"     json:"retry-times"`      // apply, unbundle
+	RetryDelay    time.Duration `mapstructure:"retry-delay"     yaml:"retry-delay"     json:"retry-delay"`      // apply, unbundle (Go duration)
+	ZstdLevel     int           `mapstructure:"zstd-level"      yaml:"zstd-level"      json:"zstd-level"`       // diff, bundle  (1..22)
+	ZstdWindowLog string        `mapstructure:"zstd-window-log" yaml:"zstd-window-log" json:"zstd-window-log"`  // diff, bundle  (auto | 10..31)
+	Workers       int           `mapstructure:"workers"         yaml:"workers"         json:"workers"`          // diff, bundle
+	Candidates    int           `mapstructure:"candidates"      yaml:"candidates"      json:"candidates"`       // diff, bundle
 }
 
 // flagNames is the Go-field-name → CLI-flag-name lookup used by

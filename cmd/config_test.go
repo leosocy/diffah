@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -19,7 +18,7 @@ func TestConfigShow_TextFormat(t *testing.T) {
 	require.Equal(t, 0, rc)
 
 	out := stdout.String()
-	require.True(t, strings.Contains(out, "platform: linux/amd64"), "got: %s", out)
+	require.Contains(t, out, "platform: linux/amd64")
 }
 
 func TestConfigShow_JSONFormat(t *testing.T) {
@@ -31,8 +30,10 @@ func TestConfigShow_JSONFormat(t *testing.T) {
 	require.Equal(t, 0, rc)
 
 	out := stdout.String()
-	require.True(t, strings.Contains(out, `"Platform":"linux/amd64"`) ||
-		strings.Contains(out, `"Platform": "linux/amd64"`), "got: %s", out)
+	// Output must use the writeJSON envelope (schema_version + data) and
+	// kebab-case keys from the json struct tags, not Go PascalCase.
+	require.Contains(t, out, `"data":`)
+	require.Contains(t, out, `"platform": "linux/amd64"`)
 }
 
 func TestConfigInit_WritesTemplate(t *testing.T) {
@@ -44,6 +45,19 @@ func TestConfigInit_WritesTemplate(t *testing.T) {
 	require.Equal(t, 0, rc)
 
 	body, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.Contains(t, string(body), "platform: linux/amd64")
+}
+
+func TestConfigInit_HonorsDIFFAH_CONFIG(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "custom.yaml")
+	t.Setenv("DIFFAH_CONFIG", target)
+
+	rc := Run(nil, nil, "config", "init")
+	require.Equal(t, 0, rc)
+
+	body, err := os.ReadFile(target)
 	require.NoError(t, err)
 	require.Contains(t, string(body), "platform: linux/amd64")
 }

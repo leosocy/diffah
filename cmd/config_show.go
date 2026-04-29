@@ -1,9 +1,6 @@
 package cmd
 
 import (
-	"encoding/json"
-	"fmt"
-
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 
@@ -32,14 +29,12 @@ func runConfigShow(cmd *cobra.Command, _ []string) error {
 	}
 	w := cmd.OutOrStdout()
 	if outputFormat == outputJSON {
-		enc := json.NewEncoder(w)
-		enc.SetIndent("", "  ")
-		return enc.Encode(cfg)
+		return writeJSON(w, cfg)
 	}
 	out, err := yaml.Marshal(cfg)
 	if err != nil {
 		return err
 	}
-	fmt.Fprint(w, string(out))
-	return nil
+	_, err = w.Write(out)
+	return err
 }

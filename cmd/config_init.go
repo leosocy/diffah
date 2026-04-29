@@ -31,7 +31,7 @@ an existing file unless --force is given.`,
 }
 
 func runConfigInit(cmd *cobra.Command, args []string) error {
-	path := configInitDefaultPath()
+	path := config.DefaultPath()
 	if len(args) == 1 {
 		path = args[0]
 	}
@@ -52,12 +52,4 @@ func runConfigInit(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "wrote %s\n", path)
 	return nil
-}
-
-func configInitDefaultPath() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "config.yaml"
-	}
-	return filepath.Join(home, ".diffah", "config.yaml")
 }
