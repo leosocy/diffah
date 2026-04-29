@@ -133,11 +133,10 @@ func init() {
 		if v := os.Getenv("DIFFAH_LOG_FORMAT"); v != "" && !cmd.Flags().Changed("log-format") {
 			logFmt = v
 		}
-		// The 'config' subtree must run even when the resolved config
-		// file is malformed — that's how operators use 'config validate'
-		// to diagnose the breakage. Skip the persistent load+apply for
-		// those commands.
-		if !isConfigSubtree(cmd) {
+		// The 'config' subtree and 'doctor' must run even when the resolved
+		// config file is malformed — that's how operators diagnose the
+		// breakage. Skip the persistent load+apply for those commands.
+		if !isExemptFromConfigLoad(cmd) {
 			if err := loadAndApplyConfig(cmd); err != nil {
 				return err
 			}
@@ -158,11 +157,20 @@ func loadAndApplyConfig(cmd *cobra.Command) error {
 	return config.ApplyTo(cmd.Flags(), cfg)
 }
 
-// isConfigSubtree reports whether cmd is the 'config' command or one
-// of its subcommands. Used by PersistentPreRunE to skip the config
-// load+apply step so 'config validate' / 'config show' / etc. work
-// even when the resolved config file is malformed.
-func isConfigSubtree(cmd *cobra.Command) bool {
+// isExemptFromConfigLoad reports whether cmd should skip the persistent
+// config load+apply step. Two reasons to exempt:
+//
+//  1. The 'config' subtree (show/init/validate) MUST run even when the
+//     resolved config file is malformed — that's how operators diagnose
+//     the breakage.
+//
+//  2. The 'doctor' command is the diagnostic escape hatch and must be
+//     able to report a malformed config structurally rather than
+//     hard-failing in PersistentPreRunE before runDoctor fires.
+func isExemptFromConfigLoad(cmd *cobra.Command) bool {
+	if cmd.Name() == "doctor" {
+		return true
+	}
 	for c := cmd; c != nil; c = c.Parent() {
 		if c.Name() == "config" {
 			return true
