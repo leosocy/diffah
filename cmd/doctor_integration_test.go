@@ -17,6 +17,14 @@ import (
 // TestDoctorProbe_OKAgainstSeededRegistry asserts a successful manifest
 // fetch (network check status=ok, exit code 0).
 func TestDoctorProbe_OKAgainstSeededRegistry(t *testing.T) {
+	// Isolate the authfile lookup chain from the developer's machine.
+	// Exit 0 requires every check to pass, including authfile; without
+	// isolation a malformed ~/.docker/config.json would surface here as
+	// a confusing failure unrelated to the probe under test.
+	t.Setenv("REGISTRY_AUTH_FILE", "")
+	t.Setenv("XDG_RUNTIME_DIR", "")
+	t.Setenv("HOME", t.TempDir())
+
 	root := findRepoRoot(t)
 	bin := integrationBinary(t)
 	srv := registrytest.New(t)
@@ -89,6 +97,10 @@ func TestDoctorProbe_TimeoutOnBlackHole(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = ln.Close() })
 
+	// Goroutines exit on listener close (outer Accept loop) or on the
+	// subprocess closing its connection (per-conn Read returns EOF).
+	// t.Cleanup runs after the subprocess has exited, so the chain
+	// unwinds without a leak.
 	go func() {
 		for {
 			conn, err := ln.Accept()
@@ -97,7 +109,6 @@ func TestDoctorProbe_TimeoutOnBlackHole(t *testing.T) {
 			}
 			go func(c net.Conn) {
 				defer c.Close()
-				// Drain reads forever; never write a response.
 				buf := make([]byte, 1024)
 				for {
 					if _, err := c.Read(buf); err != nil {
