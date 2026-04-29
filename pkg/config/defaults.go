@@ -11,7 +11,7 @@ func Default() *Config {
 		Platform:      "linux/amd64",
 		IntraLayer:    "auto",
 		Authfile:      "",
-		RetryTimes:    0,
+		RetryTimes:    3,
 		RetryDelay:    time.Duration(0),
 		ZstdLevel:     22,
 		ZstdWindowLog: "auto",

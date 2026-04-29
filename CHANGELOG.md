@@ -20,11 +20,23 @@
 - `diff` / `bundle` / `apply` / `unbundle` flag defaults now come from the
   resolved config when no flag is set on the command line. With no config
   file present, behavior is unchanged.
+- A malformed `~/.diffah/config.yaml` (or `$DIFFAH_CONFIG`) now exits 2 from
+  any non-`config` subcommand. The `config` subtree (`config show / init /
+  validate`) remains usable so operators can diagnose the breakage.
+
+### Notes
+
+- `diffah config show --format=json` emits `retry-delay` as integer
+  nanoseconds (`time.Duration`'s default JSON encoding). YAML output uses
+  the human-readable form (`"250ms"`); paste YAML, not JSON, back into
+  the config file.
 
 ### Backward compatibility
 
 - No change for users who don't create a config file. Existing CI scripts
-  with explicit flags keep their explicit values.
+  with explicit flags keep their explicit values. `pkg/config.Default()` is
+  pinned to match each command's cobra flag default
+  (`TestConfigDefaults_MatchCobraFlagDefaults`).
 
 ## [Unreleased] — Apply correctness & resilience (Track A)
 
