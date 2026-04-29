@@ -16,21 +16,21 @@ import (
 
 // TestDoctorProbe_OKAgainstSeededRegistry asserts a successful manifest
 // fetch (network check status=ok, exit code 0).
+//
+// REGISTRY_AUTH_FILE is pinned to a non-existent path so the upstream
+// containers-image credential lookup uses ONLY that path (ENOENT →
+// anonymous) instead of falling through to /run/containers/<uid>/auth.json,
+// which is present-but-unreadable on GitHub Actions runners and would
+// surface as EACCES → classified by ClassifyRegistryErr as
+// "authentication failed". The doctor's authfile check still returns
+// "warn" (file does not exist) which does not affect the exit code.
 func TestDoctorProbe_OKAgainstSeededRegistry(t *testing.T) {
 	root := findRepoRoot(t)
 	bin := integrationBinary(t)
 	srv := registrytest.New(t)
 	seedOCIIntoRegistry(t, srv, "app/v1", filepath.Join(root, "testdata/fixtures/v1_oci.tar"), nil)
 
-	// Isolate the diffah subprocess from the host's authfile lookup chain.
-	// Exit 0 requires every check to pass, including authfile; a malformed
-	// or unreadable ~/.docker/config.json or /run/containers/<uid>/auth.json
-	// would surface as a confusing failure unrelated to the probe under
-	// test. Set AFTER seeding because seedOCIIntoRegistry's containers-image
-	// credential lookup behaves differently when XDG_RUNTIME_DIR is empty.
-	t.Setenv("REGISTRY_AUTH_FILE", "")
-	t.Setenv("XDG_RUNTIME_DIR", "")
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("REGISTRY_AUTH_FILE", filepath.Join(t.TempDir(), "absent-auth.json"))
 
 	stdout, stderr, exit := runDiffahBin(t, bin,
 		"doctor",
