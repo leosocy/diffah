@@ -14,6 +14,25 @@
   - `diffah config show` — print the resolved config (yaml; `--format=json` for JSON).
   - `diffah config init [PATH] [--force]` — write a template.
   - `diffah config validate [PATH]` — validate a single file.
+- **`diffah doctor` expansion** (Phase 5.1): four new checks alongside the
+  existing `zstd` check.
+  - `tmpdir` — writes a 1 KiB probe into `$TMPDIR` (or `os.TempDir()`).
+  - `authfile` — walks the standard containers-image lookup chain
+    (`$REGISTRY_AUTH_FILE` → `$XDG_RUNTIME_DIR/containers/auth.json` →
+    `$HOME/.docker/config.json`) and validates the resolved file parses
+    as JSON with an `auths` map. Warns (does not fail) when no file
+    is found — anonymous pulls still work.
+  - `network` — gated by `--probe REF`; round-trips a single
+    `GetManifest` against the supplied registry reference under a 15 s
+    hard timeout. Skipped when `--probe` is absent.
+  - `config` — calls `pkg/config.Validate` against the resolved config
+    file. Doctor is exempted from the persistent config-load hook so
+    it can diagnose a malformed file structurally instead of
+    hard-failing in `PersistentPreRunE`.
+- `diffah doctor` accepts the full registry-flag block
+  (`--authfile`, `--tls-verify`, `--cert-dir`, `--creds`, …) so
+  `--probe` can target private registries with custom credentials and
+  TLS.
 
 ### Behavior changes
 
@@ -23,6 +42,10 @@
 - A malformed `~/.diffah/config.yaml` (or `$DIFFAH_CONFIG`) now exits 2 from
   any non-`config` subcommand. The `config` subtree (`config show / init /
   validate`) remains usable so operators can diagnose the breakage.
+- `diffah doctor` exits 3 (`CategoryEnvironment`) whenever any check
+  fails. Previously only the `zstd` check could fail; this is a
+  deliberate strengthening (spec G3). Warnings (`warn` status, e.g.,
+  authfile lookup chain empty) do not affect the exit code.
 
 ### Notes
 
@@ -37,6 +60,10 @@
   with explicit flags keep their explicit values. `pkg/config.Default()` is
   pinned to match each command's cobra flag default
   (`TestConfigDefaults_MatchCobraFlagDefaults`).
+- Existing `zstd` check semantics are preserved unchanged. JSON output
+  (`--format=json`) keeps its envelope; the `checks` array now contains
+  five entries instead of one. Old consumers that filter for
+  `"name":"zstd"` continue to work.
 
 ## [Unreleased] — Apply correctness & resilience (Track A)
 

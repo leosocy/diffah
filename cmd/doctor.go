@@ -28,8 +28,21 @@ type CheckResult struct {
 	Hint   string
 }
 
-func defaultChecks() []Check {
-	return []Check{zstdCheck{}}
+// defaultChecks returns the five checks that 'diffah doctor' runs in
+// order: zstd (binary version), tmpdir (write probe), authfile (lookup
+// chain + JSON parse), network (manifest GetManifest under 15s timeout,
+// gated by --probe), and config (pkg/config.Validate against
+// DefaultPath). probe is the value of the --probe flag (empty = skip
+// network probe). buildSysCtx materializes a *types.SystemContext from
+// the registry-flag block installed on the doctor command.
+func defaultChecks(probe string, buildSysCtx registryContextBuilder) []Check {
+	return []Check{
+		zstdCheck{},
+		tmpdirCheck{},
+		authfileCheck{},
+		networkCheck{probe: probe, buildSysCtx: buildSysCtx},
+		configCheck{},
+	}
 }
 
 type zstdCheck struct{}
@@ -49,18 +62,38 @@ func (zstdCheck) Run(ctx context.Context) CheckResult {
 }
 
 func newDoctorCommand() *cobra.Command {
-	return &cobra.Command{
+	var probe string
+	cmd := &cobra.Command{
 		Use:   "doctor",
 		Short: "Run environment preflight checks.",
-		Args:  cobra.NoArgs,
-		RunE:  runDoctor,
+		Long: `Run environment preflight checks. Five checks are executed in order:
+
+  zstd      — zstd binary on $PATH and version >= 1.5
+  tmpdir    — $TMPDIR (or os.TempDir()) accepts a 1 KiB write
+  authfile  — $REGISTRY_AUTH_FILE / $XDG_RUNTIME_DIR / $HOME chain
+              resolves to a parseable JSON file with an 'auths' map
+  network   — (skipped unless --probe is given) the supplied registry
+              reference responds to GetManifest within 15 s
+  config    — config file ($DIFFAH_CONFIG or ~/.diffah/config.yaml)
+              is absent or parses cleanly
+
+Exits 3 if any check fails (CategoryEnvironment); warnings do not
+change the exit code.`,
+		Args: cobra.NoArgs,
 	}
+	cmd.Flags().StringVar(&probe, "probe", "",
+		"image reference (e.g., docker://example.com/foo:tag) for the network check")
+	buildSysCtx := installRegistryFlags(cmd)
+	cmd.RunE = func(c *cobra.Command, _ []string) error {
+		return runDoctor(c, probe, buildSysCtx)
+	}
+	return cmd
 }
 
 func init() { rootCmd.AddCommand(newDoctorCommand()) }
 
-func runDoctor(cmd *cobra.Command, _ []string) error {
-	checks := defaultChecks()
+func runDoctor(cmd *cobra.Command, probe string, buildSysCtx registryContextBuilder) error {
+	checks := defaultChecks(probe, buildSysCtx)
 	results := make([]CheckResult, len(checks))
 	for i, c := range checks {
 		results[i] = c.Run(cmd.Context())
@@ -102,28 +135,10 @@ func renderDoctorText(w io.Writer, checks []Check, results []CheckResult) {
 }
 
 func statusLabel(status, detail string) string {
-	switch status {
-	case statusOK:
-		if detail != "" {
-			return "ok (" + detail + ")"
-		}
-		return "ok"
-	case statusWarn:
-		if detail != "" {
-			return statusWarn + " (" + detail + ")"
-		}
-		return statusWarn
-	case statusFail:
-		if detail != "" {
-			return "fail (" + detail + ")"
-		}
-		return "fail"
-	default:
-		if detail != "" {
-			return status + " (" + detail + ")"
-		}
-		return status
+	if detail != "" {
+		return status + " (" + detail + ")"
 	}
+	return status
 }
 
 func anyFailed(rs []CheckResult) bool {
