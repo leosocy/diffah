@@ -1,5 +1,43 @@
 # Changelog
 
+## [Unreleased] — Phase 5: DX & diagnostics polish
+
+### Additions
+
+- **Config file** (`~/.diffah/config.yaml` or `$DIFFAH_CONFIG`) supplies
+  defaults for nine flags: `--platform`, `--intra-layer`, `--authfile`,
+  `--retry-times`, `--retry-delay`, `--zstd-level`, `--zstd-window-log`,
+  `--workers`, `--candidates`. CLI flags always override config; absent
+  config = built-in defaults; malformed config = exit 2 with the offending
+  file path and the parse error.
+- New helper subcommands:
+  - `diffah config show` — print the resolved config (yaml; `--format=json` for JSON).
+  - `diffah config init [PATH] [--force]` — write a template.
+  - `diffah config validate [PATH]` — validate a single file.
+
+### Behavior changes
+
+- `diff` / `bundle` / `apply` / `unbundle` flag defaults now come from the
+  resolved config when no flag is set on the command line. With no config
+  file present, behavior is unchanged.
+- A malformed `~/.diffah/config.yaml` (or `$DIFFAH_CONFIG`) now exits 2 from
+  any non-`config` subcommand. The `config` subtree (`config show / init /
+  validate`) remains usable so operators can diagnose the breakage.
+
+### Notes
+
+- `diffah config show --format=json` emits `retry-delay` as integer
+  nanoseconds (`time.Duration`'s default JSON encoding). YAML output uses
+  the human-readable form (`"250ms"`); paste YAML, not JSON, back into
+  the config file.
+
+### Backward compatibility
+
+- No change for users who don't create a config file. Existing CI scripts
+  with explicit flags keep their explicit values. `pkg/config.Default()` is
+  pinned to match each command's cobra flag default
+  (`TestConfigDefaults_MatchCobraFlagDefaults`).
+
 ## [Unreleased] — Apply correctness & resilience (Track A)
 
 ### Behavior changes

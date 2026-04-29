@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/leosocy/diffah/pkg/config"
 	"github.com/leosocy/diffah/pkg/diff/errs"
 	"github.com/leosocy/diffah/pkg/progress"
 )
@@ -132,7 +133,40 @@ func init() {
 		if v := os.Getenv("DIFFAH_LOG_FORMAT"); v != "" && !cmd.Flags().Changed("log-format") {
 			logFmt = v
 		}
+		// The 'config' subtree must run even when the resolved config
+		// file is malformed — that's how operators use 'config validate'
+		// to diagnose the breakage. Skip the persistent load+apply for
+		// those commands.
+		if !isConfigSubtree(cmd) {
+			if err := loadAndApplyConfig(cmd); err != nil {
+				return err
+			}
+		}
 		installLogger(cmd.ErrOrStderr(), lvl, logFmt, quiet, verbose)
 		return nil
 	}
+}
+
+// loadAndApplyConfig loads the config from DefaultPath and applies it to
+// the command's flag set. CLI-explicit flags already win because ApplyTo
+// only writes when flag.Changed is false.
+func loadAndApplyConfig(cmd *cobra.Command) error {
+	cfg, err := config.Load(config.DefaultPath())
+	if err != nil {
+		return err
+	}
+	return config.ApplyTo(cmd.Flags(), cfg)
+}
+
+// isConfigSubtree reports whether cmd is the 'config' command or one
+// of its subcommands. Used by PersistentPreRunE to skip the config
+// load+apply step so 'config validate' / 'config show' / etc. work
+// even when the resolved config file is malformed.
+func isConfigSubtree(cmd *cobra.Command) bool {
+	for c := cmd; c != nil; c = c.Parent() {
+		if c.Name() == "config" {
+			return true
+		}
+	}
+	return false
 }
