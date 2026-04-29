@@ -44,8 +44,9 @@ func TestDIFFAH_CONFIG_DrivesDryRunDefaults(t *testing.T) {
 		"oci-archive:"+v2,
 		out,
 	)
-	require.NotEqualf(t, 0, exit,
-		"expected non-zero exit when config sets workers=0; stderr: %s", stderr)
+	// workers=0 fails --workers>=1 validation → CategoryUser → exit 2
+	require.Equalf(t, 2, exit,
+		"expected exit 2 (user error) when config sets workers=0; stderr: %s", stderr)
 	require.Containsf(t, stderr, "workers",
 		"expected 'workers' in error message; stderr: %s", stderr)
 

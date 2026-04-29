@@ -14,6 +14,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// noCfgDir holds the temp dir created to hold a non-existent config file,
+// cleaned up after m.Run() completes.
+var noCfgDir string
+
 var (
 	binaryPath string
 	binaryDir  string
@@ -23,9 +27,20 @@ var (
 )
 
 func TestMain(m *testing.M) {
+	// Phase 5.2: ensure no real ~/.diffah/config.yaml leaks into the
+	// integration suite. The binary reads $DIFFAH_CONFIG at startup;
+	// pointing it at an absent file makes every invocation use defaults.
+	if os.Getenv("DIFFAH_CONFIG") == "" {
+		dir, _ := os.MkdirTemp("", "diffah-integration-no-config-")
+		os.Setenv("DIFFAH_CONFIG", filepath.Join(dir, "absent.yaml"))
+		noCfgDir = dir
+	}
 	code := m.Run()
 	if binaryDir != "" {
 		_ = os.RemoveAll(binaryDir)
+	}
+	if noCfgDir != "" {
+		_ = os.RemoveAll(noCfgDir)
 	}
 	os.Exit(code)
 }
