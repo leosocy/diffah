@@ -123,9 +123,9 @@ func splitCreds(raw string) (user, pass string, ok bool) {
 // ResolveAuthFile returns the first existing file in the standard
 // containers-image precedence chain:
 //
-//	1. $REGISTRY_AUTH_FILE
-//	2. $XDG_RUNTIME_DIR/containers/auth.json
-//	3. $HOME/.docker/config.json
+//  1. $REGISTRY_AUTH_FILE
+//  2. $XDG_RUNTIME_DIR/containers/auth.json
+//  3. $HOME/.docker/config.json
 //
 // Returns an empty string when none of the candidates exist (upstream
 // containers-image treats this as "no credentials available"). Callers
