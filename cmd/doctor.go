@@ -74,8 +74,8 @@ func newDoctorCommand() *cobra.Command {
               resolves to a parseable JSON file with an 'auths' map
   network   — (skipped unless --probe is given) the supplied registry
               reference responds to GetManifest within 15 s
-  config    — ~/.diffah/config.yaml (or $DIFFAH_CONFIG) is absent or
-              parses cleanly
+  config    — config file ($DIFFAH_CONFIG or ~/.diffah/config.yaml)
+              is absent or parses cleanly
 
 Exits 3 if any check fails (CategoryEnvironment); warnings do not
 change the exit code.`,

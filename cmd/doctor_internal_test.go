@@ -219,7 +219,7 @@ func TestConfigCheck_FailForMalformedFile(t *testing.T) {
 
 	result := configCheck{}.Run(context.Background())
 	require.Equal(t, statusFail, result.Status)
-	require.Contains(t, result.Detail, "config")
+	require.Contains(t, result.Detail, "yaml")
 	require.NotEmpty(t, result.Hint)
 }
 
