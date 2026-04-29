@@ -3,9 +3,14 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"errors"
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.podman.io/image/v5/types"
 
 	"github.com/leosocy/diffah/pkg/diff/errs"
 )
@@ -62,13 +67,13 @@ func TestAnyFailed(t *testing.T) {
 	require.True(t, anyFailed([]CheckResult{{Status: statusFail}}))
 }
 
-func TestDefaultChecks_ContainsZstd(t *testing.T) {
-	checks := defaultChecks()
+func TestDefaultChecks_ReturnsFiveChecksInOrder(t *testing.T) {
+	checks := defaultChecks("", nil)
 	names := make([]string, len(checks))
 	for i, c := range checks {
 		names[i] = c.Name()
 	}
-	require.Contains(t, names, "zstd")
+	require.Equal(t, []string{"zstd", "tmpdir", "authfile", "network", "config"}, names)
 }
 
 func TestZstdCheck_NameAndRun(t *testing.T) {
@@ -83,6 +88,139 @@ func TestZstdCheck_NameAndRun(t *testing.T) {
 		require.NotEmpty(t, result.Detail)
 		require.NotEmpty(t, result.Hint)
 	}
+}
+
+func TestTmpdirCheck_NameAndOK(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	c := tmpdirCheck{}
+	require.Equal(t, "tmpdir", c.Name())
+	result := c.Run(context.Background())
+	require.Equal(t, statusOK, result.Status)
+	require.NotEmpty(t, result.Detail)
+	require.Empty(t, result.Hint)
+}
+
+func TestTmpdirCheck_FailWhenDirDoesNotExist(t *testing.T) {
+	t.Setenv("TMPDIR", "/nonexistent/diffah-doctor-test/path")
+	result := tmpdirCheck{}.Run(context.Background())
+	require.Equal(t, statusFail, result.Status)
+	require.NotEmpty(t, result.Detail)
+	require.NotEmpty(t, result.Hint)
+}
+
+func TestAuthfileCheck_WarnWhenChainEmpty(t *testing.T) {
+	// Empty all three env vars so ResolveAuthFile returns "".
+	t.Setenv("REGISTRY_AUTH_FILE", "")
+	t.Setenv("XDG_RUNTIME_DIR", "")
+	t.Setenv("HOME", t.TempDir()) // empty home dir — no .docker/config.json
+
+	result := authfileCheck{}.Run(context.Background())
+	require.Equal(t, statusWarn, result.Status)
+	require.Contains(t, result.Detail, "anonymous pulls only")
+}
+
+func TestAuthfileCheck_OKForValidJSON(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "auth.json")
+	require.NoError(t, os.WriteFile(path, []byte(`{
+		"auths": {
+			"registry.example.com": {"auth": "abc"},
+			"docker.io": {"auth": "def"}
+		}
+	}`), 0o600))
+	t.Setenv("REGISTRY_AUTH_FILE", path)
+	t.Setenv("XDG_RUNTIME_DIR", "")
+	t.Setenv("HOME", t.TempDir())
+
+	result := authfileCheck{}.Run(context.Background())
+	require.Equal(t, statusOK, result.Status)
+	require.Contains(t, result.Detail, path)
+	require.Contains(t, result.Detail, "2 registries")
+}
+
+func TestAuthfileCheck_FailOnMalformedJSON(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "auth.json")
+	require.NoError(t, os.WriteFile(path, []byte("{this is not json"), 0o600))
+	t.Setenv("REGISTRY_AUTH_FILE", path)
+	t.Setenv("XDG_RUNTIME_DIR", "")
+	t.Setenv("HOME", t.TempDir())
+
+	result := authfileCheck{}.Run(context.Background())
+	require.Equal(t, statusFail, result.Status)
+	require.Contains(t, result.Detail, "JSON parse error")
+	require.NotEmpty(t, result.Hint)
+}
+
+func TestAuthfileCheck_FailWhenAuthsMissing(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "auth.json")
+	require.NoError(t, os.WriteFile(path, []byte(`{"other": {}}`), 0o600))
+	t.Setenv("REGISTRY_AUTH_FILE", path)
+	t.Setenv("XDG_RUNTIME_DIR", "")
+	t.Setenv("HOME", t.TempDir())
+
+	result := authfileCheck{}.Run(context.Background())
+	require.Equal(t, statusFail, result.Status)
+	require.Contains(t, result.Detail, "missing 'auths' map")
+}
+
+func TestNetworkCheck_SkippedWhenProbeEmpty(t *testing.T) {
+	c := networkCheck{probe: "", buildSysCtx: nil}
+	result := c.Run(context.Background())
+	require.Equal(t, statusOK, result.Status)
+	require.Contains(t, result.Detail, "skipped")
+}
+
+func TestNetworkCheck_FailWhenBuildSysCtxFails(t *testing.T) {
+	stub := func() (*types.SystemContext, int, time.Duration, error) {
+		return nil, 0, 0, errors.New("flag conflict: --creds and --no-creds")
+	}
+	c := networkCheck{probe: "docker://example.com/foo:tag", buildSysCtx: stub}
+	result := c.Run(context.Background())
+	require.Equal(t, statusFail, result.Status)
+	require.Contains(t, result.Detail, "flag conflict")
+	require.NotEmpty(t, result.Hint)
+}
+
+func TestNetworkCheck_FailOnInvalidReference(t *testing.T) {
+	stub := func() (*types.SystemContext, int, time.Duration, error) {
+		return &types.SystemContext{}, 0, 0, nil
+	}
+	c := networkCheck{probe: "not a valid reference", buildSysCtx: stub}
+	result := c.Run(context.Background())
+	require.Equal(t, statusFail, result.Status)
+	require.Contains(t, result.Detail, "parse")
+}
+
+func TestConfigCheck_OKWhenFileAbsent(t *testing.T) {
+	t.Setenv("DIFFAH_CONFIG", filepath.Join(t.TempDir(), "absent.yaml"))
+	result := configCheck{}.Run(context.Background())
+	require.Equal(t, statusOK, result.Status)
+	require.Contains(t, result.Detail, "no config file")
+}
+
+func TestConfigCheck_OKForValidFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	require.NoError(t, os.WriteFile(path, []byte("platform: linux/arm64\n"), 0o600))
+	t.Setenv("DIFFAH_CONFIG", path)
+
+	result := configCheck{}.Run(context.Background())
+	require.Equal(t, statusOK, result.Status)
+	require.Contains(t, result.Detail, path)
+}
+
+func TestConfigCheck_FailForMalformedFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	require.NoError(t, os.WriteFile(path, []byte("not: valid: yaml: ["), 0o600))
+	t.Setenv("DIFFAH_CONFIG", path)
+
+	result := configCheck{}.Run(context.Background())
+	require.Equal(t, statusFail, result.Status)
+	require.Contains(t, result.Detail, "config")
+	require.NotEmpty(t, result.Hint)
 }
 
 type stubCheck struct {

@@ -30,11 +30,14 @@ func TestDoctor_JSONShape(t *testing.T) {
 	require.Equal(t, 1, env.SchemaVersion)
 	require.NotEmpty(t, env.Data.Checks, "expected at least one check")
 
-	names := make([]string, 0, len(env.Data.Checks))
+	wanted := []string{"zstd", "tmpdir", "authfile", "network", "config"}
+	gotNames := make(map[string]bool)
 	for _, c := range env.Data.Checks {
-		names = append(names, c.Name)
+		gotNames[c.Name] = true
 	}
-	require.True(t, containsStr(names, "zstd"), "expected zstd check among %v", names)
+	for _, name := range wanted {
+		require.True(t, gotNames[name], "expected check %q in %v", name, env.Data.Checks)
+	}
 
 	for _, c := range env.Data.Checks {
 		require.Contains(t, []string{"ok", "warn", "fail"}, c.Status,
@@ -61,13 +64,4 @@ func TestDoctor_TextOutput_StatusLabels(t *testing.T) {
 	out := stdout.String()
 	ok := strings.Contains(out, "ok") || strings.Contains(out, "fail")
 	require.True(t, ok, "text output should contain ok or fail status, got: %q", out)
-}
-
-func containsStr(s []string, v string) bool {
-	for _, x := range s {
-		if x == v {
-			return true
-		}
-	}
-	return false
 }
