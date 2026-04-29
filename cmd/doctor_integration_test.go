@@ -17,18 +17,20 @@ import (
 // TestDoctorProbe_OKAgainstSeededRegistry asserts a successful manifest
 // fetch (network check status=ok, exit code 0).
 func TestDoctorProbe_OKAgainstSeededRegistry(t *testing.T) {
-	// Isolate the authfile lookup chain from the developer's machine.
-	// Exit 0 requires every check to pass, including authfile; without
-	// isolation a malformed ~/.docker/config.json would surface here as
-	// a confusing failure unrelated to the probe under test.
-	t.Setenv("REGISTRY_AUTH_FILE", "")
-	t.Setenv("XDG_RUNTIME_DIR", "")
-	t.Setenv("HOME", t.TempDir())
-
 	root := findRepoRoot(t)
 	bin := integrationBinary(t)
 	srv := registrytest.New(t)
 	seedOCIIntoRegistry(t, srv, "app/v1", filepath.Join(root, "testdata/fixtures/v1_oci.tar"), nil)
+
+	// Isolate the diffah subprocess from the host's authfile lookup chain.
+	// Exit 0 requires every check to pass, including authfile; a malformed
+	// or unreadable ~/.docker/config.json or /run/containers/<uid>/auth.json
+	// would surface as a confusing failure unrelated to the probe under
+	// test. Set AFTER seeding because seedOCIIntoRegistry's containers-image
+	// credential lookup behaves differently when XDG_RUNTIME_DIR is empty.
+	t.Setenv("REGISTRY_AUTH_FILE", "")
+	t.Setenv("XDG_RUNTIME_DIR", "")
+	t.Setenv("HOME", t.TempDir())
 
 	stdout, stderr, exit := runDiffahBin(t, bin,
 		"doctor",
