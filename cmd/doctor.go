@@ -135,28 +135,10 @@ func renderDoctorText(w io.Writer, checks []Check, results []CheckResult) {
 }
 
 func statusLabel(status, detail string) string {
-	switch status {
-	case statusOK:
-		if detail != "" {
-			return "ok (" + detail + ")"
-		}
-		return "ok"
-	case statusWarn:
-		if detail != "" {
-			return statusWarn + " (" + detail + ")"
-		}
-		return statusWarn
-	case statusFail:
-		if detail != "" {
-			return "fail (" + detail + ")"
-		}
-		return "fail"
-	default:
-		if detail != "" {
-			return status + " (" + detail + ")"
-		}
-		return status
+	if detail != "" {
+		return status + " (" + detail + ")"
 	}
+	return status
 }
 
 func anyFailed(rs []CheckResult) bool {
