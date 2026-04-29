@@ -2,6 +2,7 @@ package config
 
 import (
 	"testing"
+	"time"
 
 	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/require"
@@ -46,6 +47,20 @@ func TestApplyTo_PreservesExplicitFlag(t *testing.T) {
 
 	got, _ := f.GetString("platform")
 	require.Equal(t, "linux/explicit", got)
+}
+
+func TestApplyTo_AppliesDurationField(t *testing.T) {
+	// time.Duration is reflect.Int64 with a special branch in
+	// setFlagFromCfg that formats via Duration.String() so pflag's
+	// Duration parser receives "3s" rather than a raw nanosecond int.
+	f := newFlagSet()
+	cfg := Default()
+	cfg.RetryDelay = 3 * time.Second
+
+	require.NoError(t, ApplyTo(f, cfg))
+
+	got, _ := f.GetDuration("retry-delay")
+	require.Equal(t, 3*time.Second, got)
 }
 
 func TestApplyTo_IgnoresFlagsNotPresent(t *testing.T) {
