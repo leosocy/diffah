@@ -4,10 +4,26 @@ import (
 	"errors"
 	"io/fs"
 	"os"
+	"path/filepath"
 
 	"github.com/go-viper/mapstructure/v2"
 	"github.com/spf13/viper"
 )
+
+// DefaultPath returns the resolved config file path using the lookup
+// chain $DIFFAH_CONFIG > ~/.diffah/config.yaml. Returns an empty
+// string when neither env var nor user home dir is available — Load
+// treats empty path as "no file → use defaults."
+func DefaultPath() string {
+	if p := os.Getenv("DIFFAH_CONFIG"); p != "" {
+		return p
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".diffah", "config.yaml")
+}
 
 // Load reads the config file at path and returns the resolved Config.
 // A non-existent path is not an error — Default() is returned. A file

@@ -9,6 +9,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestDefaultPath_PrefersEnvOverHome(t *testing.T) {
+	t.Setenv("DIFFAH_CONFIG", "/explicit/path/cfg.yaml")
+	require.Equal(t, "/explicit/path/cfg.yaml", DefaultPath())
+}
+
+func TestDefaultPath_FallsBackToHome(t *testing.T) {
+	t.Setenv("DIFFAH_CONFIG", "")
+	t.Setenv("HOME", "/fake/home")
+	require.Equal(t, "/fake/home/.diffah/config.yaml", DefaultPath())
+}
+
 func TestLoad_MissingFileReturnsDefaults(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "does-not-exist.yaml")
 
