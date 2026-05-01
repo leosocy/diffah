@@ -39,9 +39,9 @@ sboms:
       - "{{ .ArtifactName }}.sbom.json"
     cmd: syft
     args:
-      - "${artifact}"
+      - "$artifact"
       - "--output"
-      - "cyclonedx-json={{ .Document }}"
+      - "cyclonedx-json=$document"
 
 signs:
   - id: cosign-archives
