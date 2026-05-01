@@ -43,6 +43,15 @@
   `layers`, `waste`, `top_savings`, `size_histogram`. Existing
   first-line text shape (`archive:` / `version:` / `feature:` / …) and
   existing JSON keys are preserved — old grep / jq scripts still work.
+- **Recipes cookbook** (Phase 5.6): four end-to-end walkthroughs under
+  [`docs/recipes/`](docs/recipes/index.md) — CI-driven delta release,
+  offline signature verification (static EC P256), air-gapped customer
+  delivery, and nightly registry-to-registry mirror. Every recipe is
+  backed by a shell-based CI smoke
+  (`scripts/smoke-recipes/<slug>.sh` driven by
+  `cmd/recipes_smoke_integration_test.go`) so the documented commands
+  cannot drift from what the project itself exercises. README has a
+  new top-level **Recipes** section linking to the index.
 
 ### Behavior changes
 
