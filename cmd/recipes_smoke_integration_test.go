@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/google/go-containerregistry/pkg/crane"
 	"github.com/stretchr/testify/require"
 
 	"github.com/leosocy/diffah/internal/registrytest"
@@ -137,4 +138,47 @@ func sizeOrZero(t *testing.T, path string) int64 {
 		return 0
 	}
 	return info.Size()
+}
+
+// TestRecipeSmoke_RegistryMirror drives docs/recipes/registry-mirror.md
+// against two in-process registries: a source side seeded with v1 + v2
+// and a mirror side seeded only with v1 (representing yesterday's mirror
+// state). The script computes a delta from the source and applies it
+// into the mirror under the v2 tag; the test then pulls the new tag
+// from the mirror via crane and asserts the manifest digest is well
+// formed.
+func TestRecipeSmoke_RegistryMirror(t *testing.T) {
+	root := findRepoRoot(t)
+	bin := integrationBinary(t)
+
+	source := registrytest.New(t)
+	mirror := registrytest.New(t)
+	seedV1V2(t, source, root)
+	// The mirror only holds yesterday's tag — v2 is what this recipe
+	// writes. Apply pulls v1 from the mirror as the baseline.
+	seedOCIIntoRegistry(t, mirror, "fixtures/v1",
+		filepath.Join(root, "testdata/fixtures/v1_oci.tar"), nil)
+
+	t.Setenv("REGISTRY_AUTH_FILE", filepath.Join(t.TempDir(), "absent-auth.json"))
+
+	work := t.TempDir()
+	sourceHost := registryHost(t, source)
+	mirrorHost := registryHost(t, mirror)
+
+	stdout, stderr, exit := execSmokeScript(t, root, "registry-mirror.sh", []string{
+		"DIFFAH_BIN=" + bin,
+		"WORK_DIR=" + work,
+		"SOURCE_REGISTRY=" + sourceHost,
+		"MIRROR_REGISTRY=" + mirrorHost,
+	})
+	require.Equal(t, 0, exit,
+		"smoke failed (exit=%d)\nstdout:\n%s\nstderr:\n%s", exit, stdout, stderr)
+
+	// Validate the mirror now serves the new tag with a well-formed
+	// manifest digest.
+	img, err := crane.Pull(mirrorHost+"/fixtures/v2:latest", crane.Insecure)
+	require.NoError(t, err, "pull v2 from mirror")
+	d, err := img.Digest()
+	require.NoError(t, err)
+	require.NotEmpty(t, d.String())
 }
