@@ -11,16 +11,61 @@
     "feature": "bundle",
     "images": [
       {
+        "archive_layer_count": 1,
         "baseline": {
           "manifest_digest": "sha256:e1e79e6858384e39151817d4f88818346c441f69d4852e41f5437b347128726a",
           "media_type": "application/vnd.oci.image.manifest.v1+json",
           "source_hint": "svc-a-baseline"
         },
+        "layer_count": 2,
+        "layers": [
+          {
+            "archive_size": 0,
+            "digest": "sha256:f3f445cb429b9458abeaef6830a665faefd682f05ae16d4b102aa4a14e93bbc8",
+            "encoding": "baseline_only",
+            "patch_from": "",
+            "saved_bytes": 1050220,
+            "target_size": 1050220
+          },
+          {
+            "archive_size": 2076,
+            "digest": "sha256:a58c8ca747213430787aff0e7b10fb3832afce641b650220e90009f2b410bc77",
+            "encoding": "full",
+            "patch_from": "",
+            "ratio": 1,
+            "saved_bytes": 0,
+            "target_size": 2076
+          }
+        ],
         "name": "svc-a",
+        "size_histogram": {
+          "buckets": [
+            "<1MiB",
+            "1-10MiB",
+            "10-100MiB",
+            "100MiB-1GiB",
+            ">=1GiB"
+          ],
+          "counts": [
+            1,
+            1,
+            0,
+            0,
+            0
+          ]
+        },
         "target": {
           "manifest_digest": "sha256:0488d7cdd5e6c730cf45521ce6647fe48f968bd470744f0b9835146f36f1febb",
           "media_type": "application/vnd.oci.image.manifest.v1+json"
-        }
+        },
+        "top_savings": [
+          {
+            "digest": "sha256:f3f445cb429b9458abeaef6830a665faefd682f05ae16d4b102aa4a14e93bbc8",
+            "saved_bytes": 1050220,
+            "saved_ratio": 1
+          }
+        ],
+        "waste": []
       }
     ],
     "platform": "linux/amd64",

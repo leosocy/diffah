@@ -15,6 +15,7 @@ import (
 	"github.com/leosocy/diffah/internal/archive"
 	"github.com/leosocy/diffah/internal/zstdpatch"
 	"github.com/leosocy/diffah/pkg/diff"
+	"github.com/leosocy/diffah/pkg/importer"
 )
 
 func TestInspectJSON_Structure(t *testing.T) {
@@ -47,7 +48,7 @@ func TestInspectJSON_Structure(t *testing.T) {
 		},
 	}
 
-	result := inspectJSON("/tmp/bundle.tar", s, true, true)
+	result := inspectJSON("/tmp/bundle.tar", s, true, true, nil)
 
 	var buf bytes.Buffer
 	require.NoError(t, writeJSON(&buf, result))
@@ -140,7 +141,7 @@ func TestInspectJSON_NoPatchSavings(t *testing.T) {
 		},
 	}
 
-	result := inspectJSON("/tmp/bundle.tar", s, false, true)
+	result := inspectJSON("/tmp/bundle.tar", s, false, true, nil)
 
 	var buf bytes.Buffer
 	require.NoError(t, writeJSON(&buf, result))
@@ -156,16 +157,29 @@ func TestInspectJSON_Snapshot(t *testing.T) {
 		t.Skipf("fixture missing: %s", archivePath)
 	}
 
-	raw, err := archive.ReadSidecar(archivePath)
+	rawSidecar, err := archive.ReadSidecar(archivePath)
+	require.NoError(t, err)
+	s, err := diff.ParseSidecar(rawSidecar)
 	require.NoError(t, err)
 
-	s, err := diff.ParseSidecar(raw)
+	digests := make([]digest.Digest, 0, len(s.Images))
+	for _, img := range s.Images {
+		digests = append(digests, img.Target.ManifestDigest)
+	}
+	_, blobs, err := archive.ReadSidecarAndManifestBlobs(archivePath, digests)
 	require.NoError(t, err)
+
+	details := make(map[string]importer.InspectImageDetail, len(s.Images))
+	for _, img := range s.Images {
+		d, derr := importer.BuildInspectImageDetail(s, img, blobs[img.Target.ManifestDigest])
+		require.NoError(t, derr)
+		details[img.Name] = d
+	}
 
 	requiresZstd := s.RequiresZstd()
 	zstdAvailable, _ := zstdpatch.Available(t.Context())
 
-	result := inspectJSON(archivePath, s, requiresZstd, zstdAvailable)
+	result := inspectJSON(archivePath, s, requiresZstd, zstdAvailable, details)
 
 	var buf bytes.Buffer
 	require.NoError(t, writeJSON(&buf, result))
@@ -173,14 +187,14 @@ func TestInspectJSON_Snapshot(t *testing.T) {
 	got := buf.String()
 
 	snap := filepath.Join("testdata", "schemas", "inspect.snap.json")
-	want, err := os.ReadFile(snap)
-	if err != nil {
-		if os.Getenv("DIFFAH_UPDATE_SNAPSHOTS") == "1" {
-			require.NoError(t, os.MkdirAll(filepath.Dir(snap), 0o755))
-			require.NoError(t, os.WriteFile(snap, []byte(normalizeJSON(got)), 0o644))
-			return
+	want, rerr := os.ReadFile(snap)
+	if rerr != nil || os.Getenv("DIFFAH_UPDATE_SNAPSHOTS") == "1" {
+		require.NoError(t, os.MkdirAll(filepath.Dir(snap), 0o755))
+		require.NoError(t, os.WriteFile(snap, []byte(normalizeJSON(got)), 0o644))
+		if rerr != nil {
+			t.Fatalf("snapshot was missing; written. Re-run to verify.")
 		}
-		t.Fatalf("snapshot missing; rerun with DIFFAH_UPDATE_SNAPSHOTS=1: %v", err)
+		return
 	}
 
 	gotNorm := normalizeJSON(got)
@@ -235,4 +249,67 @@ func replaceBoolField(s, field, placeholder string) string {
 		b.WriteString(`"` + placeholder + `"`)
 		rest = rest[valueEnd:]
 	}
+}
+
+func TestInspectJSON_PerImageDetailKeysPresent(t *testing.T) {
+	mfDigest := digest.Digest("sha256:" + strings.Repeat("a", 64))
+	s := &diff.Sidecar{
+		Version: "v1", Feature: "bundle", Tool: "diffah", ToolVersion: "v0.x",
+		CreatedAt: time.Date(2026, 4, 30, 12, 0, 0, 0, time.UTC), Platform: "linux/amd64",
+		Images: []diff.ImageEntry{{
+			Name:     "svc",
+			Target:   diff.TargetRef{ManifestDigest: mfDigest, ManifestSize: 100, MediaType: "application/vnd.oci.image.manifest.v1+json"},
+			Baseline: diff.BaselineRef{ManifestDigest: digest.Digest("sha256:" + strings.Repeat("b", 64)), MediaType: "application/vnd.oci.image.manifest.v1+json"},
+		}},
+		Blobs: map[digest.Digest]diff.BlobEntry{
+			mfDigest: {Size: 100, Encoding: diff.EncodingFull, ArchiveSize: 100},
+		},
+	}
+	details := map[string]importer.InspectImageDetail{
+		"svc": {
+			Name: "svc", ManifestDigest: mfDigest, LayerCount: 1, ArchiveLayerCount: 1,
+			Layers: []importer.LayerRow{
+				{Digest: digest.Digest("sha256:" + strings.Repeat("c", 64)), Kind: importer.LayerKindFull, TargetSize: 1000, ArchiveSize: 1000},
+			},
+			Histogram: importer.SizeHistogram{
+				Buckets: []string{"<1MiB", "1-10MiB", "10-100MiB", "100MiB-1GiB", ">=1GiB"},
+				Counts:  []int{1, 0, 0, 0, 0},
+			},
+		},
+	}
+	result := inspectJSON("/tmp/bundle.tar", s, false, false, details)
+
+	var buf bytes.Buffer
+	require.NoError(t, writeJSON(&buf, result))
+
+	var env struct {
+		Data struct {
+			Images []struct {
+				Name              string `json:"name"`
+				LayerCount        int    `json:"layer_count"`
+				ArchiveLayerCount int    `json:"archive_layer_count"`
+				Layers            []struct {
+					Digest      string `json:"digest"`
+					Encoding    string `json:"encoding"`
+					TargetSize  int64  `json:"target_size"`
+					ArchiveSize int64  `json:"archive_size"`
+				} `json:"layers"`
+				Waste         []map[string]any `json:"waste"`
+				TopSavings    []map[string]any `json:"top_savings"`
+				SizeHistogram struct {
+					Buckets []string `json:"buckets"`
+					Counts  []int    `json:"counts"`
+				} `json:"size_histogram"`
+			} `json:"images"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &env))
+	require.Len(t, env.Data.Images, 1)
+	img0 := env.Data.Images[0]
+	require.Equal(t, "svc", img0.Name)
+	require.Equal(t, 1, img0.LayerCount)
+	require.Equal(t, 1, img0.ArchiveLayerCount)
+	require.Len(t, img0.Layers, 1)
+	require.Equal(t, "full", img0.Layers[0].Encoding)
+	require.Empty(t, img0.Waste)
 }

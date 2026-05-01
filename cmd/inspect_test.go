@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/leosocy/diffah/pkg/diff"
+	"github.com/leosocy/diffah/pkg/importer"
 )
 
 func TestPrintBundleSidecar_PerImageStats(t *testing.T) {
@@ -56,7 +58,7 @@ func TestPrintBundleSidecar_PerImageStats(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := printBundleSidecar(&buf, "/tmp/bundle.tar", s, true, true)
+	err := printBundleSidecar(&buf, "/tmp/bundle.tar", s, true, true, nil)
 	require.NoError(t, err)
 
 	out := buf.String()
@@ -135,8 +137,58 @@ func TestRunInspect_BundleSidecar_ParsesDirectly(t *testing.T) {
 	require.NoError(t, perr, "ParseSidecar should succeed on bundle JSON")
 
 	var buf bytes.Buffer
-	err = printBundleSidecar(&buf, "/tmp/bundle.tar", parsed, false, false)
+	err = printBundleSidecar(&buf, "/tmp/bundle.tar", parsed, false, false, nil)
 	require.NoError(t, err)
 	require.Contains(t, buf.String(), "feature: bundle")
 	require.Contains(t, buf.String(), "--- image: svc ---")
+}
+
+func TestPrintBundleSidecar_AppendsPerImageSections(t *testing.T) {
+	mfDigest := digest.Digest("sha256:" + strings.Repeat("a", 64))
+	s := &diff.Sidecar{
+		Version:     "v1",
+		Feature:     "bundle",
+		Tool:        "diffah",
+		ToolVersion: "v0.x",
+		CreatedAt:   time.Date(2026, 4, 30, 12, 0, 0, 0, time.UTC),
+		Platform:    "linux/amd64",
+		Images: []diff.ImageEntry{{
+			Name: "svc",
+			Target: diff.TargetRef{
+				ManifestDigest: mfDigest, ManifestSize: 100,
+				MediaType: "application/vnd.oci.image.manifest.v1+json",
+			},
+			Baseline: diff.BaselineRef{
+				ManifestDigest: digest.Digest("sha256:" + strings.Repeat("b", 64)),
+				MediaType:      "application/vnd.oci.image.manifest.v1+json",
+			},
+		}},
+		Blobs: map[digest.Digest]diff.BlobEntry{
+			mfDigest: {Size: 100, Encoding: diff.EncodingFull, ArchiveSize: 100},
+		},
+	}
+	details := map[string]importer.InspectImageDetail{
+		"svc": {
+			Name: "svc", ManifestDigest: mfDigest,
+			LayerCount: 1, ArchiveLayerCount: 1,
+			Layers: []importer.LayerRow{
+				{Digest: digest.Digest("sha256:" + strings.Repeat("c", 64)), Kind: importer.LayerKindFull, TargetSize: 1000, ArchiveSize: 1000},
+			},
+			Histogram: importer.SizeHistogram{
+				Buckets: []string{"<1MiB", "1-10MiB", "10-100MiB", "100MiB-1GiB", ">=1GiB"},
+				Counts:  []int{1, 0, 0, 0, 0},
+			},
+		},
+	}
+
+	var buf bytes.Buffer
+	require.NoError(t, printBundleSidecar(&buf, "/tmp/bundle.tar", s, false, false, details))
+	out := buf.String()
+
+	require.Contains(t, out, "archive: /tmp/bundle.tar")
+	require.Contains(t, out, "feature: bundle")
+	require.Contains(t, out, "--- image: svc ---")
+	require.Contains(t, out, "Layers (target manifest order):")
+	require.Contains(t, out, "Waste:")
+	require.Contains(t, out, "Layer-size histogram (target bytes):")
 }
