@@ -34,3 +34,25 @@ func TestRenderLayerTable_FullPatchBaseline(t *testing.T) {
 	require.Contains(t, out, "0.06× — patch from sha256:")
 	require.Contains(t, out, "— baseline-only")
 }
+
+func TestRenderWaste_PatchOversizedShowsHint(t *testing.T) {
+	detail := importer.InspectImageDetail{
+		Waste: []importer.WasteEntry{
+			{Kind: importer.WasteKindPatchOversized, Digest: dig(strings.Repeat("y", 64)), ArchiveSize: 12_000_000, TargetSize: 8_000_000},
+		},
+	}
+	var buf bytes.Buffer
+	renderWaste(&buf, detail)
+	out := buf.String()
+
+	require.Contains(t, out, "Waste:")
+	require.Contains(t, out, "patch-oversized")
+	require.Contains(t, out, "patch is bigger than full")
+}
+
+func TestRenderWaste_NoneWhenEmpty(t *testing.T) {
+	var buf bytes.Buffer
+	renderWaste(&buf, importer.InspectImageDetail{})
+	require.Contains(t, buf.String(), "Waste:")
+	require.Contains(t, buf.String(), "    none")
+}

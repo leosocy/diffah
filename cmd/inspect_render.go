@@ -60,3 +60,19 @@ func humanBytes(n int64) string {
 		return fmt.Sprintf("%.1f GiB", float64(n)/float64(GiB))
 	}
 }
+
+func renderWaste(w io.Writer, d importer.InspectImageDetail) {
+	fmt.Fprintln(w, "  Waste:")
+	if len(d.Waste) == 0 {
+		fmt.Fprintln(w, "    none")
+		return
+	}
+	for _, ws := range d.Waste {
+		switch ws.Kind {
+		case importer.WasteKindPatchOversized:
+			fmt.Fprintf(w, "    patch-oversized  %s archive %s ≥ target %s\n",
+				ws.Digest, humanBytes(ws.ArchiveSize), humanBytes(ws.TargetSize))
+			fmt.Fprintln(w, "                   (patch is bigger than full; force --intra-layer=off for this layer)")
+		}
+	}
+}
