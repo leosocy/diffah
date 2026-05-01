@@ -123,3 +123,27 @@ func TestComputeTopSavings_BaselineOnlyContributesFullTargetSize(t *testing.T) {
 	require.Equal(t, d("base"), top[0].Digest)
 	require.EqualValues(t, 1000, top[0].SavedBytes)
 }
+
+func TestComputeHistogram_BucketBoundariesAreHalfOpen(t *testing.T) {
+	const (
+		MiB = 1 << 20
+		GiB = 1 << 30
+	)
+	rows := []LayerRow{
+		{Digest: d("a"), TargetSize: 0},           // < 1 MiB
+		{Digest: d("b"), TargetSize: MiB - 1},     // < 1 MiB
+		{Digest: d("c"), TargetSize: MiB},         // 1–10 MiB (lower-inclusive)
+		{Digest: d("d"), TargetSize: 10 * MiB},    // 10–100 MiB (lower-inclusive)
+		{Digest: d("e"), TargetSize: 100*MiB - 1}, // 10–100 MiB (upper-exclusive)
+		{Digest: d("f"), TargetSize: 100 * MiB},   // 100 MiB–1 GiB (lower-inclusive)
+		{Digest: d("g"), TargetSize: GiB},         // ≥ 1 GiB
+	}
+	h := computeHistogram(rows)
+	require.Equal(t, []string{"<1MiB", "1-10MiB", "10-100MiB", "100MiB-1GiB", ">=1GiB"}, h.Buckets)
+	require.Equal(t, []int{2, 1, 2, 1, 1}, h.Counts)
+}
+
+func TestComputeHistogram_EmptyInputProducesAllZero(t *testing.T) {
+	h := computeHistogram(nil)
+	require.Equal(t, []int{0, 0, 0, 0, 0}, h.Counts)
+}

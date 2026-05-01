@@ -177,3 +177,39 @@ func computeTopSavings(rows []LayerRow, n int) []TopSaving {
 	}
 	return saved
 }
+
+const (
+	histMiB = 1 << 20
+	histGiB = 1 << 30
+)
+
+var histogramBucketLabels = []string{"<1MiB", "1-10MiB", "10-100MiB", "100MiB-1GiB", ">=1GiB"}
+
+// histogramBucketIndex returns the index in histogramBucketLabels for the
+// given target size, using half-open intervals [low, high). The five buckets
+// partition [0, ∞).
+func histogramBucketIndex(size int64) int {
+	switch {
+	case size < histMiB:
+		return 0
+	case size < 10*histMiB:
+		return 1
+	case size < 100*histMiB:
+		return 2
+	case size < histGiB:
+		return 3
+	default:
+		return 4
+	}
+}
+
+// computeHistogram counts target-byte sizes into the five fixed buckets.
+func computeHistogram(rows []LayerRow) SizeHistogram {
+	counts := make([]int, len(histogramBucketLabels))
+	for _, r := range rows {
+		counts[histogramBucketIndex(r.TargetSize)]++
+	}
+	labels := make([]string, len(histogramBucketLabels))
+	copy(labels, histogramBucketLabels)
+	return SizeHistogram{Buckets: labels, Counts: counts}
+}
