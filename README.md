@@ -179,6 +179,28 @@ patch-encoded entries cross the wire on the apply side (lazy fetch).
 On the producer side every baseline blob is fetched **at most once**
 per `diff` / `bundle` invocation, regardless of pair count or top-K.
 
+## Recipes
+
+End-to-end walkthroughs for common workflows live under
+[`docs/recipes/`](docs/recipes/index.md). Every recipe follows the
+same template (Goal → When to use → Prerequisites → Setup → Steps →
+Verify → Variations → Troubleshooting), and every recipe is backed
+by a CI smoke test, so the commands you read are the same commands
+the project itself exercises on every push.
+
+- [**CI-driven delta release**](docs/recipes/ci-delta-release.md) —
+  compute a delta between two registry tags inside a CI workflow and
+  publish it as a release artifact for downstream apply.
+- [**Offline signature verification**](docs/recipes/offline-verify.md) —
+  sign at diff time with a static EC P256 key, verify at apply time
+  with no external KMS or transparency log.
+- [**Air-gapped customer delivery**](docs/recipes/airgap-delivery.md) —
+  send only the delta archive across the air-gap; the customer
+  reconstructs the new image locally from their existing baseline.
+- [**Registry-to-registry mirror**](docs/recipes/registry-mirror.md) —
+  nightly cron that diffs a source registry and applies the delta
+  directly into a mirror registry; only the delta crosses the WAN.
+
 ## Image references
 
 `diffah` mirrors `skopeo`'s `transport:reference` grammar. **A bare
