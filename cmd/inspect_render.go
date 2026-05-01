@@ -135,3 +135,59 @@ func buildBar(filled, total int) string {
 	}
 	return string(out)
 }
+
+// imageDetailToJSON returns a flat map of the new per-image JSON keys defined
+// in spec §7.6. The caller (inspectJSON in cmd/inspect.go) merges this map
+// into the existing per-image entry alongside name/target/baseline.
+func imageDetailToJSON(d importer.InspectImageDetail) map[string]any {
+	layers := make([]map[string]any, 0, len(d.Layers))
+	for _, r := range d.Layers {
+		row := map[string]any{
+			"digest":       r.Digest.String(),
+			"encoding":     string(r.Kind),
+			"target_size":  r.TargetSize,
+			"archive_size": r.ArchiveSize,
+			"saved_bytes":  r.SavedBytes(),
+		}
+		if r.Kind != importer.LayerKindBaselineOnly {
+			row["ratio"] = r.Ratio()
+		}
+		if r.Kind == importer.LayerKindPatch {
+			row["patch_from"] = r.PatchFrom.String()
+		} else {
+			row["patch_from"] = ""
+		}
+		layers = append(layers, row)
+	}
+
+	waste := make([]map[string]any, 0, len(d.Waste))
+	for _, ws := range d.Waste {
+		waste = append(waste, map[string]any{
+			"kind":         string(ws.Kind),
+			"digest":       ws.Digest.String(),
+			"archive_size": ws.ArchiveSize,
+			"target_size":  ws.TargetSize,
+		})
+	}
+
+	top := make([]map[string]any, 0, len(d.TopSavings))
+	for _, s := range d.TopSavings {
+		top = append(top, map[string]any{
+			"digest":      s.Digest.String(),
+			"saved_bytes": s.SavedBytes,
+			"saved_ratio": s.SavedRatio,
+		})
+	}
+
+	return map[string]any{
+		"layer_count":         d.LayerCount,
+		"archive_layer_count": d.ArchiveLayerCount,
+		"layers":              layers,
+		"waste":               waste,
+		"top_savings":         top,
+		"size_histogram": map[string]any{
+			"buckets": d.Histogram.Buckets,
+			"counts":  d.Histogram.Counts,
+		},
+	}
+}
