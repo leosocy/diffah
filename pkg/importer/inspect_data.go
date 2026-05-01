@@ -4,7 +4,11 @@
 
 package importer
 
-import "github.com/opencontainers/go-digest"
+import (
+	"github.com/opencontainers/go-digest"
+
+	"github.com/leosocy/diffah/pkg/diff"
+)
 
 // LayerRowKind classifies a target-manifest layer by how it was shipped.
 type LayerRowKind string
@@ -88,4 +92,41 @@ type InspectImageDetail struct {
 	Waste             []WasteEntry
 	TopSavings        []TopSaving
 	Histogram         SizeHistogram
+}
+
+// buildLayerRows produces one LayerRow per target-manifest layer, in target
+// manifest order. Full / Patch are looked up in blobs; absent digests produce
+// a baseline-only row.
+func buildLayerRows(manifestLayers []LayerRef, blobs map[digest.Digest]diff.BlobEntry) []LayerRow {
+	rows := make([]LayerRow, 0, len(manifestLayers))
+	for _, l := range manifestLayers {
+		b, ok := blobs[l.Digest]
+		if !ok {
+			rows = append(rows, LayerRow{
+				Digest:     l.Digest,
+				Kind:       LayerKindBaselineOnly,
+				TargetSize: l.Size,
+			})
+			continue
+		}
+		row := LayerRow{
+			Digest:      l.Digest,
+			TargetSize:  l.Size,
+			ArchiveSize: b.ArchiveSize,
+		}
+		switch b.Encoding {
+		case diff.EncodingFull:
+			row.Kind = LayerKindFull
+		case diff.EncodingPatch:
+			row.Kind = LayerKindPatch
+			row.PatchFrom = b.PatchFromDigest
+		default:
+			// Validated upstream by sidecar.validate(); fall through to Full as a
+			// defensive default so renderers don't crash on a malformed but parsed
+			// sidecar.
+			row.Kind = LayerKindFull
+		}
+		rows = append(rows, row)
+	}
+	return rows
 }
