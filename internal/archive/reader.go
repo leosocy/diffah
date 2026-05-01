@@ -160,7 +160,8 @@ func openDecompressed(f *os.File) (io.Reader, func(), error) {
 // blob in digests, in a single tar pass. Used by `diffah inspect` to enrich
 // per-image output without extracting the full archive. Every digest in the
 // argument MUST appear as a `blobs/<algo>/<encoded>` entry; missing-blob is
-// an error. The returned map is keyed by digest, never nil.
+// an error. The returned map is keyed by digest, never nil. A nil or empty
+// digests slice is equivalent to ReadSidecar and yields an empty blob map.
 func ReadSidecarAndManifestBlobs(archivePath string, digests []digest.Digest) ([]byte, map[digest.Digest][]byte, error) {
 	want := make(map[string]digest.Digest, len(digests))
 	for _, d := range digests {
@@ -221,7 +222,9 @@ func ReadSidecarAndManifestBlobs(archivePath string, digests []digest.Digest) ([
 }
 
 // blobTarPath returns the in-archive tar entry name for a blob, matching
-// the writer convention in pkg/exporter/writer.go.
+// the writer convention in pkg/exporter/writer.go. MUST stay in sync with
+// pkg/exporter/writer.go:blobPath (no shared package to keep the
+// internal/archive ← pkg/exporter dependency direction clean).
 func blobTarPath(d digest.Digest) string {
 	parts := strings.SplitN(string(d), ":", 2)
 	if len(parts) != 2 {
