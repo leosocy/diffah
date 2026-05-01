@@ -71,3 +71,70 @@ func TestRecipeSmoke_CIDeltaRelease(t *testing.T) {
 	require.NoError(t, err)
 	require.Greater(t, restoredInfo.Size(), int64(0))
 }
+
+// TestRecipeSmoke_AirgapDelivery drives docs/recipes/airgap-delivery.md
+// entirely against on-disk OCI archive fixtures — no registry. Exercises
+// producer diff, sneakernet cp, and customer apply, then asserts the
+// reconstructed archive is non-empty.
+func TestRecipeSmoke_AirgapDelivery(t *testing.T) {
+	root := findRepoRoot(t)
+	bin := integrationBinary(t)
+	work := t.TempDir()
+
+	stdout, stderr, exit := execSmokeScript(t, root, "airgap-delivery.sh", []string{
+		"DIFFAH_BIN=" + bin,
+		"WORK_DIR=" + work,
+		"BASELINE_OCI_TAR=" + filepath.Join(root, "testdata", "fixtures", "v1_oci.tar"),
+		"TARGET_OCI_TAR=" + filepath.Join(root, "testdata", "fixtures", "v2_oci.tar"),
+	})
+	require.Equal(t, 0, exit,
+		"smoke failed (exit=%d)\nstdout:\n%s\nstderr:\n%s", exit, stdout, stderr)
+
+	deltaInfo, err := os.Stat(filepath.Join(work, "delta.tar"))
+	require.NoError(t, err)
+	require.Greater(t, deltaInfo.Size(), int64(0))
+
+	restoredInfo, err := os.Stat(filepath.Join(work, "customer", "restored.tar"))
+	require.NoError(t, err)
+	require.Greater(t, restoredInfo.Size(), int64(0))
+}
+
+// TestRecipeSmoke_OfflineVerify drives docs/recipes/offline-verify.md
+// using the project's static EC P256 test key pair. Exercises the
+// happy-path sign + verify, then re-runs apply against a tampered
+// archive and asserts a non-zero exit.
+func TestRecipeSmoke_OfflineVerify(t *testing.T) {
+	root := findRepoRoot(t)
+	bin := integrationBinary(t)
+	work := t.TempDir()
+
+	stdout, stderr, exit := execSmokeScript(t, root, "offline-verify.sh", []string{
+		"DIFFAH_BIN=" + bin,
+		"WORK_DIR=" + work,
+		"BASELINE_OCI_TAR=" + filepath.Join(root, "testdata", "fixtures", "v1_oci.tar"),
+		"TARGET_OCI_TAR=" + filepath.Join(root, "testdata", "fixtures", "v2_oci.tar"),
+		"SIGN_KEY_PEM=" + filepath.Join(root, "pkg", "signer", "testdata", "test_ec_p256.key"),
+		"VERIFY_KEY_PEM=" + filepath.Join(root, "pkg", "signer", "testdata", "test_ec_p256.pub"),
+	})
+	require.Equal(t, 0, exit,
+		"smoke failed (exit=%d)\nstdout:\n%s\nstderr:\n%s", exit, stdout, stderr)
+
+	restoredInfo, err := os.Stat(filepath.Join(work, "restored.tar"))
+	require.NoError(t, err)
+	require.Greater(t, restoredInfo.Size(), int64(0))
+
+	// The tampered apply must NOT have produced an output archive.
+	_, err = os.Stat(filepath.Join(work, "tampered-restored.tar"))
+	require.True(t, os.IsNotExist(err) || sizeOrZero(t, filepath.Join(work, "tampered-restored.tar")) == 0,
+		"tampered apply should not have produced a non-empty restored archive")
+}
+
+// sizeOrZero returns the file size at path, or 0 if the file is absent.
+func sizeOrZero(t *testing.T, path string) int64 {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		return 0
+	}
+	return info.Size()
+}
