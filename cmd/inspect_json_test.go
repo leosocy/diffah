@@ -47,7 +47,7 @@ func TestInspectJSON_Structure(t *testing.T) {
 		},
 	}
 
-	result := inspectJSON("/tmp/bundle.tar", s, true, true)
+	result := inspectJSON("/tmp/bundle.tar", s, true, true, nil)
 
 	var buf bytes.Buffer
 	require.NoError(t, writeJSON(&buf, result))
@@ -140,7 +140,7 @@ func TestInspectJSON_NoPatchSavings(t *testing.T) {
 		},
 	}
 
-	result := inspectJSON("/tmp/bundle.tar", s, false, true)
+	result := inspectJSON("/tmp/bundle.tar", s, false, true, nil)
 
 	var buf bytes.Buffer
 	require.NoError(t, writeJSON(&buf, result))
@@ -165,7 +165,7 @@ func TestInspectJSON_Snapshot(t *testing.T) {
 	requiresZstd := s.RequiresZstd()
 	zstdAvailable, _ := zstdpatch.Available(t.Context())
 
-	result := inspectJSON(archivePath, s, requiresZstd, zstdAvailable)
+	result := inspectJSON(archivePath, s, requiresZstd, zstdAvailable, nil)
 
 	var buf bytes.Buffer
 	require.NoError(t, writeJSON(&buf, result))

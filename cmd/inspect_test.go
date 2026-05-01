@@ -56,7 +56,7 @@ func TestPrintBundleSidecar_PerImageStats(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := printBundleSidecar(&buf, "/tmp/bundle.tar", s, true, true)
+	err := printBundleSidecar(&buf, "/tmp/bundle.tar", s, true, true, nil)
 	require.NoError(t, err)
 
 	out := buf.String()
@@ -135,7 +135,7 @@ func TestRunInspect_BundleSidecar_ParsesDirectly(t *testing.T) {
 	require.NoError(t, perr, "ParseSidecar should succeed on bundle JSON")
 
 	var buf bytes.Buffer
-	err = printBundleSidecar(&buf, "/tmp/bundle.tar", parsed, false, false)
+	err = printBundleSidecar(&buf, "/tmp/bundle.tar", parsed, false, false, nil)
 	require.NoError(t, err)
 	require.Contains(t, buf.String(), "feature: bundle")
 	require.Contains(t, buf.String(), "--- image: svc ---")
