@@ -5,6 +5,7 @@
 package importer
 
 import (
+	"fmt"
 	"sort"
 
 	"github.com/opencontainers/go-digest"
@@ -212,4 +213,38 @@ func computeHistogram(rows []LayerRow) SizeHistogram {
 	labels := make([]string, len(histogramBucketLabels))
 	copy(labels, histogramBucketLabels)
 	return SizeHistogram{Buckets: labels, Counts: counts}
+}
+
+const inspectTopN = 10
+
+// BuildInspectImageDetail derives the per-image detail block from a parsed
+// sidecar, the image's entry within it, and that image's target manifest
+// bytes (the canonical bytes whose digest matches img.Target.ManifestDigest).
+//
+// Pure: no I/O. Returns a wrapped error if the manifest cannot be parsed
+// (e.g., manifest list / index, malformed JSON, unsupported media type).
+func BuildInspectImageDetail(sc *diff.Sidecar, img diff.ImageEntry, manifestBytes []byte) (InspectImageDetail, error) {
+	manifestLayers, _, err := parseManifestLayers(manifestBytes, img.Target.MediaType)
+	if err != nil {
+		return InspectImageDetail{}, fmt.Errorf("inspect detail for %q: %w", img.Name, err)
+	}
+	rows := buildLayerRows(manifestLayers, sc.Blobs)
+
+	archiveCount := 0
+	for _, r := range rows {
+		if r.Kind != LayerKindBaselineOnly {
+			archiveCount++
+		}
+	}
+
+	return InspectImageDetail{
+		Name:              img.Name,
+		ManifestDigest:    img.Target.ManifestDigest,
+		LayerCount:        len(rows),
+		ArchiveLayerCount: archiveCount,
+		Layers:            rows,
+		Waste:             detectWaste(rows),
+		TopSavings:        computeTopSavings(rows, inspectTopN),
+		Histogram:         computeHistogram(rows),
+	}, nil
 }

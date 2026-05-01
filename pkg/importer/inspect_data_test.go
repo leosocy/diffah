@@ -1,7 +1,10 @@
 package importer
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/opencontainers/go-digest"
 	"github.com/stretchr/testify/require"
@@ -146,4 +149,89 @@ func TestComputeHistogram_BucketBoundariesAreHalfOpen(t *testing.T) {
 func TestComputeHistogram_EmptyInputProducesAllZero(t *testing.T) {
 	h := computeHistogram(nil)
 	require.Equal(t, []int{0, 0, 0, 0, 0}, h.Counts)
+}
+
+const ociMediaType = "application/vnd.oci.image.manifest.v1+json"
+
+// fakeOCIManifest builds a minimal OCI v1 manifest JSON with the given layers.
+func fakeOCIManifest(t *testing.T, layers []LayerRef) []byte {
+	t.Helper()
+	type layer struct {
+		MediaType string `json:"mediaType"`
+		Digest    string `json:"digest"`
+		Size      int64  `json:"size"`
+	}
+	body := struct {
+		SchemaVersion int     `json:"schemaVersion"`
+		MediaType     string  `json:"mediaType"`
+		Config        layer   `json:"config"`
+		Layers        []layer `json:"layers"`
+	}{
+		SchemaVersion: 2,
+		MediaType:     ociMediaType,
+		Config:        layer{MediaType: "application/vnd.oci.image.config.v1+json", Digest: "sha256:" + strings.Repeat("c", 64), Size: 10},
+	}
+	for _, l := range layers {
+		body.Layers = append(body.Layers, layer{
+			MediaType: "application/vnd.oci.image.layer.v1.tar",
+			Digest:    string(l.Digest),
+			Size:      l.Size,
+		})
+	}
+	out, err := json.Marshal(body)
+	require.NoError(t, err)
+	return out
+}
+
+func TestBuildInspectImageDetail_EndToEnd(t *testing.T) {
+	manifestLayers := []LayerRef{
+		{Digest: d(strings.Repeat("a", 64)), Size: 12 * (1 << 20)}, // Full
+		{Digest: d(strings.Repeat("b", 64)), Size: 8 * (1 << 20)},  // Patch
+		{Digest: d(strings.Repeat("c", 64)), Size: 5 * (1 << 20)},  // baseline-only
+	}
+	mfBytes := fakeOCIManifest(t, manifestLayers)
+	mfDigest := digest.FromBytes(mfBytes)
+
+	sc := &diff.Sidecar{
+		Version: diff.SchemaVersionV1, Feature: diff.FeatureBundle, Tool: "diffah",
+		ToolVersion: "test", CreatedAt: time.Now(), Platform: "linux/amd64",
+		Images: []diff.ImageEntry{{
+			Name:     "svc",
+			Target:   diff.TargetRef{ManifestDigest: mfDigest, ManifestSize: int64(len(mfBytes)), MediaType: ociMediaType},
+			Baseline: diff.BaselineRef{ManifestDigest: digest.Digest("sha256:" + strings.Repeat("0", 64)), MediaType: ociMediaType},
+		}},
+		Blobs: map[digest.Digest]diff.BlobEntry{
+			mfDigest:                   {Size: int64(len(mfBytes)), MediaType: ociMediaType, Encoding: diff.EncodingFull, ArchiveSize: int64(len(mfBytes))},
+			d(strings.Repeat("a", 64)): {Size: 12 * (1 << 20), Encoding: diff.EncodingFull, ArchiveSize: 12 * (1 << 20)},
+			d(strings.Repeat("b", 64)): {Size: 8 * (1 << 20), Encoding: diff.EncodingPatch, Codec: "zstd-patch", PatchFromDigest: d(strings.Repeat("9", 64)), ArchiveSize: 500 * 1024},
+			// c absent → baseline-only
+		},
+	}
+
+	detail, err := BuildInspectImageDetail(sc, sc.Images[0], mfBytes)
+	require.NoError(t, err)
+	require.Equal(t, "svc", detail.Name)
+	require.Equal(t, mfDigest, detail.ManifestDigest)
+	require.Equal(t, 3, detail.LayerCount)
+	require.Equal(t, 2, detail.ArchiveLayerCount)
+	require.Len(t, detail.Layers, 3)
+	require.Equal(t, LayerKindFull, detail.Layers[0].Kind)
+	require.Equal(t, LayerKindPatch, detail.Layers[1].Kind)
+	require.Equal(t, LayerKindBaselineOnly, detail.Layers[2].Kind)
+	require.Empty(t, detail.Waste)
+	require.NotEmpty(t, detail.TopSavings)
+	require.Equal(t, []int{0, 2, 1, 0, 0}, detail.Histogram.Counts)
+}
+
+func TestBuildInspectImageDetail_RejectsManifestList(t *testing.T) {
+	sc := &diff.Sidecar{
+		Images: []diff.ImageEntry{{
+			Name: "svc",
+			Target: diff.TargetRef{
+				ManifestDigest: d("00"), MediaType: "application/vnd.oci.image.index.v1+json",
+			},
+		}},
+	}
+	_, err := BuildInspectImageDetail(sc, sc.Images[0], []byte(`{"schemaVersion":2,"manifests":[]}`))
+	require.Error(t, err)
 }
