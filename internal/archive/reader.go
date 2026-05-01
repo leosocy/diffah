@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/klauspost/compress/zstd"
+	"github.com/opencontainers/go-digest"
 
 	"github.com/leosocy/diffah/pkg/diff"
 )
@@ -153,4 +154,78 @@ func openDecompressed(f *os.File) (io.Reader, func(), error) {
 		return dec, dec.Close, nil
 	}
 	return br, nil, nil
+}
+
+// ReadSidecarAndManifestBlobs returns the sidecar bytes and the bytes of every
+// blob in digests, in a single tar pass. Used by `diffah inspect` to enrich
+// per-image output without extracting the full archive. Every digest in the
+// argument MUST appear as a `blobs/<algo>/<encoded>` entry; missing-blob is
+// an error. The returned map is keyed by digest, never nil.
+func ReadSidecarAndManifestBlobs(archivePath string, digests []digest.Digest) ([]byte, map[digest.Digest][]byte, error) {
+	want := make(map[string]digest.Digest, len(digests))
+	for _, d := range digests {
+		want[blobTarPath(d)] = d
+	}
+
+	f, err := os.Open(archivePath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("open %s: %w", archivePath, err)
+	}
+	defer f.Close()
+
+	stream, closer, err := openDecompressed(f)
+	if err != nil {
+		return nil, nil, err
+	}
+	if closer != nil {
+		defer closer()
+	}
+
+	tr := tar.NewReader(stream)
+	var sidecar []byte
+	got := make(map[digest.Digest][]byte, len(digests))
+
+	for {
+		hdr, err := tr.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return nil, nil, fmt.Errorf("read tar: %w", err)
+		}
+		if hdr.Name == diff.SidecarFilename {
+			sidecar, err = io.ReadAll(tr)
+			if err != nil {
+				return nil, nil, fmt.Errorf("read sidecar: %w", err)
+			}
+			continue
+		}
+		if d, ok := want[hdr.Name]; ok {
+			data, err := io.ReadAll(tr)
+			if err != nil {
+				return nil, nil, fmt.Errorf("read %s: %w", hdr.Name, err)
+			}
+			got[d] = data
+		}
+	}
+
+	if sidecar == nil {
+		return nil, nil, &diff.ErrNotADiffahArchive{Path: archivePath}
+	}
+	for _, d := range digests {
+		if _, ok := got[d]; !ok {
+			return nil, nil, fmt.Errorf("blob %s not found in archive %s", d, archivePath)
+		}
+	}
+	return sidecar, got, nil
+}
+
+// blobTarPath returns the in-archive tar entry name for a blob, matching
+// the writer convention in pkg/exporter/writer.go.
+func blobTarPath(d digest.Digest) string {
+	parts := strings.SplitN(string(d), ":", 2)
+	if len(parts) != 2 {
+		return filepath.Join("blobs", string(d))
+	}
+	return filepath.Join("blobs", parts[0], parts[1])
 }
