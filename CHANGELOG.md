@@ -52,6 +52,15 @@
   `cmd/recipes_smoke_integration_test.go`) so the documented commands
   cannot drift from what the project itself exercises. README has a
   new top-level **Recipes** section linking to the index.
+- **Homebrew tap** (Phase 5.4): `goreleaser` now publishes a
+  formula to `leosocy/homebrew-tap` on every stable release.
+  Install with `brew tap leosocy/tap && brew install diffah`.
+  Pre-release tags (`-pre` / `-rc`) are skipped so the tap always
+  points at the latest stable. **First-time setup**: the
+  `HOMEBREW_TAP_TOKEN` secret must be configured on the diffah
+  repo before the next release tag — see the Phase 5.4 plan
+  (`docs/superpowers/plans/2026-05-01-phase5-brews-tap.md`) for
+  the four manual prerequisites.
 
 ### Behavior changes
 
