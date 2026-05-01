@@ -6,11 +6,13 @@ import (
 	"io"
 	"time"
 
+	"github.com/opencontainers/go-digest"
 	"github.com/spf13/cobra"
 
 	"github.com/leosocy/diffah/internal/archive"
 	"github.com/leosocy/diffah/internal/zstdpatch"
 	"github.com/leosocy/diffah/pkg/diff"
+	"github.com/leosocy/diffah/pkg/importer"
 )
 
 func newInspectCommand() *cobra.Command {
@@ -27,12 +29,13 @@ func init() {
 }
 
 func runInspect(cmd *cobra.Command, args []string) error {
-	raw, err := archive.ReadSidecar(args[0])
+	path := args[0]
+
+	rawSidecar, err := archive.ReadSidecar(path)
 	if err != nil {
 		return err
 	}
-
-	s, err := diff.ParseSidecar(raw)
+	s, err := diff.ParseSidecar(rawSidecar)
 	if err != nil {
 		var p1 *diff.ErrPhase1Archive
 		if errors.As(err, &p1) {
@@ -40,12 +43,33 @@ func runInspect(cmd *cobra.Command, args []string) error {
 		}
 		return err
 	}
+
+	digests := make([]digest.Digest, 0, len(s.Images))
+	for _, img := range s.Images {
+		digests = append(digests, img.Target.ManifestDigest)
+	}
+	_, manifestBlobs, err := archive.ReadSidecarAndManifestBlobs(path, digests)
+	if err != nil {
+		return fmt.Errorf("read target manifests: %w", err)
+	}
+
+	details := make(map[string]importer.InspectImageDetail, len(s.Images))
+	for _, img := range s.Images {
+		mfBytes := manifestBlobs[img.Target.ManifestDigest]
+		detail, derr := importer.BuildInspectImageDetail(s, img, mfBytes)
+		if derr != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "warning: cannot derive details for image %q: %v\n", img.Name, derr)
+			continue
+		}
+		details[img.Name] = detail
+	}
+
 	requiresZstd := s.RequiresZstd()
 	zstdAvailable, _ := zstdpatch.Available(cmd.Context())
 	if outputFormat == outputJSON {
-		return writeJSON(cmd.OutOrStdout(), inspectJSON(args[0], s, requiresZstd, zstdAvailable))
+		return writeJSON(cmd.OutOrStdout(), inspectJSON(path, s, requiresZstd, zstdAvailable, details))
 	}
-	return printBundleSidecar(cmd.OutOrStdout(), args[0], s, requiresZstd, zstdAvailable)
+	return printBundleSidecar(cmd.OutOrStdout(), path, s, requiresZstd, zstdAvailable, details)
 }
 
 type bundleStats struct {
@@ -69,7 +93,7 @@ func collectBundleStats(s *diff.Sidecar) bundleStats {
 	return bs
 }
 
-func printBundleSidecar(w io.Writer, path string, s *diff.Sidecar, requiresZstd, zstdAvailable bool) error {
+func printBundleSidecar(w io.Writer, path string, s *diff.Sidecar, requiresZstd, zstdAvailable bool, details map[string]importer.InspectImageDetail) error {
 	bs := collectBundleStats(s)
 
 	fmt.Fprintf(w, "archive: %s\n", path)
@@ -101,6 +125,17 @@ func printBundleSidecar(w io.Writer, path string, s *diff.Sidecar, requiresZstd,
 		if img.Baseline.SourceHint != "" {
 			fmt.Fprintf(w, "  baseline source: %s\n", img.Baseline.SourceHint)
 		}
+
+		if d, ok := details[img.Name]; ok {
+			fmt.Fprintln(w)
+			renderLayerTable(w, d)
+			fmt.Fprintln(w)
+			renderWaste(w, d)
+			fmt.Fprintln(w)
+			renderTopSavings(w, d)
+			fmt.Fprintln(w)
+			renderHistogram(w, d)
+		}
 	}
 	return nil
 }
@@ -127,7 +162,7 @@ func reportPhase1Archive(w io.Writer, err *diff.ErrPhase1Archive) error {
 	return err
 }
 
-func inspectJSON(path string, s *diff.Sidecar, requiresZstd, zstdAvailable bool) any {
+func inspectJSON(path string, s *diff.Sidecar, requiresZstd, zstdAvailable bool, details map[string]importer.InspectImageDetail) any {
 	bs := collectBundleStats(s)
 	images := make([]map[string]any, 0, len(s.Images))
 	for _, img := range s.Images {
@@ -144,6 +179,11 @@ func inspectJSON(path string, s *diff.Sidecar, requiresZstd, zstdAvailable bool)
 		}
 		if img.Baseline.SourceHint != "" {
 			entry["baseline"].(map[string]any)["source_hint"] = img.Baseline.SourceHint
+		}
+		if d, ok := details[img.Name]; ok {
+			for k, v := range imageDetailToJSON(d) {
+				entry[k] = v
+			}
 		}
 		images = append(images, entry)
 	}
