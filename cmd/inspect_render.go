@@ -89,3 +89,49 @@ func renderTopSavings(w io.Writer, d importer.InspectImageDetail) {
 			i+1, s.Digest, humanBytes(s.SavedBytes), int(s.SavedRatio*100+0.5))
 	}
 }
+
+const histogramBarWidth = 12
+
+// histogramDisplayLabels maps internal bucket keys to display strings with
+// human-readable separators (en-dash, ≥). Order matches importer.histogramBucketLabels.
+var histogramDisplayLabels = []string{
+	"< 1 MiB",
+	"1–10 MiB",
+	"10–100 MiB",
+	"100 MiB–1 GiB",
+	"≥ 1 GiB",
+}
+
+func renderHistogram(w io.Writer, d importer.InspectImageDetail) {
+	fmt.Fprintln(w, "  Layer-size histogram (target bytes):")
+	maxCount := 0
+	for _, c := range d.Histogram.Counts {
+		if c > maxCount {
+			maxCount = c
+		}
+	}
+	for i, count := range d.Histogram.Counts {
+		label := histogramDisplayLabels[i]
+		filled := 0
+		if maxCount > 0 {
+			// Ceiling: a non-empty bucket always shows ≥ 1 filled cell.
+			filled = (histogramBarWidth*count + maxCount - 1) / maxCount
+			if filled > histogramBarWidth {
+				filled = histogramBarWidth
+			}
+		}
+		fmt.Fprintf(w, "    %-14s│%s  %d\n", label, buildBar(filled, histogramBarWidth), count)
+	}
+}
+
+func buildBar(filled, total int) string {
+	out := make([]rune, 0, total)
+	for i := 0; i < total; i++ {
+		if i < filled {
+			out = append(out, '█')
+		} else {
+			out = append(out, '░')
+		}
+	}
+	return string(out)
+}

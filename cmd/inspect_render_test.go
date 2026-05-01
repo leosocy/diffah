@@ -79,3 +79,36 @@ func TestRenderTopSavings_OmittedWhenEmpty(t *testing.T) {
 	renderTopSavings(&buf, importer.InspectImageDetail{})
 	require.Empty(t, buf.String())
 }
+
+func TestRenderHistogram_FilledAndEmptyBars(t *testing.T) {
+	detail := importer.InspectImageDetail{
+		Histogram: importer.SizeHistogram{
+			Buckets: []string{"<1MiB", "1-10MiB", "10-100MiB", "100MiB-1GiB", ">=1GiB"},
+			Counts:  []int{2, 6, 3, 0, 0},
+		},
+	}
+	var buf bytes.Buffer
+	renderHistogram(&buf, detail)
+	out := buf.String()
+
+	require.Contains(t, out, "Layer-size histogram (target bytes):")
+	require.Contains(t, out, "< 1 MiB")
+	require.Contains(t, out, "1–10 MiB")
+	require.Contains(t, out, "10–100 MiB")
+	require.Contains(t, out, "100 MiB–1 GiB")
+	require.Contains(t, out, "≥ 1 GiB")
+	require.Contains(t, out, "█")
+	require.Contains(t, out, "░")
+}
+
+func TestRenderHistogram_AllZeroPrintsAllEmptyBars(t *testing.T) {
+	detail := importer.InspectImageDetail{
+		Histogram: importer.SizeHistogram{
+			Buckets: []string{"<1MiB", "1-10MiB", "10-100MiB", "100MiB-1GiB", ">=1GiB"},
+			Counts:  []int{0, 0, 0, 0, 0},
+		},
+	}
+	var buf bytes.Buffer
+	renderHistogram(&buf, detail)
+	require.Contains(t, buf.String(), "░░░░░░░░░░░░")
+}
