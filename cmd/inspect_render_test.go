@@ -56,3 +56,26 @@ func TestRenderWaste_NoneWhenEmpty(t *testing.T) {
 	require.Contains(t, buf.String(), "Waste:")
 	require.Contains(t, buf.String(), "    none")
 }
+
+func TestRenderTopSavings_PrintsRankedRows(t *testing.T) {
+	detail := importer.InspectImageDetail{
+		TopSavings: []importer.TopSaving{
+			{Digest: dig(strings.Repeat("x", 64)), SavedBytes: 7_500_000, SavedRatio: 0.94},
+			{Digest: dig(strings.Repeat("y", 64)), SavedBytes: 1_500_000, SavedRatio: 0.50},
+		},
+	}
+	var buf bytes.Buffer
+	renderTopSavings(&buf, detail)
+	out := buf.String()
+
+	require.Contains(t, out, "Top savings (2/10):")
+	require.Contains(t, out, "1. sha256:")
+	require.Contains(t, out, "(94 %)")
+	require.Contains(t, out, "2. sha256:")
+}
+
+func TestRenderTopSavings_OmittedWhenEmpty(t *testing.T) {
+	var buf bytes.Buffer
+	renderTopSavings(&buf, importer.InspectImageDetail{})
+	require.Empty(t, buf.String())
+}

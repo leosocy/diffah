@@ -76,3 +76,16 @@ func renderWaste(w io.Writer, d importer.InspectImageDetail) {
 		}
 	}
 }
+
+const inspectTopNDisplay = 10
+
+func renderTopSavings(w io.Writer, d importer.InspectImageDetail) {
+	if len(d.TopSavings) == 0 {
+		return
+	}
+	fmt.Fprintf(w, "  Top savings (%d/%d):\n", len(d.TopSavings), inspectTopNDisplay)
+	for i, s := range d.TopSavings {
+		fmt.Fprintf(w, "    %d. %s saved %s (%d %%)\n",
+			i+1, s.Digest, humanBytes(s.SavedBytes), int(s.SavedRatio*100+0.5))
+	}
+}
