@@ -118,3 +118,7 @@ build_fixtures
 
 # macOS Finder metadata
 .DS_Store
+
+# Local diffah run artifacts (default delta output, default log directory)
+/delta.tar
+/log/
