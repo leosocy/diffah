@@ -162,7 +162,9 @@ func openDecompressed(f *os.File) (io.Reader, func(), error) {
 // argument MUST appear as a `blobs/<algo>/<encoded>` entry; missing-blob is
 // an error. The returned map is keyed by digest, never nil. A nil or empty
 // digests slice is equivalent to ReadSidecar and yields an empty blob map.
-func ReadSidecarAndManifestBlobs(archivePath string, digests []digest.Digest) ([]byte, map[digest.Digest][]byte, error) {
+func ReadSidecarAndManifestBlobs(
+	archivePath string, digests []digest.Digest,
+) ([]byte, map[digest.Digest][]byte, error) {
 	want := make(map[string]digest.Digest, len(digests))
 	for _, d := range digests {
 		want[blobTarPath(d)] = d

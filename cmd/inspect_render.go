@@ -68,8 +68,7 @@ func renderWaste(w io.Writer, d importer.InspectImageDetail) {
 		return
 	}
 	for _, ws := range d.Waste {
-		switch ws.Kind {
-		case importer.WasteKindPatchOversized:
+		if ws.Kind == importer.WasteKindPatchOversized {
 			fmt.Fprintf(w, "    patch-oversized  %s archive %s ≥ target %s\n",
 				ws.Digest, humanBytes(ws.ArchiveSize), humanBytes(ws.TargetSize))
 			fmt.Fprintln(w, "                   (patch is bigger than full; force --intra-layer=off for this layer)")

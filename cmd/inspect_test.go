@@ -143,7 +143,6 @@ func TestRunInspect_BundleSidecar_ParsesDirectly(t *testing.T) {
 	require.Contains(t, buf.String(), "--- image: svc ---")
 }
 
-
 func TestPrintBundleSidecar_AppendsPerImageSections(t *testing.T) {
 	mfDigest := digest.Digest("sha256:" + strings.Repeat("a", 64))
 	s := &diff.Sidecar{

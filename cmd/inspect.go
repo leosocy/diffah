@@ -93,7 +93,11 @@ func collectBundleStats(s *diff.Sidecar) bundleStats {
 	return bs
 }
 
-func printBundleSidecar(w io.Writer, path string, s *diff.Sidecar, requiresZstd, zstdAvailable bool, details map[string]importer.InspectImageDetail) error {
+func printBundleSidecar(
+	w io.Writer, path string, s *diff.Sidecar,
+	requiresZstd, zstdAvailable bool,
+	details map[string]importer.InspectImageDetail,
+) error {
 	bs := collectBundleStats(s)
 
 	fmt.Fprintf(w, "archive: %s\n", path)
@@ -162,7 +166,11 @@ func reportPhase1Archive(w io.Writer, err *diff.ErrPhase1Archive) error {
 	return err
 }
 
-func inspectJSON(path string, s *diff.Sidecar, requiresZstd, zstdAvailable bool, details map[string]importer.InspectImageDetail) any {
+func inspectJSON(
+	path string, s *diff.Sidecar,
+	requiresZstd, zstdAvailable bool,
+	details map[string]importer.InspectImageDetail,
+) any {
 	bs := collectBundleStats(s)
 	images := make([]map[string]any, 0, len(s.Images))
 	for _, img := range s.Images {

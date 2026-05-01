@@ -1,7 +1,6 @@
 // Package importer — inspect_data derives a per-image detail summary from a
 // parsed sidecar plus the image's target manifest bytes. The output is a
 // pure data structure consumed by cmd/inspect's text and JSON renderers.
-
 package importer
 
 import (

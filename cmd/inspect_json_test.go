@@ -257,8 +257,8 @@ func TestInspectJSON_PerImageDetailKeysPresent(t *testing.T) {
 		Version: "v1", Feature: "bundle", Tool: "diffah", ToolVersion: "v0.x",
 		CreatedAt: time.Date(2026, 4, 30, 12, 0, 0, 0, time.UTC), Platform: "linux/amd64",
 		Images: []diff.ImageEntry{{
-			Name: "svc",
-			Target: diff.TargetRef{ManifestDigest: mfDigest, ManifestSize: 100, MediaType: "application/vnd.oci.image.manifest.v1+json"},
+			Name:     "svc",
+			Target:   diff.TargetRef{ManifestDigest: mfDigest, ManifestSize: 100, MediaType: "application/vnd.oci.image.manifest.v1+json"},
 			Baseline: diff.BaselineRef{ManifestDigest: digest.Digest("sha256:" + strings.Repeat("b", 64)), MediaType: "application/vnd.oci.image.manifest.v1+json"},
 		}},
 		Blobs: map[digest.Digest]diff.BlobEntry{
