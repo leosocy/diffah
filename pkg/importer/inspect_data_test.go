@@ -70,3 +70,56 @@ func TestDetectWaste_NoneWhenAllPatchesProfitable(t *testing.T) {
 	}
 	require.Empty(t, detectWaste(rows))
 }
+
+func TestComputeTopSavings_SortsBySavedBytesDesc(t *testing.T) {
+	rows := []LayerRow{
+		{Digest: d("small"), Kind: LayerKindPatch, TargetSize: 100, ArchiveSize: 50}, // saved 50
+		{Digest: d("big"), Kind: LayerKindPatch, TargetSize: 1000, ArchiveSize: 100}, // saved 900
+		{Digest: d("mid"), Kind: LayerKindPatch, TargetSize: 500, ArchiveSize: 100},  // saved 400
+	}
+
+	top := computeTopSavings(rows, 10)
+	require.Len(t, top, 3)
+	require.Equal(t, d("big"), top[0].Digest)
+	require.EqualValues(t, 900, top[0].SavedBytes)
+	require.InDelta(t, 0.9, top[0].SavedRatio, 0.001)
+	require.Equal(t, d("mid"), top[1].Digest)
+	require.Equal(t, d("small"), top[2].Digest)
+}
+
+func TestComputeTopSavings_OmitsZeroSavingRowsAndCapsAtN(t *testing.T) {
+	var rows []LayerRow
+	for i := 0; i < 15; i++ {
+		rows = append(rows, LayerRow{
+			Digest: d(string(rune('a' + i))), Kind: LayerKindPatch,
+			TargetSize: 100, ArchiveSize: int64(100 - i), // i=0 saves 0; i=1..14 save 1..14
+		})
+	}
+
+	top := computeTopSavings(rows, 10)
+	require.Len(t, top, 10)
+	require.EqualValues(t, 14, top[0].SavedBytes)
+	require.EqualValues(t, 5, top[9].SavedBytes)
+}
+
+func TestComputeTopSavings_TieBreakerByDigestLexicographic(t *testing.T) {
+	rows := []LayerRow{
+		{Digest: d("zzz"), Kind: LayerKindFull, TargetSize: 100, ArchiveSize: 60}, // saved 40
+		{Digest: d("aaa"), Kind: LayerKindFull, TargetSize: 100, ArchiveSize: 60}, // saved 40
+		{Digest: d("mmm"), Kind: LayerKindFull, TargetSize: 100, ArchiveSize: 60}, // saved 40
+	}
+	top := computeTopSavings(rows, 10)
+	require.Equal(t, d("aaa"), top[0].Digest)
+	require.Equal(t, d("mmm"), top[1].Digest)
+	require.Equal(t, d("zzz"), top[2].Digest)
+}
+
+func TestComputeTopSavings_BaselineOnlyContributesFullTargetSize(t *testing.T) {
+	rows := []LayerRow{
+		{Digest: d("base"), Kind: LayerKindBaselineOnly, TargetSize: 1000},
+		{Digest: d("patch"), Kind: LayerKindPatch, TargetSize: 1000, ArchiveSize: 200},
+	}
+	top := computeTopSavings(rows, 10)
+	require.Equal(t, d("base"), top[0].Digest)
+	require.EqualValues(t, 1000, top[0].SavedBytes)
+}

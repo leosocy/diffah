@@ -5,6 +5,8 @@
 package importer
 
 import (
+	"sort"
+
 	"github.com/opencontainers/go-digest"
 
 	"github.com/leosocy/diffah/pkg/diff"
@@ -147,4 +149,31 @@ func detectWaste(rows []LayerRow) []WasteEntry {
 		}
 	}
 	return out
+}
+
+// computeTopSavings returns the top n rows ranked by SavedBytes desc, ties
+// broken by digest ascending. Rows with SavedBytes == 0 are excluded.
+func computeTopSavings(rows []LayerRow, n int) []TopSaving {
+	saved := make([]TopSaving, 0, len(rows))
+	for _, r := range rows {
+		s := r.SavedBytes()
+		if s <= 0 {
+			continue
+		}
+		saved = append(saved, TopSaving{
+			Digest:     r.Digest,
+			SavedBytes: s,
+			SavedRatio: r.SavedRatio(),
+		})
+	}
+	sort.SliceStable(saved, func(i, j int) bool {
+		if saved[i].SavedBytes != saved[j].SavedBytes {
+			return saved[i].SavedBytes > saved[j].SavedBytes
+		}
+		return saved[i].Digest < saved[j].Digest
+	})
+	if len(saved) > n {
+		saved = saved[:n]
+	}
+	return saved
 }
