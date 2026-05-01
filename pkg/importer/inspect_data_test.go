@@ -42,3 +42,31 @@ func TestBuildLayerRows_ClassifiesFullPatchAndBaselineOnly(t *testing.T) {
 	require.EqualValues(t, 0, rows[2].ArchiveSize)
 	require.EqualValues(t, 300, rows[2].SavedBytes())
 }
+
+func TestDetectWaste_PatchOversizedFlagsArchiveAtOrAboveTarget(t *testing.T) {
+	rows := []LayerRow{
+		{Digest: d("ok"), Kind: LayerKindPatch, TargetSize: 1000, ArchiveSize: 100},  // healthy
+		{Digest: d("eq"), Kind: LayerKindPatch, TargetSize: 500, ArchiveSize: 500},   // archive == target → waste
+		{Digest: d("over"), Kind: LayerKindPatch, TargetSize: 500, ArchiveSize: 600}, // archive > target → waste
+		{Digest: d("full"), Kind: LayerKindFull, TargetSize: 500, ArchiveSize: 500},  // Full, not waste
+		{Digest: d("base"), Kind: LayerKindBaselineOnly, TargetSize: 500, ArchiveSize: 0},
+	}
+
+	w := detectWaste(rows)
+	require.Len(t, w, 2)
+
+	require.Equal(t, WasteKindPatchOversized, w[0].Kind)
+	require.Equal(t, d("eq"), w[0].Digest)
+	require.EqualValues(t, 500, w[0].ArchiveSize)
+	require.EqualValues(t, 500, w[0].TargetSize)
+
+	require.Equal(t, d("over"), w[1].Digest)
+}
+
+func TestDetectWaste_NoneWhenAllPatchesProfitable(t *testing.T) {
+	rows := []LayerRow{
+		{Digest: d("a"), Kind: LayerKindPatch, TargetSize: 1000, ArchiveSize: 100},
+		{Digest: d("b"), Kind: LayerKindPatch, TargetSize: 2000, ArchiveSize: 200},
+	}
+	require.Empty(t, detectWaste(rows))
+}

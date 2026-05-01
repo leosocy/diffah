@@ -130,3 +130,21 @@ func buildLayerRows(manifestLayers []LayerRef, blobs map[digest.Digest]diff.Blob
 	}
 	return rows
 }
+
+// detectWaste flags every patch row whose archive bytes are at least as large
+// as its target bytes — i.e., the patch saved nothing or made things worse.
+// Order follows the input row order so renderers stay deterministic.
+func detectWaste(rows []LayerRow) []WasteEntry {
+	var out []WasteEntry
+	for _, r := range rows {
+		if r.Kind == LayerKindPatch && r.ArchiveSize >= r.TargetSize {
+			out = append(out, WasteEntry{
+				Kind:        WasteKindPatchOversized,
+				Digest:      r.Digest,
+				ArchiveSize: r.ArchiveSize,
+				TargetSize:  r.TargetSize,
+			})
+		}
+	}
+	return out
+}
