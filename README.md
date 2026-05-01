@@ -62,6 +62,18 @@ Download the latest release from the
 (keyless / Sigstore); see [`SECURITY.md`](SECURITY.md) for the
 verification workflow.
 
+### Homebrew (macOS / Linuxbrew)
+
+```sh
+brew tap leosocy/tap
+brew install diffah
+```
+
+The tap (`leosocy/homebrew-tap`) is updated automatically by
+`goreleaser` on every stable release. Pre-release tags
+(`-pre` / `-rc` / etc.) are skipped, so the tap always points at
+the latest stable.
+
 ### Container image
 
 ```sh

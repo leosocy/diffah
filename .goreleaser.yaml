@@ -107,6 +107,32 @@ docker_manifests:
       - "ghcr.io/leosocy/diffah:latest-amd64"
       - "ghcr.io/leosocy/diffah:latest-arm64"
 
+brews:
+  - name: diffah
+    repository:
+      owner: leosocy
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Formula
+    homepage: "https://github.com/leosocy/diffah"
+    description: "CLI for layer-level diffs between OCI / Docker container images."
+    license: "Apache-2.0"
+    skip_upload: auto
+    commit_author:
+      name: goreleaserbot
+      email: bot@goreleaser.com
+    commit_msg_template: "chore(formula): update diffah to {{ .Tag }}"
+    caveats: |
+      `diffah` works out of the box for archives produced with
+      --intra-layer=off (the default). Some intra-layer modes also
+      need `zstd` >= 1.5 on $PATH:
+        brew install zstd
+      Run `diffah doctor` to verify your local environment.
+    test: |
+      assert_match "diffah", shell_output("#{bin}/diffah version")
+    install: |
+      bin.install "diffah"
+
 snapshot:
   version_template: "{{ incpatch .Version }}-next"
 
