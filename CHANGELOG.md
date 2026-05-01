@@ -33,6 +33,16 @@
   (`--authfile`, `--tls-verify`, `--cert-dir`, `--creds`, …) so
   `--probe` can target private registries with custom credentials and
   TLS.
+- **`diffah inspect` enrichment** (Phase 5.3): per-image output now
+  appends a per-layer table (`[F]`/`[P]`/`[B]` for full / patch /
+  baseline-only with target / archive sizes and ratio), waste detection
+  (`patch_oversized` flags any patch whose archive bytes are at least
+  as large as the target it replaces), a top-10 savings list, and a
+  five-bucket log-scale layer-size histogram. JSON output (`--output
+  json`) gains six per-image keys: `layer_count`, `archive_layer_count`,
+  `layers`, `waste`, `top_savings`, `size_histogram`. Existing
+  first-line text shape (`archive:` / `version:` / `feature:` / …) and
+  existing JSON keys are preserved — old grep / jq scripts still work.
 
 ### Behavior changes
 
