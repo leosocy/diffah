@@ -7,7 +7,7 @@ require (
 	github.com/google/go-containerregistry v0.21.5
 	github.com/gowebpki/jcs v1.0.1
 	github.com/klauspost/compress v1.18.5
-	github.com/mattn/go-isatty v0.0.21
+	github.com/mattn/go-isatty v0.0.22
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/opencontainers/image-spec v1.1.1
 	github.com/spf13/cobra v1.10.2
