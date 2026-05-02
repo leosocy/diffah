@@ -16,6 +16,22 @@
 
 ---
 
+## Amendments (post-PR 1)
+
+After PR 1 shipped, four corrections to this plan emerged. **Future PR implementers MUST honor these — the original PR 1 text below is preserved as a historical artifact, but where it contradicts the points below, the amendments win.**
+
+1. **Determinism guard test name.** `TestDetermin` matches no tests. The actual test is `TestExport_DeterministicArchive` in `pkg/exporter/exporter_test.go`. Use `go test -count=2 -run TestExport_DeterministicArchive ./pkg/exporter/...` everywhere this plan says `TestDetermin`.
+
+2. **`EncodeFull` is NOT a wrapper around `EncodeFullStream`.** The plan's PR 1 Step 1.14 is wrong — collapsing `EncodeFull` would silently shift the patch-vs-full size comparator at `pkg/exporter/intralayer.go:215` because klauspost's one-shot `EncodeAll` and streaming `Write+Close` may produce different output sizes for identical input. PR 1 ships with `EncodeFull`'s body unchanged and only its preceding doc comment updated. PR 5+ that touch the comparator must call `EncodeFullStream` directly (not via `EncodeFull`). Three `nolint:staticcheck` annotations were added at deprecated call sites in `pkg/exporter/intralayer.go` (lines 215, 234) and `pkg/importer/compose.go` (line 140); subsequent PRs that touch these sites should remove the annotations as the migrations land.
+
+3. **`writeCounter` placement in `EncodeFullStream`.** The counter MUST sit between the zstd encoder and the user's writer (`cw := &writeCounter{w: w}; enc, _ := zstd.NewWriter(cw, ...); io.Copy(enc, src); return cw.n`) so it accumulates COMPRESSED bytes. Wiring it on the input side counts uncompressed bytes — the returned size is then meaningless to the comparator. Encoder options must match legacy `EncodeFull` exactly: `WithEncoderLevel(zstdLevelToKlauspost(level)) + WithWindowSize(1<<windowLog)`, defaults level=0→3 / windowLog=0→27, NO `WithEncoderConcurrency`. (See `internal/zstdpatch/fullstream.go` as shipped for the correct shape.)
+
+4. **`DecodeStream` empty-frame check must NOT `os.ReadFile`.** The empty zstd frame is a fixed 9-byte magic. Stat first; if size matches, open + `io.ReadFull` exactly 9 bytes; otherwise skip the read entirely. The shipped implementation extracts an `isEmptyFrame(path, size)` helper — copy that pattern in any analogous size-magic check.
+
+**Implementer pre-flight:** before writing code, the PR 1 implementer ran an `advisor()` consultation against the plan and caught all three of issues #1-#3 above. The cost-of-bugs vs cost-of-pre-flight calculus heavily favors pre-flight. **Future implementers should run `advisor()` after reading their PR's full text but before touching code.** Bugs in this plan ARE possible (we've found four already); independent review pays for itself.
+
+---
+
 ## File map
 
 **New files:**
@@ -39,7 +55,7 @@
 
 **Modified files (per PR):**
 - `internal/zstdpatch/cli.go` — legacy `Encode`/`Decode` become wrappers around `EncodeStream`/`DecodeStream` with deprecation comments.
-- `internal/zstdpatch/fullgo.go` — legacy `EncodeFull` becomes wrapper around `EncodeFullStream`.
+- `internal/zstdpatch/fullgo.go` — only the doc comment above `EncodeFull` changes (deprecation note); body is **unchanged** (see Amendment #2).
 - `pkg/exporter/exporter.go` — `Options` gains `Workdir`, `MemoryBudget`; `Export()` creates/cleans workdir, builds admission controller.
 - `pkg/exporter/fingerprint.go` — adds `FingerprintReader` to `Fingerprinter` interface; `DefaultFingerprinter` implements it.
 - `pkg/exporter/fpcache.go` — DELETED (replaced by baselinespool).
@@ -61,7 +77,7 @@
 
 - [ ] **Step P-2: Run baseline tests.** Run `go test ./...` and confirm green. This baseline must hold across every PR — a regression here means a previous step broke something.
 
-- [ ] **Step P-3: Run determinism guard.** Run `go test -run TestDetermin ./pkg/exporter/...` and capture the output digests. Future PRs must produce the same digests.
+- [ ] **Step P-3: Run determinism guard.** Run `go test -count=2 -run TestExport_DeterministicArchive ./pkg/exporter/...` and capture the output digests. Future PRs must produce the same digests.
 
 ---
 
@@ -592,7 +608,7 @@ Add the missing imports (`os`, `path/filepath`, `bytes`, `context`) to the file'
 
 - [ ] **Step 1.16: Run the full repo test suite.** Run `go test ./...`. Expected: PASS — importer and exporter still consume the legacy APIs and must be byte-equivalent.
 
-- [ ] **Step 1.17: Run determinism guard.** Run `go test -run TestDetermin ./pkg/exporter/...`. Confirm output digests unchanged from Step P-3.
+- [ ] **Step 1.17: Run determinism guard.** Run `go test -count=2 -run TestExport_DeterministicArchive ./pkg/exporter/...`. Confirm output digests unchanged from Step P-3.
 
 - [ ] **Step 1.18: Lint.** Run `golangci-lint run ./internal/zstdpatch/...` (or the project's lint chain — `make lint` if present). Fix any issues.
 
@@ -1041,7 +1057,7 @@ Also append the spool-help block to the `Long:` docstring after `encodingTuningH
 
 - [ ] **Step 2.16: Run the full repo test suite.** Run `go test ./...`. Expected: PASS.
 
-- [ ] **Step 2.17: Run determinism guard.** Run `go test -run TestDetermin ./pkg/exporter/...`. Confirm digests unchanged from baseline.
+- [ ] **Step 2.17: Run determinism guard.** Run `go test -count=2 -run TestExport_DeterministicArchive ./pkg/exporter/...`. Confirm digests unchanged from baseline.
 
 - [ ] **Step 2.18: Lint.** Run `golangci-lint run ./...`. Fix.
 
@@ -2141,7 +2157,7 @@ Refs: docs/superpowers/specs/2026-05-02-export-streaming-io-design.md §5.4"
 
 ### Review checkpoint
 
-Reviewer should run `go test -run TestDetermin -count=5 ./pkg/exporter/...` to detect any nondeterminism. Confirm `<workdir>/targets/`, `<workdir>/blobs/*.cand-*` are empty after success.
+Reviewer should run `go test -run TestExport_DeterministicArchive -count=5 ./pkg/exporter/...` to detect any nondeterminism. Confirm `<workdir>/targets/`, `<workdir>/blobs/*.cand-*` are empty after success.
 
 ---
 
@@ -2896,7 +2912,7 @@ After all 7 PRs are merged:
 
 - [ ] **A-1: Verify the production-readiness goal.** Trigger `scale-bench` workflow manually on `master`. Confirm it reports peak RSS ≤ 8 GiB.
 
-- [ ] **A-2: Verify determinism over time.** Run `go test -count=10 -run TestDetermin ./pkg/exporter/...` locally. All passes.
+- [ ] **A-2: Verify determinism over time.** Run `go test -count=10 -run TestExport_DeterministicArchive ./pkg/exporter/...` locally. All passes.
 
 - [ ] **A-3: Verify cleanup contract.** Manual: `diffah bundle ... && find ./.diffah-tmp -type f` returns nothing (workdir is gone).
 
