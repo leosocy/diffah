@@ -136,6 +136,7 @@ func (s *bundleImageSource) servePatch(
 		}
 		return nil, 0, fmt.Errorf("fetch patch-from blob %s: %w", entry.PatchFromDigest, err)
 	}
+	//nolint:staticcheck // intentional: Decode is deprecated but retained for importer hot path; see deprecation comment.
 	out, err := zstdpatch.Decode(ctx, baseBytes, patchBytes)
 	if err != nil {
 		return nil, 0, fmt.Errorf("decode patch for %s: %w", target, err)

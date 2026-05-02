@@ -9,7 +9,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 )
 
@@ -42,10 +41,10 @@ func (o EncodeOpts) windowArg() string {
 }
 
 // Encode produces a zstd frame using --patch-from=ref that decodes to target.
-// An empty target returns a precomputed empty frame to avoid invoking the CLI
-// on a degenerate case that crashes older zstd builds. ctx cancellation kills
-// the zstd subprocess. EncodeOpts tunes level and window; zero-valued opts
-// reproduce Phase-3 byte-identical output.
+//
+// Deprecated: use EncodeStream. Retained for the importer hot path until
+// the importer streaming spec migrates it. See docs/superpowers/specs/
+// 2026-05-02-export-streaming-io-design.md §5.1.
 func Encode(ctx context.Context, ref, target []byte, opts EncodeOpts) ([]byte, error) {
 	if len(target) == 0 {
 		return append([]byte(nil), emptyZstdFrame()...), nil
@@ -66,30 +65,17 @@ func Encode(ctx context.Context, ref, target []byte, opts EncodeOpts) ([]byte, e
 	if err := os.WriteFile(targetPath, target, 0o600); err != nil {
 		return nil, fmt.Errorf("zstdpatch: write target: %w", err)
 	}
-
-	//nolint:gosec // G204: every argv path is created by this function via MkdirTemp; no user input reaches exec.Command.
-	cmd := exec.CommandContext(ctx, "zstd",
-		opts.levelArg(), opts.windowArg(),
-		"--patch-from="+refPath,
-		targetPath,
-		"-o", outPath,
-		"-f", "-q",
-	)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return nil, fmt.Errorf("zstdpatch: encode: %w\n%s", err, out)
+	if _, err := EncodeStream(ctx, refPath, targetPath, outPath, opts); err != nil {
+		return nil, err
 	}
-
-	patch, err := os.ReadFile(outPath)
-	if err != nil {
-		return nil, fmt.Errorf("zstdpatch: read patch: %w", err)
-	}
-	return patch, nil
+	return os.ReadFile(outPath)
 }
 
 // Decode reads a zstd frame produced by Encode and returns the original
-// target bytes. ref must be byte-identical to the ref used at encode time.
-// Callers are expected to verify the decoded bytes against the content
-// digest recorded in the sidecar. ctx cancellation kills the zstd subprocess.
+// target bytes.
+//
+// Deprecated: use DecodeStream. Retained for the importer hot path until
+// the importer streaming spec migrates it.
 func Decode(ctx context.Context, ref, patch []byte) ([]byte, error) {
 	if bytes.Equal(patch, emptyZstdFrame()) {
 		return nil, nil
@@ -110,25 +96,8 @@ func Decode(ctx context.Context, ref, patch []byte) ([]byte, error) {
 	if err := os.WriteFile(patchPath, patch, 0o600); err != nil {
 		return nil, fmt.Errorf("zstdpatch: write patch: %w", err)
 	}
-
-	// --long=31 sets the maximum admissible window size (2 GiB). Frames
-	// declaring smaller windows allocate only what they need; this cap
-	// only governs the upper bound on decoder memory.
-	//nolint:gosec // G204: every argv path is mktempd above; no user input.
-	cmd := exec.CommandContext(ctx, "zstd",
-		"-d", "--long=31",
-		"--patch-from="+refPath,
-		patchPath,
-		"-o", outPath,
-		"-f", "-q",
-	)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return nil, fmt.Errorf("zstdpatch: decode: %w\n%s", err, out)
+	if _, err := DecodeStream(ctx, refPath, patchPath, outPath); err != nil {
+		return nil, err
 	}
-
-	data, err := os.ReadFile(outPath)
-	if err != nil {
-		return nil, fmt.Errorf("zstdpatch: read target: %w", err)
-	}
-	return data, nil
+	return os.ReadFile(outPath)
 }

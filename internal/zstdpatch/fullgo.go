@@ -15,6 +15,16 @@ import (
 
 // EncodeFull compresses target as a standalone zstd frame. Zero-valued
 // EncodeOpts reproduces the historical -3 --long=27 default.
+//
+// Deprecated: use EncodeFullStream. Retained for the importer hot path
+// and for the size-ceiling comparator in pkg/exporter/intralayer.go,
+// which depends on byte-identical EncodeAll output to keep the
+// patch-vs-full decision boundary stable. Do not collapse this into a
+// thin wrapper around EncodeFullStream — klauspost's one-shot EncodeAll
+// and streaming Write+Close can produce different output sizes for the
+// same input, which would silently shift the bundle bytes. The importer
+// streaming sibling spec migrates the in-tree caller to EncodeFullStream
+// directly; remove EncodeFull only after that lands.
 func EncodeFull(target []byte, opts EncodeOpts) ([]byte, error) {
 	if len(target) == 0 {
 		return append([]byte(nil), emptyZstdFrame()...), nil
