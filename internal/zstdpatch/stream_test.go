@@ -1,6 +1,7 @@
 package zstdpatch
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -108,7 +109,7 @@ func TestEncodeStream_EmptyTargetEmitsEmptyFrame(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read patch: %v", err)
 	}
-	if !bytesEqualPublic(got, emptyZstdFrame()) {
+	if !bytes.Equal(got, emptyZstdFrame()) {
 		t.Fatalf("expected empty frame, got %d bytes", len(got))
 	}
 	if size != int64(len(emptyZstdFrame())) {
@@ -122,5 +123,3 @@ func mustWrite(t *testing.T, path string, b []byte) {
 		t.Fatalf("write %s: %v", path, err)
 	}
 }
-
-func bytesEqualPublic(a, b []byte) bool { return bytesEqual(a, b) }

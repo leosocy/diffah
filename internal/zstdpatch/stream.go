@@ -9,8 +9,10 @@
 package zstdpatch
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 )
@@ -60,12 +62,14 @@ func DecodeStream(ctx context.Context, refPath, patchPath, outPath string) (int6
 	if err != nil {
 		return 0, fmt.Errorf("zstdpatch: stat patch: %w", err)
 	}
-	patchBytes, err := os.ReadFile(patchPath)
+	// Cheap empty-frame check: only read 9 bytes when the file size matches.
+	// Avoids materializing a multi-GB patch into RAM just to compare against
+	// the 9-byte empty zstd frame constant.
+	ok, err := isEmptyFrame(patchPath, pInfo.Size())
 	if err != nil {
-		return 0, fmt.Errorf("zstdpatch: read patch: %w", err)
+		return 0, err
 	}
-	if pInfo.Size() == int64(len(emptyZstdFrame())) && bytesEqual(patchBytes, emptyZstdFrame()) {
-		// Empty-frame contract: produce a zero-byte target file.
+	if ok {
 		if err := os.WriteFile(outPath, nil, 0o600); err != nil {
 			return 0, fmt.Errorf("zstdpatch: write empty target: %w", err)
 		}
@@ -90,14 +94,22 @@ func DecodeStream(ctx context.Context, refPath, patchPath, outPath string) (int6
 	return info.Size(), nil
 }
 
-func bytesEqual(a, b []byte) bool {
-	if len(a) != len(b) {
-		return false
+// isEmptyFrame reports whether path contains exactly the precomputed empty zstd
+// frame. It short-circuits on size mismatch to avoid any I/O for large patches.
+func isEmptyFrame(path string, size int64) (bool, error) {
+	empty := emptyZstdFrame()
+	if size != int64(len(empty)) {
+		return false, nil
 	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
+	f, err := os.Open(path)
+	if err != nil {
+		return false, fmt.Errorf("zstdpatch: open patch: %w", err)
 	}
-	return true
+	head := make([]byte, len(empty))
+	_, readErr := io.ReadFull(f, head)
+	_ = f.Close()
+	if readErr != nil {
+		return false, fmt.Errorf("zstdpatch: read patch head: %w", readErr)
+	}
+	return bytes.Equal(head, empty), nil
 }
