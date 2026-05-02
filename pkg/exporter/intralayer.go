@@ -230,7 +230,7 @@ func (p *Planner) PlanShippedTopK(
 			return diff.BlobRef{}, nil, fmt.Errorf(
 				"read baseline reference %s: %w", c.Digest, err)
 		}
-		//nolint:staticcheck // intentional: Encode is deprecated but retained for importer hot path; see deprecation comment.
+		//nolint:staticcheck // intentional: this caller is migrated to EncodeStream in PR 5 of the streaming I/O series.
 		patch, err := zstdpatch.Encode(ctx, refBytes, target,
 			zstdpatch.EncodeOpts{Level: p.level, WindowLog: wl})
 		if err != nil {
