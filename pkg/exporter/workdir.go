@@ -31,7 +31,9 @@ func resolveWorkdir(flag, outputPath string) (string, error) {
 // ensureWorkdir creates the workdir and its three subdirs (baselines, targets,
 // blobs). Returns the resolved workdir path and a cleanup callback that
 // best-effort-removes everything under it. Cleanup is idempotent and safe to
-// invoke from a defer.
+// invoke from a defer. On any failure after the workdir root is created, the
+// partial directory is torn down before the error returns so the caller never
+// owes the user an orphan path.
 func ensureWorkdir(flag, outputPath string) (string, func(), error) {
 	wd, err := resolveWorkdir(flag, outputPath)
 	if err != nil {
@@ -40,12 +42,17 @@ func ensureWorkdir(flag, outputPath string) (string, func(), error) {
 	if err := os.MkdirAll(wd, 0o700); err != nil {
 		return "", func() {}, fmt.Errorf("mkdir workdir %s: %w", wd, err)
 	}
+	cleanup := func() {
+		if err := os.RemoveAll(wd); err != nil {
+			log().Warn("workdir cleanup failed", "path", wd, "err", err)
+		}
+	}
 	for _, sub := range []string{"baselines", "targets", "blobs"} {
 		if err := os.MkdirAll(filepath.Join(wd, sub), 0o700); err != nil {
+			cleanup() // tear down the partial workdir before returning
 			return "", func() {}, fmt.Errorf("mkdir %s/%s: %w", wd, sub, err)
 		}
 	}
-	cleanup := func() { _ = os.RemoveAll(wd) }
 	return wd, cleanup, nil
 }
 

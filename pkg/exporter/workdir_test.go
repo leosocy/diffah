@@ -7,6 +7,45 @@ import (
 	"testing"
 )
 
+func TestEnsureWorkdir_TearsDownOnSubdirFailure(t *testing.T) {
+	outputDir := t.TempDir()
+	outputPath := filepath.Join(outputDir, "bundle.tar")
+
+	// Force the default workdir path so we know where to plant the conflict.
+	wantBase := filepath.Join(outputDir, ".diffah-tmp")
+	if err := os.MkdirAll(wantBase, 0o700); err != nil {
+		t.Fatalf("seed workdir base: %v", err)
+	}
+
+	// Pre-create a workdir at a known path and plant a regular file at
+	// .../baselines so MkdirAll(.../baselines, 0o700) fails.
+	wd := filepath.Join(wantBase, "fixed-suffix")
+	if err := os.MkdirAll(wd, 0o700); err != nil {
+		t.Fatalf("seed wd: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(wd, "baselines"), []byte("blocker"), 0o600); err != nil {
+		t.Fatalf("plant blocker: %v", err)
+	}
+
+	// Pass the planted wd via flag so resolveWorkdir returns it deterministically.
+	got, cleanup, err := ensureWorkdir(wd, outputPath)
+	if err == nil {
+		cleanup()
+		t.Fatal("expected ensureWorkdir to fail when subdir mkdir is blocked")
+	}
+	if got != "" {
+		t.Fatalf("expected empty path on error, got %q", got)
+	}
+	// The blocker file we planted is fine to leave; we only assert that
+	// ensureWorkdir does not LEAVE BEHIND any files it created (e.g., the
+	// other two subdirs that mkdir'd successfully before the failure).
+	for _, sub := range []string{"targets", "blobs"} {
+		if _, err := os.Stat(filepath.Join(wd, sub)); !os.IsNotExist(err) {
+			t.Fatalf("expected %s subdir cleaned up, stat err = %v", sub, err)
+		}
+	}
+}
+
 func TestResolveWorkdir_FlagBeatsEnvBeatsDefault(t *testing.T) {
 	outputDir := t.TempDir()
 	outputPath := filepath.Join(outputDir, "bundle.tar")
@@ -55,6 +94,7 @@ func TestEnsureWorkdir_CreatesAllSubdirsAndCleansUp(t *testing.T) {
 		}
 	}
 	cleanup()
+	cleanup() // idempotent — second call must be safe
 	if _, err := os.Stat(wd); !os.IsNotExist(err) {
 		t.Fatalf("expected workdir to be removed, stat err = %v", err)
 	}

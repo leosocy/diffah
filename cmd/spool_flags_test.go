@@ -20,6 +20,7 @@ func TestParseMemoryBudget_Table(t *testing.T) {
 		{"abc", 0, true},
 		{"", 0, true},
 		{"5XB", 0, true},
+		{"5K", 0, true},
 	}
 	for _, c := range cases {
 		got, err := parseMemoryBudget(c.in)

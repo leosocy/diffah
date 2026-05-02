@@ -63,7 +63,6 @@ func parseMemoryBudget(s string) (int64, error) {
 	}{
 		{"KIB", 1 << 10}, {"MIB", 1 << 20}, {"GIB", 1 << 30},
 		{"KB", 1000}, {"MB", 1000 * 1000}, {"GB", 1000 * 1000 * 1000},
-		{"K", 1 << 10}, {"M", 1 << 20}, {"G", 1 << 30},
 	}
 	upper := strings.ToUpper(s)
 	for _, m := range mults {

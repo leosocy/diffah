@@ -34,7 +34,10 @@ type Options struct {
 	// disk-backed baseline / target / output blob spills. Empty selects
 	// the default placement; see resolveWorkdir for precedence.
 	// MemoryBudget caps concurrent encoder RSS via the admission
-	// controller (spec §4.3); zero selects the default 8 GiB.
+	// controller (spec §4.3). Zero disables admission entirely
+	// (operator opt-out for benchmarking). The CLI default 8GiB is
+	// applied at flag-parse time, not here, so a zero-valued field
+	// reaching Export() is an explicit opt-out, not an unset value.
 	Workdir      string
 	MemoryBudget int64
 
