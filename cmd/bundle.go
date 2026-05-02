@@ -18,6 +18,7 @@ var bundleFlags = struct {
 	buildSystemContext registryContextBuilder
 	buildSignRequest   signRequestBuilder
 	buildEncodingOpts  encodingOptsBuilder
+	buildSpoolOpts     spoolOptsBuilder
 }{}
 
 const bundleExample = `  # Bundle multiple images using a spec file
@@ -33,7 +34,8 @@ func newBundleCommand() *cobra.Command {
 		Long: `Export a multi-image delta bundle driven by a spec file. The spec lists
 {name, baseline, target} triples for every image included in the bundle.
 
-` + encodingTuningHelp,
+` + encodingTuningHelp + `
+` + spoolHelp,
 		Args: requireArgs("bundle",
 			[]string{"BUNDLE-SPEC", "DELTA-OUT"},
 			"diffah bundle bundle.json bundle.tar"),
@@ -52,6 +54,7 @@ func newBundleCommand() *cobra.Command {
 	bundleFlags.buildSystemContext = installRegistryFlags(c)
 	bundleFlags.buildSignRequest = installSigningFlags(c)
 	bundleFlags.buildEncodingOpts = installEncodingFlags(c)
+	bundleFlags.buildSpoolOpts = installSpoolFlags(c)
 	installUsageTemplate(c)
 	return c
 }
@@ -93,6 +96,10 @@ func runBundle(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	spoolOpts, err := bundleFlags.buildSpoolOpts()
+	if err != nil {
+		return err
+	}
 
 	opts := exporter.Options{
 		Pairs:            pairs,
@@ -105,6 +112,8 @@ func runBundle(cmd *cobra.Command, args []string) error {
 		Candidates:       encOpts.Candidates,
 		ZstdLevel:        encOpts.ZstdLevel,
 		ZstdWindowLog:    encOpts.ZstdWindowLog,
+		Workdir:          spoolOpts.Workdir,
+		MemoryBudget:     spoolOpts.MemoryBudget,
 		SystemContext:    sc,
 		RetryTimes:       retryTimes,
 		RetryDelay:       retryDelay,

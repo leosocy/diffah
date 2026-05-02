@@ -7,6 +7,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/leosocy/diffah/pkg/exporter"
+	"github.com/leosocy/diffah/pkg/signer"
 )
 
 var diffFlags = struct {
@@ -17,6 +18,7 @@ var diffFlags = struct {
 	buildSystemContext registryContextBuilder
 	buildSignRequest   signRequestBuilder
 	buildEncodingOpts  encodingOptsBuilder
+	buildSpoolOpts     spoolOptsBuilder
 }{}
 
 const diffExample = `  # Compute a single-image delta
@@ -34,7 +36,8 @@ func newDiffCommand() *cobra.Command {
 		Short: "Compute a single-image delta archive.",
 		Long: `Compute a single-image delta archive between BASELINE-IMAGE and TARGET-IMAGE.
 
-` + encodingTuningHelp,
+` + encodingTuningHelp + `
+` + spoolHelp,
 		Args: requireArgs("diff",
 			[]string{"BASELINE-IMAGE", "TARGET-IMAGE", "DELTA-OUT"},
 			"diffah diff docker-archive:/tmp/old.tar docker-archive:/tmp/new.tar delta.tar"),
@@ -54,6 +57,7 @@ func newDiffCommand() *cobra.Command {
 	diffFlags.buildSystemContext = installRegistryFlags(c)
 	diffFlags.buildSignRequest = installSigningFlags(c)
 	diffFlags.buildEncodingOpts = installEncodingFlags(c)
+	diffFlags.buildSpoolOpts = installSpoolFlags(c)
 	installUsageTemplate(c)
 	return c
 }
@@ -71,17 +75,41 @@ func runDiff(cmd *cobra.Command, args []string) error {
 	}
 	deltaOut := args[2]
 
-	sc, retryTimes, retryDelay, err := diffFlags.buildSystemContext()
+	opts, signReq, signing, err := buildDiffOptions(cmd, baseline, target, deltaOut)
 	if err != nil {
 		return err
+	}
+
+	ctx := context.Background()
+	if diffFlags.dryRun {
+		return runExportDryRun(ctx, cmd, opts, signing, signReq,
+			"delta would ship %d blobs across %d images (%d bytes archive)\n")
+	}
+	if err := exporter.Export(ctx, opts); err != nil {
+		return err
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "wrote %s\n", deltaOut)
+	return nil
+}
+
+func buildDiffOptions(
+	cmd *cobra.Command, baseline, target ImageRef, deltaOut string,
+) (exporter.Options, signer.SignRequest, bool, error) {
+	sc, retryTimes, retryDelay, err := diffFlags.buildSystemContext()
+	if err != nil {
+		return exporter.Options{}, signer.SignRequest{}, false, err
 	}
 	signReq, signing, err := diffFlags.buildSignRequest()
 	if err != nil {
-		return err
+		return exporter.Options{}, signer.SignRequest{}, false, err
 	}
 	encOpts, err := diffFlags.buildEncodingOpts()
 	if err != nil {
-		return err
+		return exporter.Options{}, signer.SignRequest{}, false, err
+	}
+	spoolOpts, err := diffFlags.buildSpoolOpts()
+	if err != nil {
+		return exporter.Options{}, signer.SignRequest{}, false, err
 	}
 
 	opts := exporter.Options{
@@ -99,6 +127,8 @@ func runDiff(cmd *cobra.Command, args []string) error {
 		Candidates:       encOpts.Candidates,
 		ZstdLevel:        encOpts.ZstdLevel,
 		ZstdWindowLog:    encOpts.ZstdWindowLog,
+		Workdir:          spoolOpts.Workdir,
+		MemoryBudget:     spoolOpts.MemoryBudget,
 		SystemContext:    sc,
 		RetryTimes:       retryTimes,
 		RetryDelay:       retryDelay,
@@ -109,15 +139,5 @@ func runDiff(cmd *cobra.Command, args []string) error {
 		opts.SignKeyPassphrase = signReq.PassphraseBytes
 		opts.RekorURL = signReq.RekorURL
 	}
-
-	ctx := context.Background()
-	if diffFlags.dryRun {
-		return runExportDryRun(ctx, cmd, opts, signing, signReq,
-			"delta would ship %d blobs across %d images (%d bytes archive)\n")
-	}
-	if err := exporter.Export(ctx, opts); err != nil {
-		return err
-	}
-	fmt.Fprintf(cmd.OutOrStdout(), "wrote %s\n", deltaOut)
-	return nil
+	return opts, signReq, signing, nil
 }

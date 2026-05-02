@@ -32,6 +32,8 @@ func TestConfigDefaults_MatchCobraFlagDefaults(t *testing.T) {
 		{"zstd-window-log", d.ZstdWindowLog, newDiffCommand},
 		{"workers", "8", newDiffCommand},
 		{"candidates", "3", newDiffCommand},
+		{"workdir", d.Workdir, newDiffCommand},
+		{"memory-budget", d.MemoryBudget, newDiffCommand},
 	}
 
 	for _, c := range cases {

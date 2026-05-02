@@ -19,4 +19,6 @@ func TestDefault_ReturnsBuiltInValues(t *testing.T) {
 	require.Equal(t, "auto", d.ZstdWindowLog)
 	require.Equal(t, 8, d.Workers)
 	require.Equal(t, 3, d.Candidates)
+	require.Equal(t, "", d.Workdir)          // empty = default placement under <dir(OUTPUT)>/.diffah-tmp/
+	require.Equal(t, "8GiB", d.MemoryBudget) // matches --memory-budget cobra flag default
 }
