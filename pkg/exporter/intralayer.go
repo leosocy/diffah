@@ -212,7 +212,7 @@ func (p *Planner) PlanShippedTopK(
 	// trigger K identical compressions of the same bytes — visible cost
 	// once PR-4 raises --candidates default above 1.
 	wl := ResolveWindowLog(p.windowLog, s.Size)
-	fullZst, err := zstdpatch.EncodeFull(target,
+	fullZst, err := zstdpatch.EncodeFull(target, //nolint:staticcheck // intentional: see EncodeFull deprecation comment
 		zstdpatch.EncodeOpts{Level: p.level, WindowLog: wl})
 	if err != nil {
 		return diff.BlobRef{}, nil, fmt.Errorf(
@@ -230,6 +230,7 @@ func (p *Planner) PlanShippedTopK(
 			return diff.BlobRef{}, nil, fmt.Errorf(
 				"read baseline reference %s: %w", c.Digest, err)
 		}
+		//nolint:staticcheck // intentional: this caller is migrated to EncodeStream in PR 5 of the streaming I/O series.
 		patch, err := zstdpatch.Encode(ctx, refBytes, target,
 			zstdpatch.EncodeOpts{Level: p.level, WindowLog: wl})
 		if err != nil {
