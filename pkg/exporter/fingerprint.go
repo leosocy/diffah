@@ -44,6 +44,7 @@ func score(target, candidate Fingerprint) int64 {
 // an error wrapping ErrFingerprintFailed.
 type Fingerprinter interface {
 	Fingerprint(ctx context.Context, mediaType string, blob []byte) (Fingerprint, error)
+	FingerprintReader(ctx context.Context, mediaType string, r io.Reader) (Fingerprint, error)
 }
 
 // ErrFingerprintFailed is the sentinel wrapped by every error returned
@@ -54,40 +55,49 @@ var ErrFingerprintFailed = errors.New("fingerprint failed")
 // DefaultFingerprinter handles plain tar, gzip, and zstd compressed layers.
 type DefaultFingerprinter struct{}
 
-// Fingerprint implements Fingerprinter. Dispatches to openDecompressor to
-// pick the right decompression strategy based on media type (plain tar,
-// gzip+tar, or zstd+tar). Subsequent tasks extend beyond gzip.
-func (DefaultFingerprinter) Fingerprint(
+// Fingerprint implements Fingerprinter. Thin wrapper around FingerprintReader
+// for callers that already have the full blob in memory.
+func (d DefaultFingerprinter) Fingerprint(
 	ctx context.Context, mediaType string, blob []byte,
 ) (Fingerprint, error) {
-	r, closer, err := openDecompressor(mediaType, blob)
+	return d.FingerprintReader(ctx, mediaType, bytes.NewReader(blob))
+}
+
+// FingerprintReader implements Fingerprinter. Dispatches to
+// openDecompressorReader to pick the right decompression strategy based on
+// media type (plain tar, gzip+tar, or zstd+tar) and streams through the
+// reader directly without buffering into memory.
+func (DefaultFingerprinter) FingerprintReader(
+	ctx context.Context, mediaType string, r io.Reader,
+) (Fingerprint, error) {
+	dr, closer, err := openDecompressorReader(mediaType, r)
 	if err != nil {
 		return nil, err
 	}
 	defer closer()
-	return fingerprintTar(ctx, r)
+	return fingerprintTar(ctx, dr)
 }
 
-// openDecompressor picks a decompression reader based on the media type
+// openDecompressorReader picks a decompression reader based on the media type
 // suffix. Returns (reader, closer, err). Callers must invoke closer
 // (deferrable) exactly once whether or not fingerprinting succeeded.
 // Errors wrap ErrFingerprintFailed.
-func openDecompressor(mediaType string, blob []byte) (io.Reader, func(), error) {
+func openDecompressorReader(mediaType string, r io.Reader) (io.Reader, func(), error) {
 	switch {
 	case strings.HasSuffix(mediaType, "+gzip"):
-		gz, err := gzip.NewReader(bytes.NewReader(blob))
+		gz, err := gzip.NewReader(r)
 		if err != nil {
 			return nil, func() {}, fmt.Errorf("%w: gzip: %w", ErrFingerprintFailed, err)
 		}
 		return gz, func() { _ = gz.Close() }, nil
 	case strings.HasSuffix(mediaType, "+zstd"):
-		zr, err := zstd.NewReader(bytes.NewReader(blob))
+		zr, err := zstd.NewReader(r)
 		if err != nil {
 			return nil, func() {}, fmt.Errorf("%w: zstd: %w", ErrFingerprintFailed, err)
 		}
 		return zr, func() { zr.Close() }, nil
 	default:
-		return bytes.NewReader(blob), func() {}, nil
+		return r, func() {}, nil
 	}
 }
 

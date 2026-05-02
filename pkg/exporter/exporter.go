@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"time"
 
 	"go.podman.io/image/v5/types"
@@ -130,7 +131,7 @@ func buildBundle(ctx context.Context, opts *Options) (*builtBundle, error) {
 	log().InfoContext(ctx, "planned pairs", "count", len(plans))
 
 	if err := encodeShipped(ctx, pool, plans, effectiveMode, opts.fingerprinter, opts.reporter(),
-		opts.ZstdLevel, opts.ZstdWindowLog, opts.Candidates, opts.Workers); err != nil {
+		opts.ZstdLevel, opts.ZstdWindowLog, opts.Candidates, opts.Workers, opts.Workdir); err != nil {
 		return nil, fmt.Errorf("encode shipped layers: %w", err)
 	}
 	log().InfoContext(ctx, "encoded blobs", "count", len(pool.entries))
@@ -198,6 +199,15 @@ func signArchive(ctx context.Context, opts *Options) error {
 }
 
 func DryRun(ctx context.Context, opts Options) (DryRunStats, error) {
+	// DryRun needs a temporary workdir for the baseline spool (same
+	// contract as Export, but without a permanent output path).
+	wd, cleanup, err := ensureWorkdir(opts.Workdir, os.TempDir())
+	if err != nil {
+		return DryRunStats{}, fmt.Errorf("prepare workdir: %w", err)
+	}
+	defer cleanup()
+	opts.Workdir = wd
+
 	bb, err := buildBundle(ctx, &opts)
 	if err != nil {
 		return DryRunStats{}, err

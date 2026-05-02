@@ -3,6 +3,7 @@ package exporter
 import (
 	"bytes"
 	"context"
+	"io"
 	"math/rand/v2"
 	"os/exec"
 	"testing"
@@ -203,6 +204,16 @@ func (f *fakeFingerprinter) Fingerprint(
 		return fp, nil
 	}
 	return Fingerprint{}, nil
+}
+
+func (f *fakeFingerprinter) FingerprintReader(
+	ctx context.Context, mediaType string, r io.Reader,
+) (Fingerprint, error) {
+	blob, err := io.ReadAll(r)
+	if err != nil {
+		return nil, err
+	}
+	return f.Fingerprint(ctx, mediaType, blob)
 }
 
 func TestPlanner_EagerBaselineFingerprinting(t *testing.T) {
@@ -779,6 +790,16 @@ func (c *countingFingerprinter) Fingerprint(
 ) (Fingerprint, error) {
 	c.calls[digest.FromBytes(blob)]++
 	return c.inner.Fingerprint(ctx, mt, blob)
+}
+
+func (c *countingFingerprinter) FingerprintReader(
+	ctx context.Context, mediaType string, r io.Reader,
+) (Fingerprint, error) {
+	blob, err := io.ReadAll(r)
+	if err != nil {
+		return nil, err
+	}
+	return c.Fingerprint(ctx, mediaType, blob)
 }
 
 func TestPlanner_SeedBaselineFingerprintsAvoidsReFingerprinting(t *testing.T) {

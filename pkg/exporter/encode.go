@@ -3,6 +3,9 @@ package exporter
 import (
 	"context"
 	"fmt"
+	"io"
+	"os"
+	"path/filepath"
 
 	"github.com/opencontainers/go-digest"
 
@@ -14,10 +17,11 @@ import (
 // pipeline and writes the result into pool. PR-3 splits the work into
 // two phases driven by a bounded worker pool:
 //
-//   - E1: prime fpCache for the union of distinct baseline layers across
-//     all pairs (in parallel; singleflight collapses duplicate fetches).
+//   - E1: prime baselineSpool for the union of distinct baseline layers
+//     across all pairs (in parallel; singleflight collapses duplicate
+//     fetches). Blobs are streamed to <workdir>/baselines/<digest>.
 //   - E2: per (pair, shipped) tuple, fetch the target bytes and run the
-//     planner against the primed cache (also in parallel).
+//     planner against the primed spool (also in parallel).
 //
 // Output bytes are byte-identical across worker counts because:
 //   - blobPool is content-addressed and first-write-wins
@@ -29,6 +33,7 @@ func encodeShipped(
 	ctx context.Context, pool *blobPool, pairs []*pairPlan,
 	mode string, fp Fingerprinter, rep progress.Reporter,
 	level, windowLog, candidates, workers int,
+	workdir string,
 ) error {
 	if rep == nil {
 		rep = progress.NewDiscard()
@@ -43,16 +48,20 @@ func encodeShipped(
 		fp = DefaultFingerprinter{}
 	}
 
-	cache := newFpCache()
-	if err := primeBaselineCache(ctx, pairs, cache, fp, workers); err != nil {
+	baselinesDir := filepath.Join(workdir, "baselines")
+	if err := os.MkdirAll(baselinesDir, 0o700); err != nil {
+		return fmt.Errorf("create baselines spool dir: %w", err)
+	}
+	spool := newBaselineSpool(baselinesDir)
+	if err := primeBaselineSpool(ctx, pairs, spool, fp, workers); err != nil {
 		return fmt.Errorf("prime baseline fingerprints: %w", err)
 	}
-	return encodeTargets(ctx, pool, pairs, mode, fp, rep, cache,
+	return encodeTargets(ctx, pool, pairs, mode, fp, rep, spool,
 		level, windowLog, candidates, workers)
 }
 
-// primeBaselineCache pre-fetches every distinct baseline layer digest
-// referenced by pairs into cache, in parallel up to `workers`. Per-
+// primeBaselineSpool pre-fetches every distinct baseline layer digest
+// referenced by pairs into spool, in parallel up to `workers`. Per-
 // baseline fetch failures are swallowed (logged, not propagated) to
 // mirror Planner.ensureBaselineFP's fail-soft contract: a missing or
 // unreadable baseline layer must NOT abort encoding — the planner
@@ -61,9 +70,9 @@ func encodeShipped(
 // breaking TestEncodeShipped_WarningOnError_FallbackToFull and the
 // matching real-world resilience guarantee. ctx-cancellation errors
 // still propagate so cancellation flows.
-func primeBaselineCache(
+func primeBaselineSpool(
 	ctx context.Context, pairs []*pairPlan,
-	cache *fpCache, fp Fingerprinter, workers int,
+	spool *baselineSpool, fp Fingerprinter, workers int,
 ) error {
 	pool, poolCtx := newWorkerPool(ctx, workers)
 	seen := make(map[digest.Digest]struct{})
@@ -75,11 +84,11 @@ func primeBaselineCache(
 				continue
 			}
 			seen[b.Digest] = struct{}{}
-			fetch := func(d digest.Digest) ([]byte, error) {
-				return readBlobBytes(ctx, ref, sys, d)
+			fetch := func(d digest.Digest) (io.ReadCloser, error) {
+				return streamBlobReader(ctx, ref, sys, d)
 			}
 			pool.Submit(func() error {
-				if _, _, err := cache.GetOrLoad(ctx, b, fetch, fp); err != nil {
+				if _, err := spool.GetOrSpool(ctx, b, fetch, fp); err != nil {
 					if cerr := poolCtx.Err(); cerr != nil {
 						return cerr
 					}
@@ -95,45 +104,50 @@ func primeBaselineCache(
 
 // encodeTargets runs phase E2: for every (pair, shipped) tuple it
 // fetches the target bytes and resolves the layer's encoding through
-// PlanShippedTopK against the primed cache, in parallel up to `workers`.
+// PlanShippedTopK against the primed spool, in parallel up to `workers`.
 func encodeTargets(
 	ctx context.Context, pool *blobPool, pairs []*pairPlan,
-	mode string, fp Fingerprinter, rep progress.Reporter, cache *fpCache,
+	mode string, fp Fingerprinter, rep progress.Reporter, spool *baselineSpool,
 	level, windowLog, candidates, workers int,
 ) error {
 	// fingerprint snapshot taken once after Phase E1: every per-pair
 	// Planner is seeded with the same map so a baseline shared across N
 	// pairs is fingerprinted once (during E1), not N times (once per
 	// Planner.ensureBaselineFP). Spec §4.2.
-	seedFP := cache.SnapshotFingerprints()
+	seedFP := spool.SnapshotFingerprints()
 
 	encPool, _ := newWorkerPool(ctx, workers)
 	for _, p := range pairs {
-		// Per-pair digest → meta lookup so the readBaseline retry closure
-		// passes the real MediaType into cache.GetOrLoad. Without this map
-		// the retry path strips MediaType, which would silently produce a
-		// wrong-MediaType fingerprint if it ever survived the cache.
+		// Per-pair digest → meta lookup so the readBaseline safety-net
+		// closure passes the real MediaType into spool.GetOrSpool. Without
+		// this map the retry path strips MediaType, which would silently
+		// produce a wrong-MediaType fingerprint if it ever survived.
 		metaByDigest := make(map[digest.Digest]BaselineLayerMeta, len(p.BaselineLayerMeta))
 		for _, b := range p.BaselineLayerMeta {
 			metaByDigest[b.Digest] = b
 		}
 
 		// Each pair builds its own Planner that defers all baseline reads
-		// to the shared cache. Phase E1 has already primed every digest in
-		// p.BaselineLayerMeta, so this closure should always hit the cache;
-		// the fetch function is kept as a safety net for the (currently
-		// impossible) case where a baseline digest reaches the planner
-		// without having been primed.
+		// to the shared spool. Phase E1 has already primed every digest in
+		// p.BaselineLayerMeta, so this closure should always hit the spool
+		// fast-path; the GetOrSpool call is kept as a safety net for the
+		// (currently impossible) case where a baseline digest reaches the
+		// planner without having been primed.
+		ref := p.BaselineImageRef
+		sys := p.SystemContext
 		readBaseline := func(d digest.Digest) ([]byte, error) {
 			meta, ok := metaByDigest[d]
 			if !ok {
 				meta = BaselineLayerMeta{Digest: d}
 			}
-			_, b, err := cache.GetOrLoad(ctx, meta,
-				func(d digest.Digest) ([]byte, error) {
-					return readBlobBytes(ctx, p.BaselineImageRef, p.SystemContext, d)
-				}, fp)
-			return b, err
+			fetch := func(fd digest.Digest) (io.ReadCloser, error) {
+				return streamBlobReader(ctx, ref, sys, fd)
+			}
+			entry, err := spool.GetOrSpool(ctx, meta, fetch, fp)
+			if err != nil {
+				return nil, err
+			}
+			return os.ReadFile(entry.Path)
 		}
 		planner := NewPlanner(p.BaselineLayerMeta, readBaseline, fp, level, windowLog)
 		planner.SeedBaselineFingerprints(seedFP)
