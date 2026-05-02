@@ -30,6 +30,18 @@ After PR 1 shipped, four corrections to this plan emerged. **Future PR implement
 
 **Implementer pre-flight:** before writing code, the PR 1 implementer ran an `advisor()` consultation against the plan and caught all three of issues #1-#3 above. The cost-of-bugs vs cost-of-pre-flight calculus heavily favors pre-flight. **Future implementers should run `advisor()` after reading their PR's full text but before touching code.** Bugs in this plan ARE possible (we've found four already); independent review pays for itself.
 
+## Amendments (post-PR 2)
+
+PR 2 surfaced four more corrections. Apply these for any PR that touches CLI flags or config integration.
+
+5. **Determinism workhorse test name.** `TestExport_DeterministicArchive` exists but is a `t.Skip(...)` stub. The real byte-identity test is `TestExport_OutputIsByteIdenticalAcrossWorkerCounts` in `pkg/exporter/determinism_test.go` (asserts byte-identical across `--workers` 1/2/4/8/16). Both names work for the determinism gate command (the stub passes vacuously), but for actual confidence run `go test -count=2 -run TestExport_OutputIsByteIdenticalAcrossWorkerCounts ./pkg/exporter/...`.
+
+6. **Config `Default()` values overwrite cobra flag defaults via `ApplyTo` reflection.** If a new flag has a non-empty cobra default (e.g. `--memory-budget` defaults to `"8GiB"`), the matching `pkg/config.Default()` value MUST equal that default string — otherwise `ApplyTo` will silently overwrite the cobra default with `""` on every invocation that doesn't have a config file. PR 2 hit this; fix is one line in `pkg/config/defaults.go` per new flag. Verify by adding a row to `cmd/config_defaults_test.go`'s table that asserts `f.DefValue == d.<Field>`.
+
+7. **Three-tag struct style on `pkg/config.Config`.** Existing fields use three tags: `mapstructure:"x" yaml:"x" json:"x"`. New fields MUST follow the same pattern with kebab-case keys matching the CLI flag names. Two-tag form (just `mapstructure`+`yaml`) breaks the JSON serialization path used by `diffah config show`.
+
+8. **Beware `funlen` ceiling on `runDiff`/`runBundle`.** Adding a builder call (e.g. `installSpoolFlags`) to either pushes them past the project's 60-line `funlen` cap. PR 2 extracted `buildDiffOptions` for `runDiff`; PR 3+ that adds plumbing to `runBundle` will likely need the same `buildBundleOptions` extraction. Pre-flight by running `golangci-lint` after the wiring step.
+
 ---
 
 ## File map
