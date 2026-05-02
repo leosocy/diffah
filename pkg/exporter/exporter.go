@@ -30,6 +30,14 @@ type Options struct {
 	ZstdLevel     int // 0 → 3. PR-4 changes default to 22.
 	ZstdWindowLog int // 0 → 27. PR-4 changes default to "auto" (per-layer).
 
+	// Streaming I/O — Phase 4. Workdir is the spool root for
+	// disk-backed baseline / target / output blob spills. Empty selects
+	// the default placement; see resolveWorkdir for precedence.
+	// MemoryBudget caps concurrent encoder RSS via the admission
+	// controller (spec §4.3); zero selects the default 8 GiB.
+	Workdir      string
+	MemoryBudget int64
+
 	// Registry & transport — threaded into every types.ImageReference
 	// call. Nil is acceptable; it behaves the same as today's path-only
 	// flow.
@@ -129,6 +137,14 @@ func buildBundle(ctx context.Context, opts *Options) (*builtBundle, error) {
 
 func Export(ctx context.Context, opts Options) error {
 	defer opts.reporter().Finish()
+
+	wd, cleanupWorkdir, err := ensureWorkdir(opts.Workdir, opts.OutputPath)
+	if err != nil {
+		return fmt.Errorf("prepare workdir: %w", err)
+	}
+	defer cleanupWorkdir()
+	opts.Workdir = wd // canonicalize for downstream consumers (PRs 3-6)
+
 	bb, err := buildBundle(ctx, &opts)
 	if err != nil {
 		return err

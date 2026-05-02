@@ -17,5 +17,7 @@ func Default() *Config {
 		ZstdWindowLog: "auto",
 		Workers:       8,
 		Candidates:    3,
+		Workdir:       "",     // empty = <dir(OUTPUT)>/.diffah-tmp/<random> at Export time
+		MemoryBudget:  "8GiB", // matches --memory-budget cobra flag default
 	}
 }

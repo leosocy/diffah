@@ -34,6 +34,8 @@ type Config struct {
 	ZstdWindowLog string        `mapstructure:"zstd-window-log" yaml:"zstd-window-log" json:"zstd-window-log"`
 	Workers       int           `mapstructure:"workers" yaml:"workers" json:"workers"`
 	Candidates    int           `mapstructure:"candidates" yaml:"candidates" json:"candidates"`
+	Workdir       string        `mapstructure:"workdir" yaml:"workdir" json:"workdir"`
+	MemoryBudget  string        `mapstructure:"memory-budget" yaml:"memory-budget" json:"memory-budget"`
 }
 
 // flagNames is the Go-field-name → CLI-flag-name lookup used by
