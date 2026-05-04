@@ -191,7 +191,10 @@ func encodeOneShipped(
 		return fmt.Errorf("read shipped %s: %w", s.Digest, err)
 	}
 	if pool.refCount(s.Digest) > 1 || mode == modeOff {
-		pool.addIfAbsent(s.Digest, layerBytes, fullBlobEntry(s))
+		if err := pool.addEntryIfAbsent(s.Digest, layerBytes, fullBlobEntry(s)); err != nil {
+			layer.Fail(err)
+			return err
+		}
 		layer.Done()
 		return nil
 	}
@@ -199,11 +202,17 @@ func encodeOneShipped(
 	if err != nil {
 		log().Warn("patch encode failed, falling back to full",
 			"pair", p.Name, "digest", s.Digest, "err", err)
-		pool.addIfAbsent(s.Digest, layerBytes, fullBlobEntry(s))
+		if err := pool.addEntryIfAbsent(s.Digest, layerBytes, fullBlobEntry(s)); err != nil {
+			layer.Fail(err)
+			return err
+		}
 		layer.Done()
 		return nil
 	}
-	pool.addIfAbsent(s.Digest, payload, blobEntryFromPlanner(entry))
+	if err := pool.addEntryIfAbsent(s.Digest, payload, blobEntryFromPlanner(entry)); err != nil {
+		layer.Fail(err)
+		return err
+	}
 	layer.Done()
 	return nil
 }

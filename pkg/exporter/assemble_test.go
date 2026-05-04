@@ -17,8 +17,8 @@ func TestAssembleSidecar_Minimal(t *testing.T) {
 		TargetRef:   "oci-archive:../../testdata/fixtures/v2_oci.tar"}, &Options{Platform: "linux/amd64"})
 	require.NoError(t, err)
 
-	pool := newBlobPool()
-	seedManifestAndConfig(pool, p1)
+	pool := newBlobPool(t.TempDir())
+	require.NoError(t, seedManifestAndConfig(pool, p1))
 	for _, s := range p1.Shipped {
 		pool.countShipped(s.Digest)
 	}

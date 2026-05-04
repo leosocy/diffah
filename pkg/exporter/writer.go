@@ -3,6 +3,7 @@ package exporter
 import (
 	"archive/tar"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,17 +26,16 @@ func writeBundleArchive(outPath string, sidecar diff.Sidecar, pool *blobPool) er
 	if err != nil {
 		return fmt.Errorf("marshal sidecar: %w", err)
 	}
-	if err := writeTarEntry(tw, diff.SidecarFilename, scBytes); err != nil {
+	if err := writeTarEntryBytes(tw, diff.SidecarFilename, scBytes); err != nil {
 		return fmt.Errorf("write sidecar: %w", err)
 	}
 
 	for _, d := range pool.sortedDigests() {
-		rel := blobPath(d)
-		data, ok := pool.get(d)
+		spillPath, ok := pool.spills[d]
 		if !ok {
 			return fmt.Errorf("blob %s missing from pool", d)
 		}
-		if err := writeTarEntry(tw, rel, data); err != nil {
+		if err := streamBlobIntoTar(tw, blobPath(d), spillPath); err != nil {
 			return fmt.Errorf("write blob %s: %w", d, err)
 		}
 	}
@@ -50,14 +50,42 @@ func blobPath(d digest.Digest) string {
 	return filepath.Join("blobs", parts[0], parts[1])
 }
 
-func writeTarEntry(tw *tar.Writer, name string, data []byte) error {
+// writeTarEntryBytes writes an in-memory byte slice as a tar entry.
+// Used for small sidecar payloads.
+func writeTarEntryBytes(tw *tar.Writer, name string, data []byte) error {
 	hdr := &tar.Header{
 		Name: name, Size: int64(len(data)), Mode: 0o644,
 		Format: tar.FormatPAX,
 	}
 	if err := tw.WriteHeader(hdr); err != nil {
-		return err
+		return fmt.Errorf("write tar header %s: %w", name, err)
 	}
 	_, err := tw.Write(data)
 	return err
+}
+
+// streamBlobIntoTar opens the spill file at path, stats it for the tar
+// header size, writes the header, then streams the content via io.Copy.
+func streamBlobIntoTar(tw *tar.Writer, name, path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("open spill %s: %w", path, err)
+	}
+	defer f.Close()
+
+	fi, err := f.Stat()
+	if err != nil {
+		return fmt.Errorf("stat spill %s: %w", path, err)
+	}
+	hdr := &tar.Header{
+		Name: name, Size: fi.Size(), Mode: 0o644,
+		Format: tar.FormatPAX,
+	}
+	if err := tw.WriteHeader(hdr); err != nil {
+		return fmt.Errorf("write tar header %s: %w", name, err)
+	}
+	if _, err := io.Copy(tw, f); err != nil {
+		return fmt.Errorf("copy spill %s: %w", path, err)
+	}
+	return nil
 }
