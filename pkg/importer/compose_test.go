@@ -1,6 +1,7 @@
 package importer
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -318,6 +319,63 @@ func TestServePatch_BlobNotFound_WrapsB1(t *testing.T) {
 	}
 	if b1.ImageName != "svc-x" {
 		t.Errorf("ImageName = %q, want %q", b1.ImageName, "svc-x")
+	}
+}
+
+// fakeFixedBytesSource is a minimal types.ImageSource that always returns
+// fixed bytes from GetBlob — used to drive a digest-mismatch through
+// fetchVerifiedBaselineBlob without standing up a registry fixture.
+type fakeFixedBytesSource struct{ bytes []byte }
+
+func (*fakeFixedBytesSource) Reference() types.ImageReference { return nil }
+func (*fakeFixedBytesSource) Close() error                    { return nil }
+func (*fakeFixedBytesSource) GetManifest(context.Context, *digest.Digest) ([]byte, string, error) {
+	return nil, "", nil
+}
+func (*fakeFixedBytesSource) HasThreadSafeGetBlob() bool { return true }
+func (*fakeFixedBytesSource) GetSignatures(context.Context, *digest.Digest) ([][]byte, error) {
+	return nil, nil
+}
+func (*fakeFixedBytesSource) LayerInfosForCopy(context.Context, *digest.Digest) ([]types.BlobInfo, error) {
+	return nil, nil
+}
+func (s *fakeFixedBytesSource) GetBlob(context.Context, types.BlobInfo, types.BlobInfoCache) (io.ReadCloser, int64, error) {
+	return io.NopCloser(bytes.NewReader(s.bytes)), int64(len(s.bytes)), nil
+}
+
+// TestGetBlob_BaselineDigestMismatch_RewrapsWithImageName verifies that
+// when the spool's digest-verification gate fires (fetched bytes' digest
+// does not match the requested digest), fetchVerifiedBaselineBlob
+// repopulates ImageName on the returned *diff.ErrBaselineBlobDigestMismatch.
+// Spool sees one digest at a time and is per-Import; the per-image label
+// is added at the call site so operator-facing diagnostics still name the
+// image being applied. Regression guard for PR3 backend swap.
+func TestGetBlob_BaselineDigestMismatch_RewrapsWithImageName(t *testing.T) {
+	wrongDigest := digest.FromBytes([]byte("requested-digest-source"))
+	actualBytes := []byte("actual-bytes-with-different-digest")
+
+	src := &bundleImageSource{
+		blobDir:   t.TempDir(),
+		imageName: "svc-z",
+		baseline:  &fakeFixedBytesSource{bytes: actualBytes},
+		spool:     NewBaselineSpool(t.TempDir()),
+		sidecar:   &diff.Sidecar{Blobs: map[digest.Digest]diff.BlobEntry{}},
+	}
+	_, _, err := src.GetBlob(context.Background(),
+		types.BlobInfo{Digest: wrongDigest}, nil)
+
+	var mismatch *diff.ErrBaselineBlobDigestMismatch
+	if !errors.As(err, &mismatch) {
+		t.Fatalf("expected *diff.ErrBaselineBlobDigestMismatch, got %T: %v", err, err)
+	}
+	if mismatch.ImageName != "svc-z" {
+		t.Errorf("ImageName = %q, want svc-z (rewrap dropped per-image label)", mismatch.ImageName)
+	}
+	if mismatch.Digest != wrongDigest.String() {
+		t.Errorf("Digest = %q, want %q", mismatch.Digest, wrongDigest)
+	}
+	if mismatch.Got != digest.FromBytes(actualBytes).String() {
+		t.Errorf("Got = %q, want %q", mismatch.Got, digest.FromBytes(actualBytes))
 	}
 }
 

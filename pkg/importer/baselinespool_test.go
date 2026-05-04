@@ -248,6 +248,122 @@ func TestBaselineSpool_SingleflightDedupsSameDigest(t *testing.T) {
 	}
 }
 
+// TestBaselineSpool_DigestMismatchReturnsTypedErrorAndCleansUp verifies
+// the digest-verification gate inside spoolOnce: when the fetched bytes'
+// digest does not match the requested digest, the spool returns
+// *diff.ErrBaselineBlobDigestMismatch (Got populated, ImageName empty —
+// fetchVerifiedBaselineBlob's wrapper repopulates ImageName at the
+// caller), removes the partial tmp file, and does NOT record the digest
+// in the entries map.
+func TestBaselineSpool_DigestMismatchReturnsTypedErrorAndCleansUp(t *testing.T) {
+	s := newSpool(t)
+	payload := []byte("the-actual-bytes")
+	wrongDigest := digest.FromBytes([]byte("not-the-actual-bytes"))
+
+	_, err := s.GetOrSpool(context.Background(), wrongDigest, func() (io.ReadCloser, error) {
+		return io.NopCloser(bytesReader(payload)), nil
+	})
+	if err == nil {
+		t.Fatal("expected digest-mismatch error")
+	}
+	var mismatch *diff.ErrBaselineBlobDigestMismatch
+	if !errors.As(err, &mismatch) {
+		t.Fatalf("expected *diff.ErrBaselineBlobDigestMismatch, got %T %v", err, err)
+	}
+	if mismatch.Digest != wrongDigest.String() {
+		t.Errorf("expected digest %q, got %q", wrongDigest, mismatch.Digest)
+	}
+	if mismatch.Got != digest.FromBytes(payload).String() {
+		t.Errorf("expected got %q, got %q", digest.FromBytes(payload), mismatch.Got)
+	}
+	if _, statErr := os.Stat(s.pathFor(wrongDigest)); !os.IsNotExist(statErr) {
+		t.Fatalf("partial spool file should have been removed, stat err=%v", statErr)
+	}
+	if p, ok := s.Path(wrongDigest); ok {
+		t.Fatalf("entries map should not record mismatched digest, got %q", p)
+	}
+}
+
+// TestBaselineSpool_FetchErrorAllowsRetry verifies the
+// "fetch errors are not cached" contract: a failed fetch leaves the
+// digest absent from entries, and a subsequent GetOrSpool call with a
+// successful fetch publishes the blob normally.
+func TestBaselineSpool_FetchErrorAllowsRetry(t *testing.T) {
+	s := newSpool(t)
+	payload := bytes.Repeat([]byte("R"), 2048)
+	d := digest.FromBytes(payload)
+
+	wantErr := errors.New("transient fetch failure")
+	if _, err := s.GetOrSpool(context.Background(), d, func() (io.ReadCloser, error) {
+		return nil, wantErr
+	}); !errors.Is(err, wantErr) {
+		t.Fatalf("expected wantErr, got %v", err)
+	}
+	if _, ok := s.Path(d); ok {
+		t.Fatal("entries map should not record digest after failed fetch")
+	}
+
+	path, err := s.GetOrSpool(context.Background(), d, func() (io.ReadCloser, error) {
+		return io.NopCloser(bytesReader(payload)), nil
+	})
+	if err != nil {
+		t.Fatalf("retry GetOrSpool: %v", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read retried spool: %v", err)
+	}
+	if !bytes.Equal(got, payload) {
+		t.Fatal("retried spool bytes mismatch")
+	}
+}
+
+// TestBaselineSpool_ConcurrentDistinctDigestsAllSucceed is a smoke test
+// against a regression that would route distinct digests through the
+// same singleflight key (e.g., a future change that uses dir as the key
+// instead of digest). With distinct digests the spool must run all
+// fetches and publish all of them.
+func TestBaselineSpool_ConcurrentDistinctDigestsAllSucceed(t *testing.T) {
+	s := newSpool(t)
+	const N = 8
+	payloads := make([][]byte, N)
+	digests := make([]digest.Digest, N)
+	for i := 0; i < N; i++ {
+		payloads[i] = bytes.Repeat([]byte{byte('a' + i)}, 1024+i)
+		digests[i] = digest.FromBytes(payloads[i])
+	}
+
+	var calls atomic.Int32
+	var wg sync.WaitGroup
+	for i := 0; i < N; i++ {
+		i := i
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			path, err := s.GetOrSpool(context.Background(), digests[i], func() (io.ReadCloser, error) {
+				calls.Add(1)
+				return io.NopCloser(bytesReader(payloads[i])), nil
+			})
+			if err != nil {
+				t.Errorf("digest %d GetOrSpool: %v", i, err)
+				return
+			}
+			got, err := os.ReadFile(path)
+			if err != nil {
+				t.Errorf("digest %d read: %v", i, err)
+				return
+			}
+			if !bytes.Equal(got, payloads[i]) {
+				t.Errorf("digest %d payload mismatch on disk", i)
+			}
+		}()
+	}
+	wg.Wait()
+	if got := calls.Load(); got != int32(N) {
+		t.Fatalf("expected %d fetches (one per distinct digest), got %d", N, got)
+	}
+}
+
 // bytesReader is a tiny helper to avoid pulling bytes.Reader into every
 // fetch closure.
 func bytesReader(b []byte) io.Reader { return &slowBytesReader{b: b} }

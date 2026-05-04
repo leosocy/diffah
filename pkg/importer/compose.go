@@ -3,6 +3,7 @@ package importer
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -162,6 +163,11 @@ func (s *bundleImageSource) servePatch(
 // a separate concern from s.spool. PR4 will rewrite serveFull/servePatch to
 // stream from disk; PR3 keeps the []byte return so this PR is purely a
 // backend swap.
+//
+// Re-wraps any *diff.ErrBaselineBlobDigestMismatch returned by the spool
+// to repopulate ImageName: the spool is per-Import (image-agnostic) but
+// the operator-facing error has historically named the offending image
+// so support flows can locate the apply context.
 func (s *bundleImageSource) fetchVerifiedBaselineBlob(
 	ctx context.Context, d digest.Digest, cache types.BlobInfoCache,
 ) ([]byte, error) {
@@ -170,6 +176,10 @@ func (s *bundleImageSource) fetchVerifiedBaselineBlob(
 		return rc, gerr
 	})
 	if err != nil {
+		var mismatch *diff.ErrBaselineBlobDigestMismatch
+		if errors.As(err, &mismatch) && mismatch.ImageName == "" {
+			mismatch.ImageName = s.imageName
+		}
 		return nil, err
 	}
 	return os.ReadFile(path)

@@ -12,9 +12,14 @@
 // blob cache's behaviour). Failed fetches do not cache: the next
 // caller retries.
 //
-// Mirrors pkg/exporter/baselinespool.go in shape and safety patterns
-// (singleflight + drain + atomic rename via tmp + committed sentinel),
-// minus the fingerprint coupling which is exporter-only.
+// Mirrors pkg/exporter/baselinespool.go in shape and the singleflight /
+// drain / committed-sentinel pattern. Importer additionally publishes via
+// tmp + atomic rename (CreateTemp → Sync → Close → Rename) for defense-
+// in-depth: even if a future caller bypasses singleflight (as the atomic-
+// rename test does directly), concurrent writers race on distinct tmp
+// files and only the digest-matching writer's payload reaches dst. The
+// exporter does not need this because all of its writers go through the
+// singleflight gate.
 package importer
 
 import (
