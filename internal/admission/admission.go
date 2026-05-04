@@ -59,6 +59,9 @@ func NewAdmissionPool(ctx context.Context, workers int, memoryBudget int64) *Adm
 
 // Submit runs fn under all three gates, dedup'd by key. estimate is
 // the predicted per-task RSS in bytes.
+//
+// Admission gates only change WHEN tasks run, not WHAT they produce;
+// output remains deterministic across (workers, memBudget) combinations.
 func (p *AdmissionPool) Submit(key string, estimate int64, fn func() error) {
 	if estimate < 1 {
 		estimate = 1

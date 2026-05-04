@@ -4,21 +4,32 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 )
 
+// Gated form (channel sync) ensures all 8 Submits coalesce into one
+// singleflight execution deterministically, instead of relying on a
+// time.Sleep that goes flaky under load.
 func TestAdmission_SingleflightDedup(t *testing.T) {
 	p := NewAdmissionPool(context.Background(), 4, 0)
 	var ran int32
+	running := make(chan struct{})
+	unblock := make(chan struct{})
+	var once sync.Once
 	for i := 0; i < 8; i++ {
 		p.Submit("same", 1, func() error {
 			atomic.AddInt32(&ran, 1)
-			time.Sleep(20 * time.Millisecond)
+			once.Do(func() { close(running) })
+			<-unblock
 			return nil
 		})
 	}
+	<-running                        // leader is inside the gated fn
+	time.Sleep(5 * time.Millisecond) // let followers attach to singleflight
+	close(unblock)                   // release the leader; followers receive the same result
 	if err := p.Wait(); err != nil {
 		t.Fatal(err)
 	}
@@ -36,8 +47,8 @@ func TestAdmission_WorkerSemBounds(t *testing.T) {
 			cur := atomic.AddInt32(&inFlight, 1)
 			defer atomic.AddInt32(&inFlight, -1)
 			for {
-				p := atomic.LoadInt32(&peak)
-				if cur <= p || atomic.CompareAndSwapInt32(&peak, p, cur) {
+				prev := atomic.LoadInt32(&peak)
+				if cur <= prev || atomic.CompareAndSwapInt32(&peak, prev, cur) {
 					break
 				}
 			}
@@ -63,8 +74,8 @@ func TestAdmission_MemSemBoundsByEstimate(t *testing.T) {
 			cur := atomic.AddInt32(&inFlight, 1)
 			defer atomic.AddInt32(&inFlight, -1)
 			for {
-				p := atomic.LoadInt32(&peak)
-				if cur <= p || atomic.CompareAndSwapInt32(&peak, p, cur) {
+				prev := atomic.LoadInt32(&peak)
+				if cur <= prev || atomic.CompareAndSwapInt32(&peak, prev, cur) {
 					break
 				}
 			}
