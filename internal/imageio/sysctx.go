@@ -160,6 +160,7 @@ func ResolveAuthFile() string {
 // containers-image library. Stat is side-effect-free, so gosec G703's
 // path-traversal concern does not apply to this lookup site.
 func fileExists(path string) bool {
-	_, err := os.Stat(path) //nolint:gosec // G703: env-derived config path; stat-only, no content read
+	//nolint:gosec // G703: stat-only, no content read; see comment above.
+	_, err := os.Stat(path)
 	return err == nil
 }

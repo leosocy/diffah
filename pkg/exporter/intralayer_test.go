@@ -1,11 +1,12 @@
 package exporter
 
 import (
-	"bytes"
 	"context"
 	"io"
 	"math/rand/v2"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"testing"
 
 	"github.com/opencontainers/go-digest"
@@ -18,12 +19,38 @@ import (
 // raw bytes.
 type blobMap map[digest.Digest][]byte
 
-func (m blobMap) read(d digest.Digest) ([]byte, error) {
-	b, ok := m[d]
-	if !ok {
-		return nil, &missingBlobError{d: d}
+// readPath returns a readBlobPath-compatible closure that writes each blob
+// into dir on first call and caches the path. It satisfies the new
+// Planner.readBlobPath func(digest.Digest) (string, error) contract.
+func (m blobMap) readPath(t *testing.T) func(digest.Digest) (string, error) {
+	t.Helper()
+	dir := t.TempDir()
+	cache := make(map[digest.Digest]string)
+	return func(d digest.Digest) (string, error) {
+		if p, ok := cache[d]; ok {
+			return p, nil
+		}
+		b, ok := m[d]
+		if !ok {
+			return "", &missingBlobError{d: d}
+		}
+		p := filepath.Join(dir, d.Encoded())
+		if err := os.WriteFile(p, b, 0o600); err != nil {
+			return "", err
+		}
+		cache[d] = p
+		return p, nil
 	}
-	return b, nil
+}
+
+// writeBlobToDir writes blob bytes to dir/<digest.Encoded()> and returns the
+// path. Used to prepare targetPath arguments for PlanShippedTopK.
+func writeBlobToDir(t *testing.T, dir string, b []byte) string {
+	t.Helper()
+	d := digest.FromBytes(b)
+	p := filepath.Join(dir, d.Encoded())
+	require.NoError(t, os.WriteFile(p, b, 0o600))
+	return p
 }
 
 type missingBlobError struct{ d digest.Digest }
@@ -64,16 +91,19 @@ func TestPlanner_PicksFullWhenPatchLarger(t *testing.T) {
 	baseline := []BaselineLayerMeta{{Digest: refDigest, Size: int64(len(ref)), MediaType: "m"}}
 	blobs := blobMap{refDigest: ref, tgtDigest: target}
 
-	p := &Planner{baseline: baseline, readBlob: blobs.read}
-	entries, payloads, err := p.Run(context.Background(), []diff.BlobRef{
-		{Digest: tgtDigest, Size: int64(len(target)), MediaType: "m"},
-	})
+	targetsDir := t.TempDir()
+	blobsDir := t.TempDir()
+	targetPath := writeBlobToDir(t, targetsDir, target)
+
+	p := NewPlanner(baseline, blobs.readPath(t), nil, 0, 0)
+	br := diff.BlobRef{Digest: tgtDigest, Size: int64(len(target)), MediaType: "m"}
+	entry, payloadPath, err := p.PlanShippedTopK(context.Background(), br, targetPath, blobsDir, 1)
 	require.NoError(t, err)
-	require.Len(t, entries, 1)
-	require.Equal(t, diff.EncodingFull, entries[0].Encoding,
+	require.Equal(t, diff.EncodingFull, entry.Encoding,
 		"independent random pair should degrade to encoding=full")
-	require.True(t, bytes.Equal(target, payloads[tgtDigest]),
-		"full payload must be verbatim target bytes")
+	got, err := os.ReadFile(payloadPath)
+	require.NoError(t, err)
+	require.Equal(t, target, got, "full payload must be verbatim target bytes")
 }
 
 func TestPlanner_PicksPatchWhenBytesClose(t *testing.T) {
@@ -91,17 +121,21 @@ func TestPlanner_PicksPatchWhenBytesClose(t *testing.T) {
 	baseline := []BaselineLayerMeta{{Digest: refDigest, Size: int64(len(ref)), MediaType: "m"}}
 	blobs := blobMap{refDigest: ref, tgtDigest: target}
 
-	p := &Planner{baseline: baseline, readBlob: blobs.read}
-	entries, payloads, err := p.Run(context.Background(), []diff.BlobRef{
-		{Digest: tgtDigest, Size: int64(len(target)), MediaType: "m"},
-	})
+	targetsDir := t.TempDir()
+	blobsDir := t.TempDir()
+	targetPath := writeBlobToDir(t, targetsDir, target)
+
+	p := NewPlanner(baseline, blobs.readPath(t), nil, 0, 0)
+	br := diff.BlobRef{Digest: tgtDigest, Size: int64(len(target)), MediaType: "m"}
+	entry, payloadPath, err := p.PlanShippedTopK(context.Background(), br, targetPath, blobsDir, 1)
 	require.NoError(t, err)
-	require.Len(t, entries, 1)
-	require.Equal(t, diff.EncodingPatch, entries[0].Encoding)
-	require.Equal(t, "zstd-patch", entries[0].Codec)
-	require.Equal(t, refDigest, entries[0].PatchFromDigest)
-	require.Less(t, entries[0].ArchiveSize, entries[0].Size)
-	require.Less(t, len(payloads[tgtDigest]), len(target)/2,
+	require.Equal(t, diff.EncodingPatch, entry.Encoding)
+	require.Equal(t, "zstd-patch", entry.Codec)
+	require.Equal(t, refDigest, entry.PatchFromDigest)
+	require.Less(t, entry.ArchiveSize, entry.Size)
+	patchBytes, err := os.ReadFile(payloadPath)
+	require.NoError(t, err)
+	require.Less(t, len(patchBytes), len(target)/2,
 		"patch of a near-identical pair should be far smaller than half")
 }
 
@@ -125,12 +159,15 @@ func TestPlanner_PicksSizeClosestReferenceDeterministically(t *testing.T) {
 		digest.FromBytes(target): target,
 	}
 
-	p := &Planner{baseline: baseline, readBlob: blobs.read}
-	entries, _, err := p.Run(context.Background(), []diff.BlobRef{
-		{Digest: digest.FromBytes(target), Size: int64(len(target)), MediaType: "m"},
-	})
+	targetsDir := t.TempDir()
+	blobsDir := t.TempDir()
+	targetPath := writeBlobToDir(t, targetsDir, target)
+
+	p := NewPlanner(baseline, blobs.readPath(t), nil, 0, 0)
+	br := diff.BlobRef{Digest: digest.FromBytes(target), Size: int64(len(target)), MediaType: "m"}
+	entry, _, err := p.PlanShippedTopK(context.Background(), br, targetPath, blobsDir, 1)
 	require.NoError(t, err)
-	require.Equal(t, digest.FromBytes(mid), entries[0].PatchFromDigest,
+	require.Equal(t, digest.FromBytes(mid), entry.PatchFromDigest,
 		"planner must pick the size-closest baseline layer as patch reference")
 }
 
@@ -139,16 +176,20 @@ func TestPlanner_EmptyBaselineProducesFullEntries(t *testing.T) {
 	target := pseudoRandom(20, 1<<10)
 	tgtDigest := digest.FromBytes(target)
 	blobs := blobMap{tgtDigest: target}
-	p := &Planner{baseline: nil, readBlob: blobs.read}
 
-	entries, payloads, err := p.Run(context.Background(), []diff.BlobRef{
-		{Digest: tgtDigest, Size: int64(len(target)), MediaType: "m"},
-	})
+	targetsDir := t.TempDir()
+	blobsDir := t.TempDir()
+	targetPath := writeBlobToDir(t, targetsDir, target)
+
+	p := NewPlanner(nil, blobs.readPath(t), nil, 0, 0)
+	br := diff.BlobRef{Digest: tgtDigest, Size: int64(len(target)), MediaType: "m"}
+	entry, payloadPath, err := p.PlanShippedTopK(context.Background(), br, targetPath, blobsDir, 1)
 	require.NoError(t, err)
-	require.Len(t, entries, 1)
-	require.Equal(t, diff.EncodingFull, entries[0].Encoding,
+	require.Equal(t, diff.EncodingFull, entry.Encoding,
 		"with no baseline layers to diff against, shipped entries must be full")
-	require.True(t, bytes.Equal(target, payloads[tgtDigest]))
+	got, err := os.ReadFile(payloadPath)
+	require.NoError(t, err)
+	require.Equal(t, target, got)
 }
 
 func TestPlanner_SizeTieBrokenByFirstSeen(t *testing.T) {
@@ -175,12 +216,16 @@ func TestPlanner_SizeTieBrokenByFirstSeen(t *testing.T) {
 		digest.FromBytes(b):      b,
 		digest.FromBytes(target): target,
 	}
-	p := &Planner{baseline: baseline, readBlob: blobs.read}
-	entries, _, err := p.Run(context.Background(), []diff.BlobRef{
-		{Digest: digest.FromBytes(target), Size: int64(len(target)), MediaType: "m"},
-	})
+
+	targetsDir := t.TempDir()
+	blobsDir := t.TempDir()
+	targetPath := writeBlobToDir(t, targetsDir, target)
+
+	p := NewPlanner(baseline, blobs.readPath(t), nil, 0, 0)
+	br := diff.BlobRef{Digest: digest.FromBytes(target), Size: int64(len(target)), MediaType: "m"}
+	entry, _, err := p.PlanShippedTopK(context.Background(), br, targetPath, blobsDir, 1)
 	require.NoError(t, err)
-	require.Equal(t, digest.FromBytes(a), entries[0].PatchFromDigest,
+	require.Equal(t, digest.FromBytes(a), entry.PatchFromDigest,
 		"tie: first-seen baseline entry wins")
 }
 
@@ -237,11 +282,9 @@ func TestPlanner_EagerBaselineFingerprinting(t *testing.T) {
 		{Digest: digest.FromBytes(bBlob), Size: int64(len(bBlob)), MediaType: "m"},
 	}
 
-	p := NewPlanner(baseline, blobs.read, fake, 0, 0)
-	// Run with empty shipped list to trigger ensureBaselineFP without
-	// any per-layer work.
-	_, _, err := p.Run(context.Background(), nil)
-	require.NoError(t, err)
+	p := NewPlanner(baseline, blobs.readPath(t), fake, 0, 0)
+	// Trigger ensureBaselineFP without any per-layer work.
+	p.ensureBaselineFP(context.Background())
 
 	require.NotNil(t, p.baselineFP)
 	require.Equal(t,
@@ -263,40 +306,60 @@ func TestPlanner_PlanShippedReusesBaselineFingerprint(t *testing.T) {
 	baseBDigest := digest.FromBytes(baseB)
 
 	reads := map[digest.Digest]int{}
-	readBlob := func(d digest.Digest) ([]byte, error) {
-		reads[d]++
+	dir := t.TempDir()
+	cache := map[digest.Digest]string{}
+	blobsDir := t.TempDir()
+
+	readBlobPath := func(d digest.Digest) (string, error) {
+		if p, ok := cache[d]; ok {
+			reads[d]++
+			return p, nil
+		}
+		var b []byte
 		switch d {
 		case baseADigest:
-			return baseA, nil
+			b = baseA
 		case baseBDigest:
-			return baseB, nil
+			b = baseB
+		default:
+			return "", &missingBlobError{d: d}
 		}
-		return nil, &missingBlobError{d: d}
+		p := filepath.Join(dir, d.Encoded())
+		if err := os.WriteFile(p, b, 0o600); err != nil {
+			return "", err
+		}
+		cache[d] = p
+		reads[d]++
+		return p, nil
 	}
 
 	baseline := []BaselineLayerMeta{
 		{Digest: baseADigest, Size: int64(len(baseA)), MediaType: "m"},
 		{Digest: baseBDigest, Size: int64(len(baseB)), MediaType: "m"},
 	}
-	p := NewPlanner(baseline, readBlob, nil, 0, 0)
+	p := NewPlanner(baseline, readBlobPath, nil, 0, 0)
 
 	ctx := context.Background()
+	targetsDir1 := t.TempDir()
+	targetPath1 := writeBlobToDir(t, targetsDir1, target1)
 	tgt1 := diff.BlobRef{
 		Digest: digest.FromBytes(target1), Size: int64(len(target1)), MediaType: "m",
 	}
+	targetsDir2 := t.TempDir()
+	targetPath2 := writeBlobToDir(t, targetsDir2, target2)
 	tgt2 := diff.BlobRef{
 		Digest: digest.FromBytes(target2), Size: int64(len(target2)), MediaType: "m",
 	}
 
-	_, _, err := p.PlanShipped(ctx, tgt1, target1)
+	_, _, err := p.PlanShippedTopK(ctx, tgt1, targetPath1, blobsDir, 1)
 	require.NoError(t, err)
-	// Snapshot counts after first PlanShipped: ensureBaselineFP has read each
-	// baseline once, plus pickSimilar has pulled the chosen ref for patching.
+	// Snapshot counts after first PlanShippedTopK: ensureBaselineFP has read each
+	// baseline once, plus PlanShippedTopK has pulled the chosen ref for patching.
 	afterFirst := map[digest.Digest]int{
 		baseADigest: reads[baseADigest], baseBDigest: reads[baseBDigest],
 	}
 
-	_, _, err = p.PlanShipped(ctx, tgt2, target2)
+	_, _, err = p.PlanShippedTopK(ctx, tgt2, targetPath2, blobsDir, 1)
 	require.NoError(t, err)
 
 	// The second call must NOT re-run baseline fingerprinting — at most one
@@ -304,7 +367,7 @@ func TestPlanner_PlanShippedReusesBaselineFingerprint(t *testing.T) {
 	delta := (reads[baseADigest] - afterFirst[baseADigest]) +
 		(reads[baseBDigest] - afterFirst[baseBDigest])
 	require.LessOrEqual(t, delta, 1,
-		"second PlanShipped caused %d baseline reads (reads=%v, afterFirst=%v); "+
+		"second PlanShippedTopK caused %d baseline reads (reads=%v, afterFirst=%v); "+
 			"fingerprint cache should mean at most one read (for the patch ref)",
 		delta, reads, afterFirst)
 }
@@ -321,9 +384,8 @@ func TestPlanner_EagerFingerprinting_FailedBaselineIsNil(t *testing.T) {
 		{Digest: digest.FromBytes(aBlob), Size: int64(len(aBlob)), MediaType: "m"},
 	}
 
-	p := NewPlanner(baseline, blobs.read, fake, 0, 0)
-	_, _, err := p.Run(context.Background(), nil)
-	require.NoError(t, err)
+	p := NewPlanner(baseline, blobs.readPath(t), fake, 0, 0)
+	p.ensureBaselineFP(context.Background())
 
 	fp, ok := p.baselineFP[digest.FromBytes(aBlob)]
 	require.True(t, ok, "key must be present even when fingerprinting failed")
@@ -354,7 +416,7 @@ func TestPickSimilar_TargetFpFails_UsesSizeClosest(t *testing.T) {
 			digest.FromBytes(far):  {digest.FromBytes([]byte("y")): 10},
 		},
 	}
-	p := NewPlanner(baseline, blobs.read, fake, 0, 0)
+	p := NewPlanner(baseline, blobs.readPath(t), fake, 0, 0)
 	p.ensureBaselineFP(context.Background())
 
 	got, ok := p.pickSimilar(nil, 120)
@@ -381,7 +443,7 @@ func TestPickSimilar_AllCandidateFpFail_UsesSizeClosest(t *testing.T) {
 			digest.FromBytes(far):  ErrFingerprintFailed,
 		},
 	}
-	p := NewPlanner(baseline, blobs.read, fake, 0, 0)
+	p := NewPlanner(baseline, blobs.readPath(t), fake, 0, 0)
 	p.ensureBaselineFP(context.Background())
 
 	targetFP := Fingerprint{digest.FromBytes([]byte("z")): 10}
@@ -412,7 +474,7 @@ func TestPickSimilar_AllScoresZero_UsesSizeClosest(t *testing.T) {
 			digest.FromBytes(far):  {yFile: 10},
 		},
 	}
-	p := NewPlanner(baseline, blobs.read, fake, 0, 0)
+	p := NewPlanner(baseline, blobs.readPath(t), fake, 0, 0)
 	p.ensureBaselineFP(context.Background())
 
 	targetFP := Fingerprint{zFile: 100}
@@ -439,7 +501,7 @@ func TestPickSimilar_SingleWinnerByScore(t *testing.T) {
 			digest.FromBytes(far):  {sharedFile: 1_000_000},
 		},
 	}
-	p := NewPlanner(baseline, blobs.read, fake, 0, 0)
+	p := NewPlanner(baseline, blobs.readPath(t), fake, 0, 0)
 	p.ensureBaselineFP(context.Background())
 
 	targetFP := Fingerprint{sharedFile: 1_000_000}
@@ -467,7 +529,7 @@ func TestPickSimilar_TiedScore_BrokenBySize(t *testing.T) {
 			digest.FromBytes(farCorrect):  {shared: 500},
 		},
 	}
-	p := NewPlanner(baseline, blobs.read, fake, 0, 0)
+	p := NewPlanner(baseline, blobs.readPath(t), fake, 0, 0)
 	p.ensureBaselineFP(context.Background())
 
 	targetFP := Fingerprint{shared: 500}
@@ -504,7 +566,7 @@ func TestPickSimilar_TiedScoreAndSize_BrokenByDigestOrder(t *testing.T) {
 			dB: {shared: 500},
 		},
 	}
-	p := NewPlanner(baseline, blobs.read, fake, 0, 0)
+	p := NewPlanner(baseline, blobs.readPath(t), fake, 0, 0)
 	p.ensureBaselineFP(context.Background())
 
 	targetFP := Fingerprint{shared: 500}
@@ -514,7 +576,8 @@ func TestPickSimilar_TiedScoreAndSize_BrokenByDigestOrder(t *testing.T) {
 }
 
 func TestPickSimilar_EmptyBaseline_ReturnsFalse(t *testing.T) {
-	p := NewPlanner(nil, func(_ digest.Digest) ([]byte, error) { return nil, nil }, &fakeFingerprinter{}, 0, 0)
+	noopPath := func(_ digest.Digest) (string, error) { return "", nil }
+	p := NewPlanner(nil, noopPath, &fakeFingerprinter{}, 0, 0)
 	p.ensureBaselineFP(context.Background())
 	_, ok := p.pickSimilar(Fingerprint{digest.FromBytes([]byte("x")): 1}, 100)
 	require.False(t, ok)
@@ -551,19 +614,25 @@ func TestPlanShippedTopK_PicksSmallestOfKPatches(t *testing.T) {
 		},
 	}
 
-	p := NewPlanner(baseline, blobs.read, fake, 0, 0)
+	targetsDir := t.TempDir()
+	blobsDir := t.TempDir()
+	targetPath := writeBlobToDir(t, targetsDir, target)
+
+	p := NewPlanner(baseline, blobs.readPath(t), fake, 0, 0)
 	br := diff.BlobRef{Digest: dT, Size: int64(len(target)), MediaType: "m"}
-	entry, payload, err := p.PlanShippedTopK(context.Background(), br, target, 2)
+	entry, payloadPath, err := p.PlanShippedTopK(context.Background(), br, targetPath, blobsDir, 2)
 	require.NoError(t, err)
 	require.Equal(t, diff.EncodingPatch, entry.Encoding)
 	require.Equal(t, dClose, entry.PatchFromDigest, "smaller patch comes from closeRef")
-	require.Less(t, int64(len(payload)), int64(len(target)),
-		"patch payload (%d) should be smaller than target (%d)", len(payload), len(target))
+	patchBytes, err := os.ReadFile(payloadPath)
+	require.NoError(t, err)
+	require.Less(t, int64(len(patchBytes)), int64(len(target)),
+		"patch payload (%d) should be smaller than target (%d)", len(patchBytes), len(target))
 }
 
 // TestPlanShippedTopK_FallsBackToFullWhenAllPatchesExceedFull asserts
 // that when no candidate produces a patch smaller than the full-zstd
-// ceiling, the planner emits encoding=full with the target verbatim.
+// ceiling, the planner emits encoding=full with the target as payload.
 func TestPlanShippedTopK_FallsBackToFullWhenAllPatchesExceedFull(t *testing.T) {
 	skipWithoutZstdCLI(t)
 	// Two unrelated random blobs — no patch will beat full encoding.
@@ -583,52 +652,16 @@ func TestPlanShippedTopK_FallsBackToFullWhenAllPatchesExceedFull(t *testing.T) {
 		},
 	}
 
-	p := NewPlanner(baseline, blobs.read, fake, 0, 0)
+	targetsDir := t.TempDir()
+	blobsDir := t.TempDir()
+	targetPath := writeBlobToDir(t, targetsDir, target)
+
+	p := NewPlanner(baseline, blobs.readPath(t), fake, 0, 0)
 	br := diff.BlobRef{Digest: dT, Size: int64(len(target)), MediaType: "m"}
-	entry, _, err := p.PlanShippedTopK(context.Background(), br, target, 1)
+	entry, _, err := p.PlanShippedTopK(context.Background(), br, targetPath, blobsDir, 1)
 	require.NoError(t, err)
 	require.Equal(t, diff.EncodingFull, entry.Encoding,
 		"unrelated random pair should fall back to full encoding")
-}
-
-// TestPlanShippedTopK_K1MatchesPlanShipped asserts byte-identical
-// output between PlanShipped (legacy K=1) and PlanShippedTopK with k=1
-// — the byte-identical-Phase-3 invariant for default --candidates=1.
-func TestPlanShippedTopK_K1MatchesPlanShipped(t *testing.T) {
-	skipWithoutZstdCLI(t)
-	ref := pseudoRandom(70, 1<<15)
-	target := append([]byte(nil), ref...)
-	target[0] ^= 0x42
-	dRef := digest.FromBytes(ref)
-	dT := digest.FromBytes(target)
-
-	baseline := []BaselineLayerMeta{
-		{Digest: dRef, Size: int64(len(ref)), MediaType: "m"},
-	}
-	blobs := blobMap{dRef: ref, dT: target}
-	shared := digest.FromBytes([]byte("shared"))
-	fake := &fakeFingerprinter{
-		fps: map[digest.Digest]Fingerprint{
-			dRef: {shared: 16384},
-			dT:   {shared: 16384},
-		},
-	}
-
-	pa := NewPlanner(baseline, blobs.read, fake, 0, 0)
-	pb := NewPlanner(baseline, blobs.read, fake, 0, 0)
-
-	br := diff.BlobRef{Digest: dT, Size: int64(len(target)), MediaType: "m"}
-	entryA, payloadA, err := pa.PlanShipped(context.Background(), br, target)
-	require.NoError(t, err)
-	entryB, payloadB, err := pb.PlanShippedTopK(context.Background(), br, target, 1)
-	require.NoError(t, err)
-
-	require.Equal(t, entryA.Encoding, entryB.Encoding)
-	require.Equal(t, entryA.PatchFromDigest, entryB.PatchFromDigest)
-	require.Equal(t, entryA.ArchiveSize, entryB.ArchiveSize)
-	require.True(t, bytes.Equal(payloadA, payloadB),
-		"payloads differ (lenA=%d, lenB=%d) — K=1 must match PlanShipped byte-for-byte",
-		len(payloadA), len(payloadB))
 }
 
 // TestPickTopK_PrefersHighestScoreThenSizeClosest verifies that
@@ -636,7 +669,7 @@ func TestPlanShippedTopK_K1MatchesPlanShipped(t *testing.T) {
 // size-closest as the tie-break. Uses the existing blobMap +
 // fakeFingerprinter helpers because they key fingerprints off
 // digest.FromBytes(blob) — the same contract Planner.ensureBaselineFP
-// honors when reading baselines through readBlob.
+// honors when reading baselines through readBlobPath.
 func TestPickTopK_PrefersHighestScoreThenSizeClosest(t *testing.T) {
 	a := makeBlob("baseline-a")
 	b := makeBlob("baseline-b")
@@ -660,7 +693,7 @@ func TestPickTopK_PrefersHighestScoreThenSizeClosest(t *testing.T) {
 			dC: {digest.FromBytes([]byte("x")): 100}, // score 0 (no overlap)
 		},
 	}
-	p := NewPlanner(baseline, blobs.read, fake, 0, 0)
+	p := NewPlanner(baseline, blobs.readPath(t), fake, 0, 0)
 	target := Fingerprint{shared: 100}
 
 	got := p.PickTopK(context.Background(), target, 150, 2)
@@ -682,7 +715,7 @@ func TestPickTopK_FallsBackToSizeClosestWhenNoFingerprint(t *testing.T) {
 		{Digest: dB, Size: 250, MediaType: "m"},
 	}
 	blobs := blobMap{dA: a, dB: b}
-	p := NewPlanner(baseline, blobs.read, &fakeFingerprinter{}, 0, 0)
+	p := NewPlanner(baseline, blobs.readPath(t), &fakeFingerprinter{}, 0, 0)
 
 	got := p.PickTopK(context.Background(), nil, 240, 2) // target size 240 → dB (250) is closer
 	require.Len(t, got, 2)
@@ -702,15 +735,15 @@ func TestPickTopK_ClampsAtAvailableCount(t *testing.T) {
 	fake := &fakeFingerprinter{
 		fps: map[digest.Digest]Fingerprint{dA: {shared: 50}},
 	}
-	p := NewPlanner(baseline, blobs.read, fake, 0, 0)
+	p := NewPlanner(baseline, blobs.readPath(t), fake, 0, 0)
 
 	got := p.PickTopK(context.Background(), Fingerprint{shared: 50}, 100, 5)
 	require.Len(t, got, 1)
 }
 
 // TestPlanner_Run_PrefersContentMatchOverSizeClosest verifies the full
-// Run path: target blob is non-tar (fingerprinter fails naturally with
-// DefaultFingerprinter, but we inject content-aware fake), and the
+// PlanShippedTopK path: target blob is non-tar (fingerprinter fails naturally
+// with DefaultFingerprinter, but we inject content-aware fake), and the
 // planner must choose the content winner rather than the size winner.
 func TestPlanner_Run_PrefersContentMatchOverSizeClosest(t *testing.T) {
 	skipWithoutZstdCLI(t)
@@ -737,16 +770,18 @@ func TestPlanner_Run_PrefersContentMatchOverSizeClosest(t *testing.T) {
 		},
 	}
 
-	p := NewPlanner(baseline, blobs.read, fake, 0, 0)
-	entries, _, err := p.Run(context.Background(), []diff.BlobRef{
-		{Digest: digest.FromBytes(target), Size: int64(len(target)), MediaType: "m"},
-	})
+	targetsDir := t.TempDir()
+	blobsDir := t.TempDir()
+	targetPath := writeBlobToDir(t, targetsDir, target)
+
+	p := NewPlanner(baseline, blobs.readPath(t), fake, 0, 0)
+	br := diff.BlobRef{Digest: digest.FromBytes(target), Size: int64(len(target)), MediaType: "m"}
+	entry, _, err := p.PlanShippedTopK(context.Background(), br, targetPath, blobsDir, 1)
 	require.NoError(t, err)
-	require.Len(t, entries, 1)
 	// Regardless of whether patch beats full on these random bytes, the
 	// picked baseline digest must be "far" (the content winner).
-	if entries[0].Encoding == diff.EncodingPatch {
-		require.Equal(t, digest.FromBytes(far), entries[0].PatchFromDigest,
+	if entry.Encoding == diff.EncodingPatch {
+		require.Equal(t, digest.FromBytes(far), entry.PatchFromDigest,
 			"content-match baseline must be picked when scores disagree with size")
 	}
 }
@@ -778,7 +813,7 @@ func TestResolveWindowLog(t *testing.T) {
 }
 
 // countingFingerprinter wraps fakeFingerprinter and counts the number
-// of Fingerprint() invocations per digest, so tests can assert that
+// of FingerprintReader() invocations per digest, so tests can assert that
 // SeedBaselineFingerprints actually short-circuits re-fingerprinting.
 type countingFingerprinter struct {
 	inner *fakeFingerprinter
@@ -824,7 +859,7 @@ func TestPlanner_SeedBaselineFingerprintsAvoidsReFingerprinting(t *testing.T) {
 		calls: make(map[digest.Digest]int),
 	}
 
-	p := NewPlanner(baseline, blobs.read, counter, 0, 0)
+	p := NewPlanner(baseline, blobs.readPath(t), counter, 0, 0)
 	// Seed only one of the two — exercises both paths in ensureBaselineFP.
 	p.SeedBaselineFingerprints(map[digest.Digest]Fingerprint{
 		aDigest: {"shared": 10},
@@ -850,7 +885,7 @@ func TestPlanner_SeedBaselineFingerprintsHonorsNilSentinel(t *testing.T) {
 		calls: make(map[digest.Digest]int),
 	}
 
-	p := NewPlanner(baseline, blobs.read, counter, 0, 0)
+	p := NewPlanner(baseline, blobs.readPath(t), counter, 0, 0)
 	// nil sentinel = "fingerprint failed during E1; do not retry".
 	p.SeedBaselineFingerprints(map[digest.Digest]Fingerprint{aDigest: nil})
 	p.ensureBaselineFP(context.Background())

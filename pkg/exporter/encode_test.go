@@ -3,6 +3,10 @@ package exporter
 import (
 	"bytes"
 	"context"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"testing/iotest"
@@ -149,4 +153,63 @@ func TestEncodeShipped_WarningOnError_FallbackToFull(t *testing.T) {
 		require.True(t, ok, "shipped blob must be in pool")
 		require.Equal(t, diff.EncodingFull, entry.Encoding, "fallback must be full encoding")
 	}
+}
+
+// TestEncodeShipped_WorkdirCleanupAfterEncode verifies that after encodeShipped
+// completes successfully, all target spool files and candidate spill files are
+// removed from the workdir — they should have been either renamed into the blob
+// pool (winning candidates) or deleted (losing candidates). Only the final
+// per-digest blob files (no .cand-* suffix) remain in blobs/.
+//
+// This covers the PR-5 cleanup guarantee: targets/ empty, blobs/*.cand-* empty.
+func TestEncodeShipped_WorkdirCleanupAfterEncode(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	ctx := context.Background()
+
+	plan, err := planPair(ctx, Pair{
+		Name:        "svc-a",
+		BaselineRef: "oci-archive:../../testdata/fixtures/v1_oci.tar",
+		TargetRef:   "oci-archive:../../testdata/fixtures/v2_oci.tar",
+	}, &Options{Platform: "linux/amd64"})
+	require.NoError(t, err)
+
+	workdir := t.TempDir()
+	blobsDir := filepath.Join(workdir, "blobs")
+	require.NoError(t, os.MkdirAll(blobsDir, 0o700))
+
+	pool := newBlobPool(blobsDir)
+	require.NoError(t, seedManifestAndConfig(pool, plan))
+	for _, s := range plan.Shipped {
+		pool.countShipped(s.Digest)
+	}
+
+	require.NoError(t, encodeShipped(ctx, pool, []*pairPlan{plan}, "auto", DefaultFingerprinter{}, nil, 0, 0, 1, 1, workdir))
+
+	// targets/ must be empty: all target spools renamed into blobs/ or deleted.
+	targetsDir := filepath.Join(workdir, "targets")
+	var targets []string
+	_ = filepath.WalkDir(targetsDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		targets = append(targets, path)
+		return nil
+	})
+	require.Empty(t, targets, "targets/ must be empty after encode; leftover files: %v", targets)
+
+	// blobs/ must contain no .cand-* files: losing candidates are removed,
+	// winners are renamed to their canonical <digest.Encoded()> path.
+	var cands []string
+	_ = filepath.WalkDir(blobsDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		if strings.Contains(filepath.Base(path), ".cand-") {
+			cands = append(cands, path)
+		}
+		return nil
+	})
+	require.Empty(t, cands, "blobs/*.cand-* must be cleaned up after encode; leftover files: %v", cands)
 }

@@ -3,6 +3,9 @@ package exporter
 import (
 	"context"
 	"fmt"
+	"io"
+	"os"
+	"path/filepath"
 	"sort"
 	"sync"
 
@@ -46,14 +49,14 @@ type BaselineLayerMeta struct {
 }
 
 // Planner computes per-layer encoding decisions for ShippedInDelta. It
-// owns no I/O state directly — readBlob is injected so tests can avoid
+// owns no I/O state directly — readBlobPath is injected so tests can avoid
 // the real container-image stack. The fingerprinter is used to build a
 // byte-weighted content overlap score per baseline; a nil fingerprinter
 // falls back to DefaultFingerprinter{}.
 type Planner struct {
-	baseline    []BaselineLayerMeta
-	readBlob    func(digest.Digest) ([]byte, error)
-	fingerprint Fingerprinter
+	baseline     []BaselineLayerMeta
+	readBlobPath func(digest.Digest) (string, error)
+	fingerprint  Fingerprinter
 
 	// Stage 1 of Phase 4: tunables threaded into every Encode call.
 	// Zero values reproduce historical Phase-3 behavior (level 3,
@@ -68,16 +71,17 @@ type Planner struct {
 	baselineFP map[digest.Digest]Fingerprint
 }
 
-// NewPlanner builds a planner that reads blobs via readBlob, keyed by
-// digest. The function must handle both target and baseline digests.
-// A nil Fingerprinter defaults to DefaultFingerprinter{}. Baselines are
-// sorted by Digest at construction time for deterministic tie-breaks.
+// NewPlanner builds a planner that reads blobs via readBlobPath, keyed by
+// digest. The function must handle baseline digests and return the path to
+// the spooled blob file on disk. A nil Fingerprinter defaults to
+// DefaultFingerprinter{}. Baselines are sorted by Digest at construction
+// time for deterministic tie-breaks.
 //
-// level and windowLog are forwarded to every zstd Encode/EncodeFull
+// level and windowLog are forwarded to every zstd Encode/EncodeFullStream
 // call; zero values reproduce Phase-3 byte-identical defaults.
 func NewPlanner(
 	baseline []BaselineLayerMeta,
-	readBlob func(digest.Digest) ([]byte, error),
+	readBlobPath func(digest.Digest) (string, error),
 	fp Fingerprinter,
 	level, windowLog int,
 ) *Planner {
@@ -87,54 +91,12 @@ func NewPlanner(
 		return sorted[i].Digest < sorted[j].Digest
 	})
 	return &Planner{
-		baseline:    sorted,
-		readBlob:    readBlob,
-		fingerprint: fp,
-		level:       level,
-		windowLog:   windowLog,
+		baseline:     sorted,
+		readBlobPath: readBlobPath,
+		fingerprint:  fp,
+		level:        level,
+		windowLog:    windowLog,
 	}
-}
-
-// Run returns the BlobRef entries to drop into the sidecar's shipped blobs and
-// the on-disk payload map. The payload under each digest is the bytes the
-// exporter should persist at `<deltaDir>/<digest.Encoded()>` before packing.
-//
-// Run loads each shipped target via readBlob before delegating to PlanShipped.
-// Encoder paths that already have target bytes in hand should call PlanShipped
-// directly — that way a single Planner instance fingerprints the baseline set
-// once across the whole pair instead of once per shipped layer.
-func (p *Planner) Run(
-	ctx context.Context, shipped []diff.BlobRef,
-) ([]diff.BlobRef, map[digest.Digest][]byte, error) {
-	// Prime the baseline fingerprint cache unconditionally so callers that
-	// inspect baselineFP after an empty-shipped Run (existing contract) still
-	// see it populated.
-	p.ensureBaselineFP(ctx)
-	entries := make([]diff.BlobRef, 0, len(shipped))
-	payloads := make(map[digest.Digest][]byte, len(shipped))
-	for _, l := range shipped {
-		target, err := p.readBlob(l.Digest)
-		if err != nil {
-			return nil, nil, fmt.Errorf("read target blob %s: %w", l.Digest, err)
-		}
-		entry, payload, err := p.PlanShipped(ctx, l, target)
-		if err != nil {
-			return nil, nil, err
-		}
-		entries = append(entries, entry)
-		payloads[l.Digest] = payload
-	}
-	return entries, payloads, nil
-}
-
-// PlanShipped decides the encoding (full vs patch) for a single shipped
-// layer with target bytes already in memory. K=1 shorthand over
-// PlanShippedTopK; behavior is byte-identical (pinned by
-// TestPlanShippedTopK_K1MatchesPlanShipped).
-func (p *Planner) PlanShipped(
-	ctx context.Context, s diff.BlobRef, target []byte,
-) (diff.BlobRef, []byte, error) {
-	return p.PlanShippedTopK(ctx, s, target, 1)
 }
 
 // PickTopK returns up to k candidates ordered by content-similarity
@@ -187,74 +149,92 @@ func (p *Planner) PickTopK(ctx context.Context, targetFP Fingerprint, targetSize
 }
 
 // PlanShippedTopK encodes the target up to k+1 ways — once per top-k
-// baseline candidate plus one "full" encode — and returns whichever
-// produces the smallest emitted bytes. A target fingerprint is computed
-// inside this call (failure is non-fatal; PickTopK degrades to size-only
-// ranking). PlanShipped is the k=1 shorthand wrapper.
+// baseline candidate (via zstdpatch.EncodeStream into per-candidate spill
+// files) plus one "full" size measurement (via zstdpatch.EncodeFullStream
+// into io.Discard) — and returns whichever produces the smallest emitted
+// bytes along with the path to the winning payload file.
+//
+// If len(cands) == 0 after PickTopK (no viable baseline), the function
+// returns immediately with (fullEntry(s), targetPath, nil) without performing
+// any encoding work.
+//
+// targetPath is the path to the on-disk target spool written by spoolBlob.
+// blobsDir is where candidate spill files are written (auto-cleaned on loss).
+// A target fingerprint is computed inside this call from disk (failure is
+// non-fatal; PickTopK degrades to size-only ranking).
+//
+// Ownership: on return the caller owns payloadPath (rename or delete it).
+// If payloadPath != targetPath, targetPath is also caller-owned and must be
+// cleaned up (encode.go's encodeOneShipped removes it when a patch wins).
 func (p *Planner) PlanShippedTopK(
-	ctx context.Context, s diff.BlobRef, target []byte, k int,
-) (diff.BlobRef, []byte, error) {
+	ctx context.Context, s diff.BlobRef, targetPath string, blobsDir string, k int,
+) (diff.BlobRef, string, error) {
 	p.ensureBaselineFP(ctx)
 	fp := p.fingerprint
 	if fp == nil {
 		fp = DefaultFingerprinter{}
 	}
-	// Target fingerprint failure is non-fatal; PickTopK degrades to
-	// size-closest ranking when targetFP is nil.
-	targetFP, _ := fp.Fingerprint(ctx, s.MediaType, target)
+
+	// Re-fingerprint the target by re-reading from disk. The target file is
+	// OS-cached (just written by spoolBlob), so the cost is one sequential
+	// read of cached bytes; no RAM retention.
+	tf, err := os.Open(targetPath)
+	if err != nil {
+		return diff.BlobRef{}, "", fmt.Errorf("open target spool %s: %w", targetPath, err)
+	}
+	targetFP, _ := fp.FingerprintReader(ctx, s.MediaType, tf) // fp failure → nil → size-only ranking
+	_ = tf.Close()                                            // read-only file; close error has no observable consequence
+
 	cands := p.PickTopK(ctx, targetFP, s.Size, k)
 	if len(cands) == 0 {
-		return fullEntry(s), target, nil
+		return fullEntry(s), targetPath, nil
 	}
 
-	// Hoisted: compute the full-zstd ceiling once. target is
-	// loop-invariant, so leaving EncodeFull inside the loop would
-	// trigger K identical compressions of the same bytes — visible cost
-	// once PR-4 raises --candidates default above 1.
 	wl := ResolveWindowLog(p.windowLog, s.Size)
-	fullZst, err := zstdpatch.EncodeFull(target, //nolint:staticcheck // intentional: see EncodeFull deprecation comment
-		zstdpatch.EncodeOpts{Level: p.level, WindowLog: wl})
+	opts := zstdpatch.EncodeOpts{Level: p.level, WindowLog: wl}
+
+	// Full-zstd ceiling: streaming, size only, no spill (correction E).
+	// EncodeFullStream already counts compressed bytes internally and returns
+	// the count — no need for a duplicate writeCounter in this package.
+	fullSize, err := zstdpatch.EncodeFullStream(ctx, targetPath, io.Discard, opts)
 	if err != nil {
-		return diff.BlobRef{}, nil, fmt.Errorf(
-			"encode full %s: %w", s.Digest, err)
+		return diff.BlobRef{}, "", fmt.Errorf("size-only full encode %s: %w", s.Digest, err)
 	}
 
-	// "full" is always the safety floor — never inflate beyond raw
-	// target bytes.
 	bestEntry := fullEntry(s)
-	bestPayload := target
+	bestPath := targetPath // raw-target / encoding=full default
+	bestSize := s.Size
 
 	for _, c := range cands {
-		refBytes, err := p.readBlob(c.Digest)
+		refPath, err := p.readBlobPath(c.Digest)
 		if err != nil {
-			return diff.BlobRef{}, nil, fmt.Errorf(
-				"read baseline reference %s: %w", c.Digest, err)
+			return diff.BlobRef{}, "", fmt.Errorf("baseline path %s: %w", c.Digest, err)
 		}
-		//nolint:staticcheck // intentional: this caller is migrated to EncodeStream in PR 5 of the streaming I/O series.
-		patch, err := zstdpatch.Encode(ctx, refBytes, target,
-			zstdpatch.EncodeOpts{Level: p.level, WindowLog: wl})
+		candPath := filepath.Join(blobsDir,
+			fmt.Sprintf("%s.cand-%s", s.Digest.Encoded(), c.Digest.Encoded()[:8]))
+		patchSize, err := zstdpatch.EncodeStream(ctx, refPath, targetPath, candPath, opts)
 		if err != nil {
-			return diff.BlobRef{}, nil, fmt.Errorf(
-				"encode patch %s vs %s: %w", s.Digest, c.Digest, err)
+			_ = os.Remove(candPath)
+			return diff.BlobRef{}, "", fmt.Errorf("encode patch %s vs %s: %w", s.Digest, c.Digest, err)
 		}
-		// Patch must strictly beat the full-zstd ceiling, the raw target
-		// bytes, and the running best — otherwise full-encode wins.
-		if len(patch) < len(fullZst) &&
-			int64(len(patch)) < s.Size &&
-			len(patch) < len(bestPayload) {
-			bestEntry = diff.BlobRef{
-				Digest:          s.Digest,
-				Size:            s.Size,
-				MediaType:       s.MediaType,
-				Encoding:        diff.EncodingPatch,
-				Codec:           CodecZstdPatch,
-				PatchFromDigest: c.Digest,
-				ArchiveSize:     int64(len(patch)),
+		// Patch must strictly beat full-zstd, raw target, AND running best.
+		if patchSize < fullSize && patchSize < s.Size && patchSize < bestSize {
+			// Discard previous winner if it was a candidate spill (not the target).
+			if bestPath != targetPath {
+				_ = os.Remove(bestPath)
 			}
-			bestPayload = patch
+			bestEntry = diff.BlobRef{
+				Digest: s.Digest, Size: s.Size, MediaType: s.MediaType,
+				Encoding: diff.EncodingPatch, Codec: CodecZstdPatch,
+				PatchFromDigest: c.Digest, ArchiveSize: patchSize,
+			}
+			bestPath = candPath
+			bestSize = patchSize
+		} else {
+			_ = os.Remove(candPath)
 		}
 	}
-	return bestEntry, bestPayload, nil
+	return bestEntry, bestPath, nil
 }
 
 // SeedBaselineFingerprints pre-populates the planner's baseline
@@ -290,7 +270,7 @@ func (p *Planner) SeedBaselineFingerprints(fps map[digest.Digest]Fingerprint) {
 //
 // Pre-seeded entries (via SeedBaselineFingerprints) are honored as-is,
 // including nil sentinels. Only baselines without a cached fingerprint
-// trigger a fresh readBlob + Fingerprint call.
+// trigger a fresh readBlobPath + FingerprintReader call.
 func (p *Planner) ensureBaselineFP(ctx context.Context) {
 	p.fpOnce.Do(func() {
 		fp := p.fingerprint
@@ -304,17 +284,23 @@ func (p *Planner) ensureBaselineFP(ctx context.Context) {
 			if _, seeded := p.baselineFP[b.Digest]; seeded {
 				continue
 			}
-			blob, err := p.readBlob(b.Digest)
+			path, err := p.readBlobPath(b.Digest)
 			if err != nil {
 				p.baselineFP[b.Digest] = nil
 				continue
 			}
-			f, err := fp.Fingerprint(ctx, b.MediaType, blob)
+			f, err := os.Open(path)
 			if err != nil {
 				p.baselineFP[b.Digest] = nil
 				continue
 			}
-			p.baselineFP[b.Digest] = f
+			fingerprint, err := fp.FingerprintReader(ctx, b.MediaType, f)
+			_ = f.Close() // read-only file; close error has no observable consequence
+			if err != nil {
+				p.baselineFP[b.Digest] = nil
+				continue
+			}
+			p.baselineFP[b.Digest] = fingerprint
 		}
 	})
 }
