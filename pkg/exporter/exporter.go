@@ -200,7 +200,7 @@ func checkSingleLayerFitsInBudget(plans []*pairPlan, windowLog int, memBudget in
 			msg: fmt.Sprintf(
 				"layer %s requires %d byte(s) of admission budget; --memory-budget is %d",
 				offendingDigest, maxEst, memBudget),
-			hint: "increase --memory-budget or set --workers 1 with a smaller --zstd-window-log",
+			hint: "increase --memory-budget or reduce --zstd-window-log",
 		}
 	}
 	return nil

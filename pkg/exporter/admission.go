@@ -72,14 +72,20 @@ func newEncodePool(ctx context.Context, workers int, memoryBudget int64) *encode
 }
 
 // Submit runs fn under both gates, dedup'd by d. estimate is the predicted
-// per-encode RSS; it is clamped at memBudget so a too-large estimate (one that
-// passed the single-layer fail-fast check upstream) never deadlocks. Admission
-// only changes WHEN encodes run, not WHAT they produce — output is deterministic.
+// per-encode RSS. Admission only changes WHEN encodes run, not WHAT they
+// produce — output is deterministic.
 func (p *encodePool) Submit(d digest.Digest, estimate int64, fn func() error) {
 	if estimate < 1 {
 		estimate = 1
 	}
+	// Defense-in-depth: clamp estimate to the budget so a too-large estimate
+	// can never deadlock memSem.Acquire. In practice this branch is
+	// unreachable because checkSingleLayerFitsInBudget rejects too-large
+	// estimates upstream — if it fires, the upstream guard was bypassed.
 	if p.memBudget > 0 && estimate > p.memBudget {
+		log().Warn("encode estimate exceeds memory budget; clamping",
+			"estimate", estimate, "budget", p.memBudget,
+			"hint", "checkSingleLayerFitsInBudget should have caught this upstream")
 		estimate = p.memBudget
 	}
 	p.g.Go(func() error {
