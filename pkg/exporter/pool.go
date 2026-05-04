@@ -75,6 +75,40 @@ func (p *blobPool) addEntryIfAbsent(d digest.Digest, payload []byte, e diff.Blob
 	return nil
 }
 
+// addEntryFromPath adopts an existing on-disk file at srcPath as the
+// payload for d via os.Rename to <dir>/<digest.Encoded()>. First-write-
+// wins; on collision, srcPath is removed and the existing canonical
+// entry is preserved (lost-race branch is safe because content-addressed:
+// both srcPaths contain byte-identical data).
+//
+// Caller invariant: srcPath must already exist on the same filesystem as
+// the pool's dir (rename is atomic on POSIX). Caller MUST NOT touch
+// srcPath after this call returns successfully — the file has been moved.
+func (p *blobPool) addEntryFromPath(d digest.Digest, srcPath string, e diff.BlobEntry) error {
+	p.mu.RLock()
+	_, exists := p.spills[d]
+	p.mu.RUnlock()
+	if exists {
+		// Lost the race or duplicate caller; remove the unused candidate.
+		_ = os.Remove(srcPath)
+		return nil
+	}
+	dst := filepath.Join(p.dir, d.Encoded())
+	if err := os.Rename(srcPath, dst); err != nil {
+		return fmt.Errorf("adopt blob %s: %w", d, err)
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if _, exists := p.spills[d]; exists {
+		// Lost race after rename; harmless because dst content is byte-identical.
+		// Keep the existing canonical entry; do not overwrite.
+		return nil
+	}
+	p.spills[d] = dst
+	p.entries[d] = e
+	return nil
+}
+
 func (p *blobPool) has(d digest.Digest) bool {
 	p.mu.RLock()
 	defer p.mu.RUnlock()

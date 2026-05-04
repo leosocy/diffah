@@ -20,8 +20,10 @@ import (
 //   - E1: prime baselineSpool for the union of distinct baseline layers
 //     across all pairs (in parallel; singleflight collapses duplicate
 //     fetches). Blobs are streamed to <workdir>/baselines/<digest>.
-//   - E2: per (pair, shipped) tuple, fetch the target bytes and run the
-//     planner against the primed spool (also in parallel).
+//   - E2: per (pair, shipped) tuple, spool the target to disk via spoolBlob
+//     (write-tmp + atomic rename) and run the planner against the primed
+//     spool, then adopt the winning path into the blob pool via
+//     pool.addEntryFromPath (also in parallel).
 //
 // Output bytes are byte-identical across worker counts because:
 //   - blobPool is content-addressed and first-write-wins
@@ -57,7 +59,7 @@ func encodeShipped(
 		return fmt.Errorf("prime baseline fingerprints: %w", err)
 	}
 	return encodeTargets(ctx, pool, pairs, mode, fp, rep, spool,
-		level, windowLog, candidates, workers)
+		level, windowLog, candidates, workers, workdir)
 }
 
 // primeBaselineSpool pre-fetches every distinct baseline layer digest
@@ -102,13 +104,15 @@ func primeBaselineSpool(
 	return pool.Wait()
 }
 
-// encodeTargets runs phase E2: for every (pair, shipped) tuple it
-// fetches the target bytes and resolves the layer's encoding through
-// PlanShippedTopK against the primed spool, in parallel up to `workers`.
+// encodeTargets runs phase E2: for every (pair, shipped) tuple it spools
+// the target blob to disk, resolves the layer's encoding through
+// PlanShippedTopK against the primed spool, and adopts the winning path
+// into the blob pool, in parallel up to `workers`.
 func encodeTargets(
 	ctx context.Context, pool *blobPool, pairs []*pairPlan,
 	mode string, fp Fingerprinter, rep progress.Reporter, spool *baselineSpool,
 	level, windowLog, candidates, workers int,
+	workdir string,
 ) error {
 	// fingerprint snapshot taken once after Phase E1: every per-pair
 	// Planner is seeded with the same map so a baseline shared across N
@@ -116,102 +120,109 @@ func encodeTargets(
 	// Planner.ensureBaselineFP). Spec §4.2.
 	seedFP := spool.SnapshotFingerprints()
 
+	targetsDir := filepath.Join(workdir, "targets")
+	blobsDir := filepath.Join(workdir, "blobs")
+	for _, sub := range []string{targetsDir, blobsDir} {
+		if err := os.MkdirAll(sub, 0o700); err != nil {
+			return fmt.Errorf("create spool subdir %s: %w", sub, err)
+		}
+	}
+
 	encPool, _ := newWorkerPool(ctx, workers)
 	for _, p := range pairs {
-		// Per-pair digest → meta lookup so the readBaseline safety-net
-		// closure passes the real MediaType into spool.GetOrSpool. Without
-		// this map the retry path strips MediaType, which would silently
-		// produce a wrong-MediaType fingerprint if it ever survived.
-		metaByDigest := make(map[digest.Digest]BaselineLayerMeta, len(p.BaselineLayerMeta))
-		for _, b := range p.BaselineLayerMeta {
-			metaByDigest[b.Digest] = b
-		}
-
 		// Each pair builds its own Planner that defers all baseline reads
 		// to the shared spool. Phase E1 has already primed every digest in
-		// p.BaselineLayerMeta, so this closure should always hit the spool
-		// fast-path; the GetOrSpool call is kept as a safety net for the
-		// (currently impossible) case where a baseline digest reaches the
-		// planner without having been primed.
-		ref := p.BaselineImageRef
-		sys := p.SystemContext
-		readBaseline := func(d digest.Digest) ([]byte, error) {
-			meta, ok := metaByDigest[d]
-			if !ok {
-				meta = BaselineLayerMeta{Digest: d}
+		// p.BaselineLayerMeta when fetching succeeds.
+		//
+		// Design choice (correction B): primeBaselineSpool swallows per-digest
+		// fetch errors (mirrors fpCache fail-soft contract). Unprimed digests
+		// are therefore possible when the baseline registry is unreachable or
+		// returns a corrupt blob. Returning an error here lets PlanShippedTopK
+		// propagate it upward, which encodeOneShipped converts to a full-encoding
+		// fallback — consistent with the existing resilience guarantee. A panic
+		// would break that guarantee by crashing the whole export.
+		readBaselinePath := func(d digest.Digest) (string, error) {
+			if e, ok := spool.lookup(d); ok {
+				return e.Path, nil
 			}
-			fetch := func(fd digest.Digest) (io.ReadCloser, error) {
-				return streamBlobReader(ctx, ref, sys, fd)
-			}
-			entry, err := spool.GetOrSpool(ctx, meta, fetch, fp)
-			if err != nil {
-				return nil, err
-			}
-			return os.ReadFile(entry.Path)
+			return "", fmt.Errorf("baseline %s not primed (fetch may have failed during E1)", d)
 		}
-		planner := NewPlanner(p.BaselineLayerMeta, readBaseline, fp, level, windowLog)
+		planner := NewPlanner(p.BaselineLayerMeta, readBaselinePath, fp, level, windowLog)
 		planner.SeedBaselineFingerprints(seedFP)
 
 		for _, s := range p.Shipped {
 			// pool.has() is an early-out optimization, not a correctness
 			// gate. Two workers racing to encode the same digest is safe
-			// because addIfAbsent is first-write-wins; a missed early-out
-			// just means a duplicate encode whose output is then discarded
-			// by addIfAbsent. Determinism is preserved by the
-			// content-addressed pool, not by who arrives first.
+			// because addEntryFromPath is first-write-wins via atomic rename;
+			// a missed early-out just means a duplicate encode whose output is
+			// then discarded. Determinism is preserved by the content-addressed
+			// pool, not by who arrives first.
 			if pool.has(s.Digest) {
 				continue
 			}
 			encPool.Submit(func() error {
-				return encodeOneShipped(ctx, pool, p, s, planner, mode, rep, candidates)
+				return encodeOneShipped(ctx, pool, p, s, planner, mode, rep,
+					candidates, targetsDir, blobsDir)
 			})
 		}
 	}
 	return encPool.Wait()
 }
 
-// encodeOneShipped streams the bytes of a single shipped target layer,
-// runs PlanShippedTopK against the primed planner, and writes the result
-// (or a full-encoding fallback) into pool. Per-layer encode failures are
-// swallowed and converted to full encoding to mirror Phase 3 fail-soft
-// semantics; only target-bytes read errors abort the worker.
+// encodeOneShipped spools a single shipped target layer to disk, runs
+// PlanShippedTopK against the primed planner, and adopts the winning path
+// into the blob pool via pool.addEntryFromPath. Per-layer encode failures
+// are swallowed and converted to full encoding (fail-soft). Only target
+// spool read errors abort the worker.
 func encodeOneShipped(
 	ctx context.Context, pool *blobPool, p *pairPlan, s diff.BlobRef,
-	planner *Planner, mode string, rep progress.Reporter, candidates int,
+	planner *Planner, mode string, rep progress.Reporter,
+	candidates int, targetsDir, blobsDir string,
 ) error {
 	layer := rep.StartLayer(s.Digest, s.Size, string(s.Encoding))
+
+	targetPath := filepath.Join(targetsDir, s.Digest.Encoded())
+
 	// The OCI-archive transport transparently decompresses tar+gzip layers
 	// on GetBlob, so the streamed byte count can exceed the manifest-
 	// declared s.Size. Cap progress reports to s.Size so the bar stops at
 	// 100 % instead of overshooting.
-	layerBytes, err := streamBlobBytes(ctx, p.TargetImageRef, p.SystemContext, s.Digest,
-		cappedWriter(s.Size, layer.Written))
-	if err != nil {
+	if _, err := spoolBlob(ctx, p.TargetImageRef, p.SystemContext, s.Digest, targetPath,
+		cappedWriter(s.Size, layer.Written)); err != nil {
+		_ = os.Remove(targetPath)
 		layer.Fail(err)
-		return fmt.Errorf("read shipped %s: %w", s.Digest, err)
+		return fmt.Errorf("spool shipped %s: %w", s.Digest, err)
 	}
+
 	if pool.refCount(s.Digest) > 1 || mode == modeOff {
-		if err := pool.addEntryIfAbsent(s.Digest, layerBytes, fullBlobEntry(s)); err != nil {
+		// Force full encoding; adopt target spool as the blob.
+		if err := pool.addEntryFromPath(s.Digest, targetPath, fullBlobEntry(s)); err != nil {
 			layer.Fail(err)
 			return err
 		}
 		layer.Done()
 		return nil
 	}
-	entry, payload, err := planner.PlanShippedTopK(ctx, s, layerBytes, candidates)
+
+	entry, payloadPath, err := planner.PlanShippedTopK(ctx, s, targetPath, blobsDir, candidates)
 	if err != nil {
-		log().Warn("patch encode failed, falling back to full",
+		log().Warn("patch planning failed, falling back to full",
 			"pair", p.Name, "digest", s.Digest, "err", err)
-		if err := pool.addEntryIfAbsent(s.Digest, layerBytes, fullBlobEntry(s)); err != nil {
+		if err := pool.addEntryFromPath(s.Digest, targetPath, fullBlobEntry(s)); err != nil {
 			layer.Fail(err)
 			return err
 		}
 		layer.Done()
 		return nil
 	}
-	if err := pool.addEntryIfAbsent(s.Digest, payload, blobEntryFromPlanner(entry)); err != nil {
+
+	if err := pool.addEntryFromPath(s.Digest, payloadPath, blobEntryFromPlanner(entry)); err != nil {
 		layer.Fail(err)
 		return err
+	}
+	if payloadPath != targetPath {
+		// Patch winner — target spool is now leftover.
+		_ = os.Remove(targetPath)
 	}
 	layer.Done()
 	return nil

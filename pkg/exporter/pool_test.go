@@ -199,3 +199,67 @@ func TestEncodeShipped_ForcesFullOnCrossImageDup(t *testing.T) {
 		require.Equal(t, diff.EncodingFull, entry.Encoding, "shared shipped must be full")
 	}
 }
+
+// TestBlobPool_AddEntryFromPath_RenamesAndRecords verifies the happy path:
+// an existing file at srcPath is renamed into the pool's canonical path,
+// the spills map is updated, and the file is readable from the canonical path.
+func TestBlobPool_AddEntryFromPath_RenamesAndRecords(t *testing.T) {
+	poolDir := t.TempDir()
+	pool := newBlobPool(poolDir)
+
+	srcDir := t.TempDir()
+	payload := []byte("hello-from-path")
+	d := digest.FromBytes(payload)
+	srcPath := filepath.Join(srcDir, "candidate-file")
+	require.NoError(t, os.WriteFile(srcPath, payload, 0o600))
+
+	e := diff.BlobEntry{Size: int64(len(payload)), ArchiveSize: int64(len(payload)), Encoding: diff.EncodingFull}
+	require.NoError(t, pool.addEntryFromPath(d, srcPath, e))
+
+	// srcPath must no longer exist (it was renamed).
+	_, err := os.Stat(srcPath)
+	require.True(t, os.IsNotExist(err), "srcPath should have been moved")
+
+	// Canonical path must exist and contain the original bytes.
+	canonPath := filepath.Join(poolDir, d.Encoded())
+	got, err := os.ReadFile(canonPath)
+	require.NoError(t, err)
+	require.Equal(t, payload, got)
+
+	// Pool metadata must reflect the entry.
+	require.True(t, pool.has(d))
+	require.Equal(t, int64(len(payload)), pool.entries[d].Size)
+}
+
+// TestBlobPool_AddEntryFromPath_FirstWriteWinsOnCollision verifies that a
+// second call for the same digest removes its srcPath without overwriting
+// the canonical entry in the pool (first-write-wins, content-addressed).
+func TestBlobPool_AddEntryFromPath_FirstWriteWinsOnCollision(t *testing.T) {
+	poolDir := t.TempDir()
+	pool := newBlobPool(poolDir)
+
+	srcDir := t.TempDir()
+	payload := []byte("byte-identical-content")
+	d := digest.FromBytes(payload)
+
+	// First write succeeds.
+	first := filepath.Join(srcDir, "first")
+	require.NoError(t, os.WriteFile(first, payload, 0o600))
+	e1 := diff.BlobEntry{Size: int64(len(payload)), ArchiveSize: int64(len(payload)), Encoding: diff.EncodingFull}
+	require.NoError(t, pool.addEntryFromPath(d, first, e1))
+
+	// Second write: provide a second source file with byte-identical content
+	// but a different entry (to confirm first-write-wins).
+	second := filepath.Join(srcDir, "second")
+	require.NoError(t, os.WriteFile(second, payload, 0o600))
+	e2 := diff.BlobEntry{Size: 999, ArchiveSize: 999, Encoding: diff.EncodingFull}
+	require.NoError(t, pool.addEntryFromPath(d, second, e2))
+
+	// srcPath for the second call should have been removed (lost race).
+	_, err := os.Stat(second)
+	require.True(t, os.IsNotExist(err), "second srcPath should have been removed")
+
+	// First entry must be preserved (size=original, not 999).
+	require.Equal(t, int64(len(payload)), pool.entries[d].Size,
+		"first-write-wins: entry must reflect the first write")
+}

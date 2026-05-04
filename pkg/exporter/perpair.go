@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 
 	"github.com/opencontainers/go-digest"
 	"go.podman.io/image/v5/manifest"
@@ -216,4 +218,68 @@ func readAllReportingChunks(r io.Reader, onChunk func(int64)) ([]byte, error) {
 			return nil, err
 		}
 	}
+}
+
+// spoolBlob streams blob d from ref into dstPath without keeping the bytes
+// in RAM. Writes via a temp file + atomic rename so concurrent fingerprinter
+// readers (PlanShippedTopK) never observe a partial file. Returns the on-disk
+// size. The optional onChunk callback receives each read chunk's byte count
+// (used by the progress.Layer.Written hook).
+func spoolBlob(
+	ctx context.Context, ref types.ImageReference, sys *types.SystemContext,
+	d digest.Digest, dstPath string, onChunk func(int64),
+) (int64, error) {
+	rc, err := streamBlobReader(ctx, ref, sys, d)
+	if err != nil {
+		return 0, err
+	}
+	defer rc.Close()
+
+	tmp, err := os.CreateTemp(filepath.Dir(dstPath), filepath.Base(dstPath)+".tmp.*")
+	if err != nil {
+		return 0, fmt.Errorf("create target spool tmp: %w", err)
+	}
+	tmpPath := tmp.Name()
+	committed := false
+	defer func() {
+		_ = tmp.Close() // idempotent; safe if Sync+Close already ran
+		if !committed {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+
+	chunk := make([]byte, 64*1024)
+	var total int64
+	for {
+		if err := ctx.Err(); err != nil {
+			return total, err
+		}
+		n, rerr := rc.Read(chunk)
+		if n > 0 {
+			if _, werr := tmp.Write(chunk[:n]); werr != nil {
+				return total, fmt.Errorf("write target spool %s: %w", dstPath, werr)
+			}
+			total += int64(n)
+			if onChunk != nil {
+				onChunk(int64(n))
+			}
+		}
+		if rerr == io.EOF {
+			break
+		}
+		if rerr != nil {
+			return total, rerr
+		}
+	}
+	if err := tmp.Sync(); err != nil {
+		return total, fmt.Errorf("sync target spool: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return total, fmt.Errorf("close target spool: %w", err)
+	}
+	if err := os.Rename(tmpPath, dstPath); err != nil {
+		return total, fmt.Errorf("rename target spool %s: %w", dstPath, err)
+	}
+	committed = true
+	return total, nil
 }
