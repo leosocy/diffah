@@ -39,8 +39,8 @@ func TestWorkerPool_BoundedConcurrency(t *testing.T) {
 		p.Submit(func() error {
 			cur := atomic.AddInt32(&inFlight, 1)
 			for {
-				p := atomic.LoadInt32(&peak)
-				if cur <= p || atomic.CompareAndSwapInt32(&peak, p, cur) {
+				prev := atomic.LoadInt32(&peak)
+				if cur <= prev || atomic.CompareAndSwapInt32(&peak, prev, cur) {
 					break
 				}
 			}
