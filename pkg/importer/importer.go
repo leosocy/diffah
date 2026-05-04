@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"go.podman.io/image/v5/types"
 
 	"github.com/leosocy/diffah/internal/imageio"
+	"github.com/leosocy/diffah/internal/workdir"
 	"github.com/leosocy/diffah/internal/zstdpatch"
 	"github.com/leosocy/diffah/pkg/diff"
 	"github.com/leosocy/diffah/pkg/progress"
@@ -72,26 +74,21 @@ func (o *Options) probeOrDefault() func(context.Context) (bool, string) {
 
 func Import(ctx context.Context, opts Options) error {
 	defer opts.reporter().Finish()
+
+	wd, cleanupWorkdir, werr := ensureImportWorkdir(opts)
+	if werr != nil {
+		return werr
+	}
+	defer cleanupWorkdir()
+	opts.Workdir = wd
+
 	bundle, err := extractBundle(opts.DeltaPath)
 	if err != nil {
 		return err
 	}
 	defer bundle.cleanup()
 
-	if opts.VerifyPubKeyPath != "" {
-		if err := verifySignature(ctx, opts.DeltaPath, bundle.sidecarRawBytes, opts); err != nil {
-			return err
-		}
-	}
-
-	if bundle.sidecar.RequiresZstd() {
-		ok, reason := opts.probeOrDefault()(ctx)
-		if !ok {
-			return fmt.Errorf("%w: %s", zstdpatch.ErrZstdBinaryMissing, reason)
-		}
-	}
-
-	if err := validatePositionalBaseline(bundle.sidecar, opts.Baselines); err != nil {
+	if err := preApplyChecks(ctx, opts, bundle); err != nil {
 		return err
 	}
 	resolved, err := resolveBaselines(ctx, bundle.sidecar, opts.Baselines, opts.SystemContext,
@@ -127,8 +124,11 @@ func Import(ctx context.Context, opts Options) error {
 	}
 
 	applyList, skippedByPreflight := splitPreflightResults(preflightResults)
-	cache := newBaselineBlobCache()
-	report := importEachImage(ctx, bundle, resolvedByName, outputs, opts, cache, applyList)
+	spool, err := newImportSpool(wd)
+	if err != nil {
+		return err
+	}
+	report := importEachImage(ctx, bundle, resolvedByName, outputs, opts, spool, applyList)
 	report.Total = len(bundle.sidecar.Images)
 	mergePreflightSkips(&report, bundle.sidecar.Images, skippedByPreflight)
 	finalizeImportReport(ctx, rep, report, len(skippedByPreflight))
@@ -205,12 +205,12 @@ func importEachImage(
 	resolvedByName map[string]resolvedBaseline,
 	outputs map[string]string,
 	opts Options,
-	cache *baselineBlobCache,
+	spool *BaselineSpool,
 	applyList []string,
 ) ApplyReport {
 	report := ApplyReport{}
 	for _, name := range applyList {
-		result := applyOneImage(ctx, name, bundle, resolvedByName, outputs, opts, cache)
+		result := applyOneImage(ctx, name, bundle, resolvedByName, outputs, opts, spool)
 		report.Results = append(report.Results, result)
 		if opts.Strict && result.Status != ApplyImageOK {
 			return report
@@ -228,7 +228,7 @@ func applyOneImage(
 	resolvedByName map[string]resolvedBaseline,
 	outputs map[string]string,
 	opts Options,
-	cache *baselineBlobCache,
+	spool *BaselineSpool,
 ) ApplyImageResult {
 	img, ok := findImageByName(bundle.sidecar.Images, name)
 	if !ok {
@@ -253,7 +253,7 @@ func applyOneImage(
 		}
 	}
 	if err := composeImage(ctx, img, bundle, rb, destRef,
-		opts.SystemContext, opts.AllowConvert, opts.reporter(), cache); err != nil {
+		opts.SystemContext, opts.AllowConvert, opts.reporter(), spool); err != nil {
 		return ApplyImageResult{
 			ImageName: name, Status: ApplyImageFailedCompose, Err: err,
 		}
@@ -290,6 +290,79 @@ func findImageByName(imgs []diff.ImageEntry, name string) (diff.ImageEntry, bool
 		}
 	}
 	return diff.ImageEntry{}, false
+}
+
+// preApplyChecks runs the cross-cutting checks that gate any apply work:
+// signature verification, zstd-binary availability for patched bundles,
+// and positional-baseline validation. Extracted from Import() so its
+// cyclomatic complexity stays under the linter's threshold; each check is
+// independent and short-circuits Import on failure.
+func preApplyChecks(ctx context.Context, opts Options, bundle *extractedBundle) error {
+	if opts.VerifyPubKeyPath != "" {
+		if err := verifySignature(ctx, opts.DeltaPath, bundle.sidecarRawBytes, opts); err != nil {
+			return err
+		}
+	}
+	if bundle.sidecar.RequiresZstd() {
+		ok, reason := opts.probeOrDefault()(ctx)
+		if !ok {
+			return fmt.Errorf("%w: %s", zstdpatch.ErrZstdBinaryMissing, reason)
+		}
+	}
+	return validatePositionalBaseline(bundle.sidecar, opts.Baselines)
+}
+
+// ensureImportWorkdir resolves and creates the per-Import workdir.
+// Spool (PR3) and per-image scratch (PR4) live underneath. The hint
+// biases default placement toward the first file-transport output so a
+// bundle written to /vol/X spills its baselines next to it instead of
+// /tmp, keeping cross-mount renames off the hot path.
+func ensureImportWorkdir(opts Options) (string, func(), error) {
+	wd, cleanup, err := workdir.Ensure(opts.Workdir, firstOutputHint(opts.Outputs))
+	if err != nil {
+		return "", func() {}, fmt.Errorf("prepare workdir: %w", err)
+	}
+	return wd, cleanup, nil
+}
+
+// newImportSpool creates the per-Import baseline spool under wd/baselines.
+// Extracted from Import() so its cyclomatic complexity stays under the
+// linter's threshold; the spool dir is never reused across Imports.
+func newImportSpool(wd string) (*BaselineSpool, error) {
+	baselineDir := filepath.Join(wd, "baselines")
+	if err := os.MkdirAll(baselineDir, 0o700); err != nil {
+		return nil, fmt.Errorf("create baselines spool dir: %w", err)
+	}
+	return NewBaselineSpool(baselineDir), nil
+}
+
+// firstOutputHint returns the first file-transport output path it finds in
+// outputs, iterated in stable name order so the workdir.Resolve hint stays
+// deterministic across runs. Returns "" when no output uses a file-backed
+// transport (registry-only Imports leave the workdir under os.TempDir()).
+//
+// File transports recognized: oci-archive, docker-archive, dir, oci.
+// Other transports (docker://, containers-storage:, etc.) are ignored —
+// their refs are not real paths, so co-locating the spool next to them
+// makes no sense.
+func firstOutputHint(outputs map[string]string) string {
+	if len(outputs) == 0 {
+		return ""
+	}
+	names := make([]string, 0, len(outputs))
+	for k := range outputs {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+	for _, n := range names {
+		raw := outputs[n]
+		for _, prefix := range []string{"oci-archive:", "docker-archive:", "dir:", "oci:"} {
+			if strings.HasPrefix(raw, prefix) {
+				return strings.TrimPrefix(raw, prefix)
+			}
+		}
+	}
+	return ""
 }
 
 // preflightResultToErr maps a non-OK PreflightResult back into the

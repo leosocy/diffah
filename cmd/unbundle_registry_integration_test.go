@@ -101,7 +101,7 @@ func TestUnbundleCLI_MixedDestinations(t *testing.T) {
 // (same fixture pushed to two distinct registry repos, app-a/v1 and
 // app-b/v1). After diffah unbundle, every distinct baseline blob
 // digest must appear in BlobHits exactly once total across both
-// repos — proving the per-Import baselineBlobCache deduplicates
+// repos — proving the per-Import BaselineSpool deduplicates
 // fetches across images. Without the cache this assertion fails
 // because each bundleImageSource opens an independent ImageSource
 // and re-fetches every required blob.

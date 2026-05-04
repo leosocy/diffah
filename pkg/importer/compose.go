@@ -3,6 +3,7 @@ package importer
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -46,7 +47,7 @@ type bundleImageSource struct {
 	baseline     types.ImageSource
 	imageName    string
 	ref          types.ImageReference
-	cache        *baselineBlobCache
+	spool        *BaselineSpool
 }
 
 var _ types.ImageSource = (*bundleImageSource)(nil)
@@ -151,34 +152,37 @@ func (s *bundleImageSource) servePatch(
 
 // fetchVerifiedBaselineBlob reads `d` from the wrapped baseline source and
 // verifies its digest. Used both for patch-from references (Task 4) and for
-// blobs the sidecar did not ship (Task 5). Routed through s.cache so each
+// blobs the sidecar did not ship (Task 5). Routed through s.spool so each
 // distinct digest is fetched at most once per Import() call regardless of
 // how many shipped patches reference it or how many images in a multi-image
-// bundle share it.
+// bundle share it; the on-disk spool also keeps RSS bounded vs the previous
+// in-memory cache.
 //
 // The cache types.BlobInfoCache parameter is the upstream containers-image
 // blob info cache and is forwarded to s.baseline.GetBlob unchanged — it is
-// a separate concern from s.cache.
+// a separate concern from s.spool. PR4 will rewrite serveFull/servePatch to
+// stream from disk; PR3 keeps the []byte return so this PR is purely a
+// backend swap.
+//
+// Re-wraps any *diff.ErrBaselineBlobDigestMismatch returned by the spool
+// to repopulate ImageName: the spool is per-Import (image-agnostic) but
+// the operator-facing error has historically named the offending image
+// so support flows can locate the apply context.
 func (s *bundleImageSource) fetchVerifiedBaselineBlob(
 	ctx context.Context, d digest.Digest, cache types.BlobInfoCache,
 ) ([]byte, error) {
-	return s.cache.GetOrLoad(ctx, d, func() ([]byte, error) {
-		rc, _, err := s.baseline.GetBlob(ctx, types.BlobInfo{Digest: d}, cache)
-		if err != nil {
-			return nil, err
-		}
-		defer rc.Close()
-		data, err := io.ReadAll(rc)
-		if err != nil {
-			return nil, err
-		}
-		if got := digest.FromBytes(data); got != d {
-			return nil, &diff.ErrBaselineBlobDigestMismatch{
-				ImageName: s.imageName, Digest: d.String(), Got: got.String(),
-			}
-		}
-		return data, nil
+	path, err := s.spool.GetOrSpool(ctx, d, func() (io.ReadCloser, error) {
+		rc, _, gerr := s.baseline.GetBlob(ctx, types.BlobInfo{Digest: d}, cache)
+		return rc, gerr
 	})
+	if err != nil {
+		var mismatch *diff.ErrBaselineBlobDigestMismatch
+		if errors.As(err, &mismatch) && mismatch.ImageName == "" {
+			mismatch.ImageName = s.imageName
+		}
+		return nil, err
+	}
+	return os.ReadFile(path)
 }
 
 // staticSourceRef wraps a prebuilt ImageSource so copy.Image can consume it
@@ -235,7 +239,7 @@ func composeImage(
 	sysctx *types.SystemContext,
 	allowConvert bool,
 	_ progress.Reporter, // hook site for per-blob pull/push progress; not yet wired
-	cache *baselineBlobCache,
+	spool *BaselineSpool,
 ) error {
 	mfPath := filepath.Join(bundle.blobDir, img.Target.ManifestDigest.Algorithm().String(),
 		img.Target.ManifestDigest.Encoded())
@@ -251,7 +255,7 @@ func composeImage(
 		sidecar:      bundle.sidecar,
 		baseline:     rb.Src, // already open — DO NOT open a fresh one
 		imageName:    img.Name,
-		cache:        cache,
+		spool:        spool,
 	}
 	src.ref = &staticSourceRef{src: src}
 
