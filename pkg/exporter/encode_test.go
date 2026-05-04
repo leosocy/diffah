@@ -90,8 +90,8 @@ func TestEncodeShipped_StreamsWrittenDuringRead(t *testing.T) {
 	}, &Options{Platform: "linux/amd64"})
 	require.NoError(t, err)
 
-	pool := newBlobPool()
-	seedManifestAndConfig(pool, plan)
+	pool := newBlobPool(t.TempDir())
+	require.NoError(t, seedManifestAndConfig(pool, plan))
 	for _, s := range plan.Shipped {
 		pool.countShipped(s.Digest)
 	}
@@ -134,8 +134,8 @@ func TestEncodeShipped_WarningOnError_FallbackToFull(t *testing.T) {
 		plan.BaselineLayerMeta[i].Digest = fakeDigest
 	}
 
-	pool := newBlobPool()
-	seedManifestAndConfig(pool, plan)
+	pool := newBlobPool(t.TempDir())
+	require.NoError(t, seedManifestAndConfig(pool, plan))
 	for _, s := range plan.Shipped {
 		pool.countShipped(s.Digest)
 	}

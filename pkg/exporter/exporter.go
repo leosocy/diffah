@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"path/filepath"
 	"time"
 
 	"go.podman.io/image/v5/types"
@@ -112,7 +113,7 @@ func buildBundle(ctx context.Context, opts *Options) (*builtBundle, error) {
 	opts.reporter().Phase("planning")
 
 	plans := make([]*pairPlan, 0, len(opts.Pairs))
-	pool := newBlobPool()
+	pool := newBlobPool(filepath.Join(opts.Workdir, "blobs"))
 
 	for _, p := range opts.Pairs {
 		plan, err := planPair(ctx, p, opts)
@@ -120,7 +121,9 @@ func buildBundle(ctx context.Context, opts *Options) (*builtBundle, error) {
 			return nil, fmt.Errorf("plan pair %q: %w", p.Name, err)
 		}
 		plans = append(plans, plan)
-		seedManifestAndConfig(pool, plan)
+		if err := seedManifestAndConfig(pool, plan); err != nil {
+			return nil, fmt.Errorf("seed manifest/config %q: %w", p.Name, err)
+		}
 	}
 	for _, plan := range plans {
 		for _, s := range plan.Shipped {
