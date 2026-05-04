@@ -231,6 +231,46 @@ func TestBlobPool_AddEntryFromPath_RenamesAndRecords(t *testing.T) {
 	require.Equal(t, int64(len(payload)), pool.entries[d].Size)
 }
 
+// TestBlobPool_AddEntryFromPath_ConcurrentSameDigest_FirstWriteWins verifies
+// that N concurrent goroutines each calling addEntryFromPath with the same
+// digest and byte-identical content produce exactly one pool entry, exactly one
+// canonical file, and no leftover srcPaths. This exercises the post-rename
+// lost-race branch (pool.go:100-106) which sequential tests cannot reach
+// because the early RLock short-circuit (pool.go:88-95) fires first.
+func TestBlobPool_AddEntryFromPath_ConcurrentSameDigest_FirstWriteWins(t *testing.T) {
+	poolDir := t.TempDir()
+	pool := newBlobPool(poolDir)
+	payload := []byte("byte-identical")
+	d := digest.FromBytes(payload)
+
+	const N = 16
+	srcDir := t.TempDir()
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for i := 0; i < N; i++ {
+		i := i
+		src := filepath.Join(srcDir, fmt.Sprintf("src-%d", i))
+		require.NoError(t, os.WriteFile(src, payload, 0o600))
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			require.NoError(t, pool.addEntryFromPath(d, src,
+				diff.BlobEntry{Size: int64(len(payload))}))
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	require.Len(t, pool.spills, 1)
+	canon, err := os.ReadFile(filepath.Join(poolDir, d.Encoded()))
+	require.NoError(t, err)
+	require.Equal(t, payload, canon)
+	// Every losing srcPath must be removed.
+	entries, _ := os.ReadDir(srcDir)
+	require.Empty(t, entries, "all losing srcPaths must be cleaned up")
+}
+
 // TestBlobPool_AddEntryFromPath_FirstWriteWinsOnCollision verifies that a
 // second call for the same digest removes its srcPath without overwriting
 // the canonical entry in the pool (first-write-wins, content-addressed).

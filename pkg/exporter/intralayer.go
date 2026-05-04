@@ -154,10 +154,18 @@ func (p *Planner) PickTopK(ctx context.Context, targetFP Fingerprint, targetSize
 // into io.Discard) — and returns whichever produces the smallest emitted
 // bytes along with the path to the winning payload file.
 //
+// If len(cands) == 0 after PickTopK (no viable baseline), the function
+// returns immediately with (fullEntry(s), targetPath, nil) without performing
+// any encoding work.
+//
 // targetPath is the path to the on-disk target spool written by spoolBlob.
 // blobsDir is where candidate spill files are written (auto-cleaned on loss).
 // A target fingerprint is computed inside this call from disk (failure is
 // non-fatal; PickTopK degrades to size-only ranking).
+//
+// Ownership: on return the caller owns payloadPath (rename or delete it).
+// If payloadPath != targetPath, targetPath is also caller-owned and must be
+// cleaned up (encode.go's encodeOneShipped removes it when a patch wins).
 func (p *Planner) PlanShippedTopK(
 	ctx context.Context, s diff.BlobRef, targetPath string, blobsDir string, k int,
 ) (diff.BlobRef, string, error) {
@@ -175,7 +183,7 @@ func (p *Planner) PlanShippedTopK(
 		return diff.BlobRef{}, "", fmt.Errorf("open target spool %s: %w", targetPath, err)
 	}
 	targetFP, _ := fp.FingerprintReader(ctx, s.MediaType, tf) // fp failure → nil → size-only ranking
-	_ = tf.Close()
+	_ = tf.Close()                                            // read-only file; close error has no observable consequence
 
 	cands := p.PickTopK(ctx, targetFP, s.Size, k)
 	if len(cands) == 0 {
@@ -287,7 +295,7 @@ func (p *Planner) ensureBaselineFP(ctx context.Context) {
 				continue
 			}
 			fingerprint, err := fp.FingerprintReader(ctx, b.MediaType, f)
-			_ = f.Close()
+			_ = f.Close() // read-only file; close error has no observable consequence
 			if err != nil {
 				p.baselineFP[b.Digest] = nil
 				continue

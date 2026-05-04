@@ -189,7 +189,8 @@ func encodeOneShipped(
 	// 100 % instead of overshooting.
 	if _, err := spoolBlob(ctx, p.TargetImageRef, p.SystemContext, s.Digest, targetPath,
 		cappedWriter(s.Size, layer.Written)); err != nil {
-		_ = os.Remove(targetPath)
+		// spoolBlob's committed-sentinel already cleaned up its tmp file; the
+		// rename never happened, so targetPath does not exist. No Remove needed.
 		layer.Fail(err)
 		return fmt.Errorf("spool shipped %s: %w", s.Digest, err)
 	}

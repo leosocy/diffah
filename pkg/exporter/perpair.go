@@ -220,21 +220,14 @@ func readAllReportingChunks(r io.Reader, onChunk func(int64)) ([]byte, error) {
 	}
 }
 
-// spoolBlob streams blob d from ref into dstPath without keeping the bytes
-// in RAM. Writes via a temp file + atomic rename so concurrent fingerprinter
-// readers (PlanShippedTopK) never observe a partial file. Returns the on-disk
-// size. The optional onChunk callback receives each read chunk's byte count
-// (used by the progress.Layer.Written hook).
-func spoolBlob(
-	ctx context.Context, ref types.ImageReference, sys *types.SystemContext,
-	d digest.Digest, dstPath string, onChunk func(int64),
-) (int64, error) {
-	rc, err := streamBlobReader(ctx, ref, sys, d)
-	if err != nil {
-		return 0, err
-	}
+// spoolReader drains rc into dstPath via a temp file + atomic rename so
+// concurrent readers (e.g. PlanShippedTopK fingerprinting) never observe a
+// partial file at dstPath. The committed sentinel ensures the temp file is
+// removed if any step before the rename fails or the context is cancelled.
+// Returns the total bytes written. The optional onChunk callback receives
+// each chunk's byte count (used by progress.Layer.Written).
+func spoolReader(ctx context.Context, rc io.ReadCloser, dstPath string, onChunk func(int64)) (int64, error) {
 	defer rc.Close()
-
 	tmp, err := os.CreateTemp(filepath.Dir(dstPath), filepath.Base(dstPath)+".tmp.*")
 	if err != nil {
 		return 0, fmt.Errorf("create target spool tmp: %w", err)
@@ -282,4 +275,19 @@ func spoolBlob(
 	}
 	committed = true
 	return total, nil
+}
+
+// spoolBlob streams blob d from ref into dstPath without keeping the bytes
+// in RAM. Delegates to spoolReader so the tmp+rename atomicity property is
+// shared and unit-testable. Returns the on-disk size. The optional onChunk
+// callback receives each read chunk's byte count (used by progress.Layer.Written).
+func spoolBlob(
+	ctx context.Context, ref types.ImageReference, sys *types.SystemContext,
+	d digest.Digest, dstPath string, onChunk func(int64),
+) (int64, error) {
+	rc, err := streamBlobReader(ctx, ref, sys, d)
+	if err != nil {
+		return 0, err
+	}
+	return spoolReader(ctx, rc, dstPath, onChunk)
 }
