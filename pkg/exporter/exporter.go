@@ -130,7 +130,7 @@ func buildBundle(ctx context.Context, opts *Options) (*builtBundle, error) {
 	log().InfoContext(ctx, "planned pairs", "count", len(plans))
 
 	if err := encodeShipped(ctx, pool, plans, effectiveMode, opts.fingerprinter, opts.reporter(),
-		opts.ZstdLevel, opts.ZstdWindowLog, opts.Candidates, opts.Workers); err != nil {
+		opts.ZstdLevel, opts.ZstdWindowLog, opts.Candidates, opts.Workers, opts.Workdir); err != nil {
 		return nil, fmt.Errorf("encode shipped layers: %w", err)
 	}
 	log().InfoContext(ctx, "encoded blobs", "count", len(pool.entries))
@@ -198,6 +198,16 @@ func signArchive(ctx context.Context, opts *Options) error {
 }
 
 func DryRun(ctx context.Context, opts Options) (DryRunStats, error) {
+	// DryRun needs a workdir for the baseline spool, same as Export.
+	// resolveWorkdir colocates with opts.OutputPath when set, and falls
+	// back to os.TempDir when OutputPath is empty (API callers).
+	wd, cleanup, err := ensureWorkdir(opts.Workdir, opts.OutputPath)
+	if err != nil {
+		return DryRunStats{}, fmt.Errorf("prepare workdir: %w", err)
+	}
+	defer cleanup()
+	opts.Workdir = wd
+
 	bb, err := buildBundle(ctx, &opts)
 	if err != nil {
 		return DryRunStats{}, err

@@ -273,3 +273,24 @@ func TestDefaultFingerprinter_CorruptZstdHeader_WrapsErr(t *testing.T) {
 	require.Error(t, err)
 	require.True(t, errors.Is(err, ErrFingerprintFailed))
 }
+
+func TestDefaultFingerprinter_ReaderMatchesBytes(t *testing.T) {
+	ctx := context.Background()
+	data := []byte("hello via reader")
+	tarBlob := buildTarBlob(t, tarEntry{name: "a", data: data, typeflag: tar.TypeReg})
+	var gzBuf bytes.Buffer
+	gw := gzip.NewWriter(&gzBuf)
+	_, err := gw.Write(tarBlob)
+	require.NoError(t, err)
+	require.NoError(t, gw.Close())
+	gzBytes := gzBuf.Bytes()
+
+	mediaType := "application/vnd.oci.image.layer.v1.tar+gzip"
+	fp := DefaultFingerprinter{}
+
+	want, err := fp.Fingerprint(ctx, mediaType, gzBytes)
+	require.NoError(t, err)
+	got, err := fp.FingerprintReader(ctx, mediaType, bytes.NewReader(gzBytes))
+	require.NoError(t, err)
+	require.Equal(t, want, got)
+}

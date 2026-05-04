@@ -3,6 +3,7 @@ package exporter
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 
@@ -134,6 +135,37 @@ func readBlobBytes(
 	ctx context.Context, ref types.ImageReference, sys *types.SystemContext, d digest.Digest,
 ) ([]byte, error) {
 	return streamBlobBytes(ctx, ref, sys, d, nil)
+}
+
+// streamBlobReader returns the layer blob as a streaming ReadCloser without
+// buffering it into memory. Caller must Close() the returned ReadCloser,
+// which also closes the underlying ImageSource.
+func streamBlobReader(
+	ctx context.Context, ref types.ImageReference, sys *types.SystemContext, d digest.Digest,
+) (io.ReadCloser, error) {
+	src, err := ref.NewImageSource(ctx, sys)
+	if err != nil {
+		return nil, err
+	}
+	r, _, err := src.GetBlob(ctx, types.BlobInfo{Digest: d}, none.NoCache)
+	if err != nil {
+		_ = src.Close()
+		return nil, err
+	}
+	return &srcBlobReader{r: r, src: src}, nil
+}
+
+// srcBlobReader wraps a blob ReadCloser together with the ImageSource it
+// came from so that both are closed when the caller is done.
+type srcBlobReader struct {
+	r   io.ReadCloser
+	src types.ImageSource
+}
+
+func (s *srcBlobReader) Read(p []byte) (int, error) { return s.r.Read(p) }
+
+func (s *srcBlobReader) Close() error {
+	return errors.Join(s.r.Close(), s.src.Close())
 }
 
 // streamBlobBytes reads a blob and, if onChunk is non-nil, reports each chunk's
