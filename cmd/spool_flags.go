@@ -24,8 +24,11 @@ type spoolOptsBuilder func() (spoolOpts, error)
 const spoolHelp = `Spool & memory:
   --workdir DIR              spool location for per-Export disk-backed blobs
                              (default: <dir(OUTPUT)>/.diffah-tmp/<random>; also DIFFAH_WORKDIR env)
-  --memory-budget BYTES      admission cap for concurrent encoders
-                             (default: 8GiB; supports KiB/MiB/GiB/KB/MB/GB; 0 disables)
+  --memory-budget BYTES      admission cap for concurrent encoders; if any single layer's
+                             estimated RSS exceeds this value, Export fails immediately before
+                             opening any spool (fail-fast); increase the budget or reduce
+                             --zstd-window-log to resolve; 0 disables admission entirely
+                             (default: 8GiB; supports KiB/MiB/GiB/KB/MB/GB)
 `
 
 // installSpoolFlags registers --workdir and --memory-budget on cmd.

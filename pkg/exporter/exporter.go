@@ -11,6 +11,7 @@ import (
 
 	"github.com/leosocy/diffah/internal/archive"
 	"github.com/leosocy/diffah/internal/zstdpatch"
+	"github.com/leosocy/diffah/pkg/diff/errs"
 	"github.com/leosocy/diffah/pkg/progress"
 	"github.com/leosocy/diffah/pkg/signer"
 )
@@ -92,6 +93,22 @@ type ImageStats struct {
 	ArchiveSize  int64
 }
 
+// userError is an exporter-package error that carries an errs.Category
+// and a remediation hint, satisfying errs.Categorized and errs.Advised
+// for the cmd/ exit-code mapper.
+type userError struct {
+	cat  errs.Category
+	msg  string
+	hint string
+}
+
+var _ errs.Categorized = (*userError)(nil)
+var _ errs.Advised = (*userError)(nil)
+
+func (e *userError) Error() string           { return e.msg }
+func (e *userError) Category() errs.Category { return e.cat }
+func (e *userError) NextAction() string      { return e.hint }
+
 type builtBundle struct {
 	plans []*pairPlan
 	pool  *blobPool
@@ -132,13 +149,61 @@ func buildBundle(ctx context.Context, opts *Options) (*builtBundle, error) {
 	}
 	log().InfoContext(ctx, "planned pairs", "count", len(plans))
 
-	if err := encodeShipped(ctx, pool, plans, effectiveMode, opts.fingerprinter, opts.reporter(),
-		opts.ZstdLevel, opts.ZstdWindowLog, opts.Candidates, opts.Workers, opts.Workdir); err != nil {
+	// Fail-fast guard: if any single shipped layer's estimated RSS exceeds
+	// the memory budget, we cannot admit it — return a structured user error
+	// before opening any spool. The admission controller clamps estimate to
+	// budget (so a single oversized layer never deadlocks), but that is a
+	// safety net for logic errors, not the intended operator contract.
+	if opts.MemoryBudget > 0 {
+		if err := checkSingleLayerFitsInBudget(plans, opts.ZstdWindowLog, opts.MemoryBudget); err != nil {
+			return nil, err
+		}
+	}
+
+	encOpts := encodeOptions{
+		Mode:         effectiveMode,
+		Fingerprint:  opts.fingerprinter,
+		Reporter:     opts.reporter(),
+		Level:        opts.ZstdLevel,
+		WindowLog:    opts.ZstdWindowLog,
+		Candidates:   opts.Candidates,
+		Workers:      opts.Workers,
+		Workdir:      opts.Workdir,
+		MemoryBudget: opts.MemoryBudget,
+	}
+	if err := encodeShipped(ctx, pool, plans, encOpts); err != nil {
 		return nil, fmt.Errorf("encode shipped layers: %w", err)
 	}
 	log().InfoContext(ctx, "encoded blobs", "count", len(pool.entries))
 	opts.reporter().Phase("encoded")
 	return &builtBundle{plans: plans, pool: pool}, nil
+}
+
+// checkSingleLayerFitsInBudget returns a user-facing error if any single
+// shipped layer's estimated RSS exceeds memBudget. Called before opening any
+// spool so the error is surfaced immediately with the offending digest.
+func checkSingleLayerFitsInBudget(plans []*pairPlan, windowLog int, memBudget int64) error {
+	var maxEst int64
+	var offendingDigest string
+	for _, plan := range plans {
+		for _, s := range plan.Shipped {
+			e := estimateRSSForWindowLog(ResolveWindowLog(windowLog, s.Size))
+			if e > maxEst {
+				maxEst = e
+				offendingDigest = s.Digest.String()
+			}
+		}
+	}
+	if maxEst > memBudget {
+		return &userError{
+			cat: errs.CategoryUser,
+			msg: fmt.Sprintf(
+				"layer %s requires %d byte(s) of admission budget; --memory-budget is %d",
+				offendingDigest, maxEst, memBudget),
+			hint: "increase --memory-budget or reduce --zstd-window-log",
+		}
+	}
+	return nil
 }
 
 func Export(ctx context.Context, opts Options) error {
