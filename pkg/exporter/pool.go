@@ -14,6 +14,7 @@ package exporter
 // starts must take p.mu.
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -22,8 +23,31 @@ import (
 
 	"github.com/opencontainers/go-digest"
 
+	"github.com/leosocy/diffah/internal/admission"
 	"github.com/leosocy/diffah/pkg/diff"
 )
+
+// encodePool is a thin wrapper over admission.AdmissionPool that keeps
+// the existing exporter call shape (Submit on a digest.Digest key).
+// All admission semantics — singleflight dedup, worker bounding, memory
+// budget — live in internal/admission and are shared with the importer.
+type encodePool struct {
+	p *admission.AdmissionPool
+}
+
+func newEncodePool(ctx context.Context, workers int, memoryBudget int64) *encodePool {
+	return &encodePool{p: admission.NewAdmissionPool(ctx, workers, memoryBudget)}
+}
+
+// Submit forwards to AdmissionPool with the digest as the singleflight key.
+// AdmissionPool clamps internally so per-task estimate > budget is safe;
+// upstream checkSingleLayerFitsInBudget is still the primary guard against
+// a single layer exceeding the memory budget.
+func (p *encodePool) Submit(d digest.Digest, estimate int64, fn func() error) {
+	p.p.Submit(string(d), estimate, fn)
+}
+
+func (p *encodePool) Wait() error { return p.p.Wait() }
 
 type blobPool struct {
 	mu       sync.RWMutex
