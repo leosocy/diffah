@@ -1,0 +1,50 @@
+name: scale-bench
+
+on:
+  schedule:
+    - cron: "0 6 * * *"   # 06:00 UTC nightly
+  workflow_dispatch: {}
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      DIFFAH_BIG_TEST: "1"
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.25.9'
+          cache: true
+
+      - name: Install zstd >= 1.5
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y zstd
+          zstd --version
+
+      - name: Run scale bench under /usr/bin/time -v
+        run: |
+          /usr/bin/time -v -o time.out \
+            go test \
+              -tags='big containers_image_openpgp exclude_graphdriver_btrfs exclude_graphdriver_devicemapper' \
+              -timeout=75m \
+              -v \
+              -run TestScaleBench_2GiBLayer \
+              ./pkg/exporter/...
+          cat time.out
+          rss_kib=$(grep -oP 'Maximum resident set size \(kbytes\): \K[0-9]+' time.out)
+          echo "Peak RSS: ${rss_kib} KiB"
+          if [ "${rss_kib}" -gt 8388608 ]; then
+            echo "FAIL: peak RSS ${rss_kib} KiB exceeds 8 GiB ceiling (spec §13)"
+            exit 1
+          fi
+          echo "PASS: peak RSS ${rss_kib} KiB <= 8 GiB ceiling"
+
+      - name: Upload /usr/bin/time output
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: scale-bench-time-${{ github.run_id }}
+          path: time.out

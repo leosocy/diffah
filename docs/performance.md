@@ -89,3 +89,74 @@ SHA-256-equates the resulting archives.
 | Speed-prioritized CI | `--zstd-level=12 --candidates=2` |
 | Maximum compression | `--zstd-level=22 --zstd-window-log=31 --candidates=5` |
 | Phase-3 importer compatibility | `--zstd-window-log=27` (other Phase-4 flags ok) |
+
+---
+
+## Phase 4 — Streaming I/O: bounded-memory contract
+
+The Phase 4 streaming pipeline replaces in-memory blob accumulation with a
+producer→spool→ordered-drainer design. Peak RSS is bounded regardless of layer
+size, capped by `--memory-budget` (default `8GiB`).
+
+### Streaming knobs
+
+| Knob | Default | Effect |
+|---|---|---|
+| `--memory-budget BYTES` | `8GiB` | Admission cap for concurrent encoder RSS. Encodes are admitted only when the sum of in-flight estimated RSS plus the new encode's estimate fits within this budget. |
+| `--workers N` | `min(GOMAXPROCS, 4)` | Hard cap on encoder goroutines. Both the worker-count gate and the memory-budget gate apply independently. |
+| `--workdir DIR` | `<dir(OUTPUT)>/.diffah-tmp/<random>` | Spool root for disk-backed baseline / target / output blob spills. Also settable via `DIFFAH_WORKDIR`. |
+
+### RSS estimate table
+
+The estimated RSS per encode is derived from the chosen `windowLog`
+(itself a function of layer size, via `--zstd-window-log=auto`):
+
+| `windowLog` | Layer size threshold | RSS estimate |
+|---|---|---|
+| 27 | ≤ 128 MiB | 256 MiB |
+| 28 | ≤ 256 MiB | 512 MiB |
+| 29 | ≤ 512 MiB | 1 GiB |
+| 30 | ≤ 1 GiB | 2 GiB |
+| 31 | > 1 GiB | 4 GiB |
+
+These estimates are intentionally conservative. The nightly CI benchmark
+validates the 8 GiB ceiling on a real 2 GiB-layer fixture.
+
+### Disk budget
+
+Each in-flight encode uses up to `(K+1) × max_layer_size` of spool space
+(K candidate spills + 1 target spool). Under typical settings
+(`--workers 4`, `--candidates 3`, GB-scale layers) the spool can peak at
+around `4 × 4 × 1 GiB ≈ 16 GiB`. Operators with limited spool space should:
+
+- Set `--workdir` to a filesystem with more free space.
+- Lower `--workers` and/or `--candidates`.
+
+### Single-layer-exceeds-budget fail-fast
+
+If any single shipped layer's estimated RSS exceeds `--memory-budget`,
+`Export()` fails immediately with a structured error before opening any spool.
+The error message includes the offending layer digest and suggests either
+raising `--memory-budget` to at least twice the layer size or lowering
+`--zstd-window-log`.
+
+### Disabling admission (benchmarking / debugging)
+
+Pass `--memory-budget=0` to disable the admission controller entirely. Encode
+goroutines are then limited only by `--workers`. Use this to benchmark raw
+throughput without admission serialisation.
+
+### Nightly benchmark — spec §13 acceptance gate
+
+A deterministic 2 GiB-layer fixture is built by
+`scripts/build_fixtures -scale=2147483648 -out=<dir>` and consumed by
+`TestScaleBench_2GiBLayer` in `pkg/exporter/scale_bench_test.go`
+(build tag `big`, env `DIFFAH_BIG_TEST=1`).
+
+The nightly GitHub Actions workflow (`.github/workflows/scale-bench.yml`):
+1. Builds and runs the test wrapped in `/usr/bin/time -v`.
+2. Parses peak RSS from the `/usr/bin/time` output.
+3. Fails the job if peak RSS exceeds **8 GiB** (8 388 608 KiB).
+
+A walltime regression gate will be added in a follow-up PR once real nightly
+baselines are established from actual runs; no placeholder is committed now.
