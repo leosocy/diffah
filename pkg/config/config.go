@@ -36,6 +36,12 @@ type Config struct {
 	Candidates    int           `mapstructure:"candidates" yaml:"candidates" json:"candidates"`
 	Workdir       string        `mapstructure:"workdir" yaml:"workdir" json:"workdir"`
 	MemoryBudget  string        `mapstructure:"memory-budget" yaml:"memory-budget" json:"memory-budget"`
+	// Apply-side streaming I/O knobs. Mirror the export-side workdir/memory-budget
+	// but kept under apply-* keys so each command line and config file can be
+	// tuned independently.
+	ApplyWorkdir      string `mapstructure:"apply-workdir" yaml:"apply-workdir" json:"apply-workdir"`
+	ApplyMemoryBudget string `mapstructure:"apply-memory-budget" yaml:"apply-memory-budget" json:"apply-memory-budget"`
+	ApplyWorkers      int    `mapstructure:"apply-workers" yaml:"apply-workers" json:"apply-workers"`
 }
 
 // flagNames is the Go-field-name → CLI-flag-name lookup used by

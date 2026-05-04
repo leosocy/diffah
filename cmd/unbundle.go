@@ -16,6 +16,7 @@ var unbundleFlags = struct {
 	dryRun             bool
 	buildSystemContext registryContextBuilder
 	buildVerify        verifyConfigBuilder
+	buildImportSpool   importSpoolOptsBuilder
 }{}
 
 const unbundleExample = `  # Multi-image registry round-trip
@@ -28,6 +29,9 @@ func newUnbundleCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "unbundle DELTA-IN BASELINE-SPEC OUTPUT-SPEC",
 		Short: "Reconstruct all images from a multi-image delta bundle.",
+		Long: `Reconstruct all images from a multi-image delta bundle.
+
+` + importSpoolHelp,
 		Args: requireArgs("unbundle",
 			[]string{"DELTA-IN", "BASELINE-SPEC", "OUTPUT-SPEC"},
 			"diffah unbundle bundle.tar baselines.json outputs.json"),
@@ -45,6 +49,7 @@ func newUnbundleCommand() *cobra.Command {
 	f.BoolVarP(&unbundleFlags.dryRun, "dry-run", "n", false, "verify reachability without writing")
 	unbundleFlags.buildSystemContext = installRegistryFlags(c)
 	unbundleFlags.buildVerify = installVerifyFlags(c)
+	unbundleFlags.buildImportSpool = installImportSpoolFlags(c)
 	installUsageTemplate(c)
 	return c
 }
@@ -66,27 +71,9 @@ func runUnbundle(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("parse output spec: %w", err)
 	}
 
-	sc, retryTimes, retryDelay, err := unbundleFlags.buildSystemContext()
+	opts, err := buildUnbundleOptions(cmd, deltaIn, spec, outputSpec)
 	if err != nil {
 		return err
-	}
-	vc, err := unbundleFlags.buildVerify()
-	if err != nil {
-		return err
-	}
-
-	opts := importer.Options{
-		DeltaPath:        deltaIn,
-		Baselines:        spec.Baselines,
-		Outputs:          outputSpec.Outputs,
-		Strict:           unbundleFlags.strict,
-		AllowConvert:     unbundleFlags.allowConvert,
-		SystemContext:    sc,
-		RetryTimes:       retryTimes,
-		RetryDelay:       retryDelay,
-		ProgressReporter: newProgressReporter(cmd.ErrOrStderr()),
-		VerifyPubKeyPath: vc.PubKeyPath,
-		VerifyRekorURL:   vc.RekorURL,
 	}
 	ctx := context.Background()
 
@@ -105,4 +92,43 @@ func runUnbundle(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "wrote %d images per %s\n", len(outputSpec.Outputs), outputSpecPath)
 	return nil
+}
+
+func buildUnbundleOptions(
+	cmd *cobra.Command,
+	deltaIn string,
+	spec *diff.BaselineSpec,
+	outputSpec *diff.OutputSpec,
+) (importer.Options, error) {
+	sc, retryTimes, retryDelay, err := unbundleFlags.buildSystemContext()
+	if err != nil {
+		return importer.Options{}, err
+	}
+	vc, err := unbundleFlags.buildVerify()
+	if err != nil {
+		return importer.Options{}, err
+	}
+	imp, err := unbundleFlags.buildImportSpool()
+	if err != nil {
+		return importer.Options{}, err
+	}
+
+	return importer.Options{
+		DeltaPath:        deltaIn,
+		Baselines:        spec.Baselines,
+		Outputs:          outputSpec.Outputs,
+		Strict:           unbundleFlags.strict,
+		AllowConvert:     unbundleFlags.allowConvert,
+		SystemContext:    sc,
+		RetryTimes:       retryTimes,
+		RetryDelay:       retryDelay,
+		ProgressReporter: newProgressReporter(cmd.ErrOrStderr()),
+		VerifyPubKeyPath: vc.PubKeyPath,
+		VerifyRekorURL:   vc.RekorURL,
+		// Streaming I/O knobs (plumbing only for PR1; consumed in PR3-PR5).
+		// Workers activates concurrent image applies on unbundle path in PR5.
+		Workdir:      imp.Workdir,
+		MemoryBudget: imp.MemoryBudget,
+		Workers:      imp.Workers,
+	}, nil
 }
