@@ -13,6 +13,7 @@ import (
 	"github.com/leosocy/diffah/internal/archive"
 	"github.com/leosocy/diffah/internal/zstdpatch"
 	"github.com/leosocy/diffah/pkg/diff"
+	"github.com/leosocy/diffah/pkg/diff/errs"
 	"github.com/leosocy/diffah/pkg/exporter"
 )
 
@@ -111,6 +112,42 @@ func TestExport_AutoMode_DowngradesSilentlyWhenProbeMissing(t *testing.T) {
 	err := exporter.Export(context.Background(), opts)
 	require.NoError(t, err)
 	requireAllFullEncoding(t, opts.OutputPath)
+}
+
+// TestExport_FailFastWhenSingleLayerExceedsBudget verifies that Export returns
+// a CategoryUser error before opening any spool when the memory budget is
+// smaller than the smallest layer's estimated RSS. We use MemoryBudget=1 byte
+// so any real layer (whose RSS estimate is ≥256MiB) exceeds it, without
+// requiring a large fixture.
+func TestExport_FailFastWhenSingleLayerExceedsBudget(t *testing.T) {
+	if testing.Short() {
+		t.Skip("reads OCI fixture")
+	}
+	tmp := t.TempDir()
+	opts := exporter.Options{
+		Pairs: []exporter.Pair{
+			{
+				Name:        "alpha",
+				BaselineRef: "oci-archive:../../testdata/fixtures/v1_oci.tar",
+				TargetRef:   "oci-archive:../../testdata/fixtures/v2_oci.tar",
+			},
+		},
+		Platform:     "linux/amd64",
+		OutputPath:   filepath.Join(tmp, "bundle.tar"),
+		ToolVersion:  "test",
+		MemoryBudget: 1, // 1 byte — smaller than any real layer's RSS estimate
+	}
+	err := exporter.Export(context.Background(), opts)
+	require.Error(t, err)
+	var cat errs.Categorized
+	require.True(t, errors.As(err, &cat), "error must satisfy errs.Categorized; got %T: %v", err, err)
+	require.Equal(t, errs.CategoryUser, cat.Category())
+	var adv errs.Advised
+	require.True(t, errors.As(err, &adv), "error must satisfy errs.Advised; got %T: %v", err, err)
+	require.NotEmpty(t, adv.NextAction())
+	// Bundle must not have been written.
+	_, statErr := os.Stat(opts.OutputPath)
+	require.True(t, os.IsNotExist(statErr), "bundle must not be written on fail-fast")
 }
 
 func requireAllFullEncoding(t *testing.T, path string) {

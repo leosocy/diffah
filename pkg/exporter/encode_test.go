@@ -102,7 +102,9 @@ func TestEncodeShipped_StreamsWrittenDuringRead(t *testing.T) {
 
 	rep := &recordingReporter{}
 	require.NoError(t,
-		encodeShipped(ctx, pool, []*pairPlan{plan}, "auto", DefaultFingerprinter{}, rep, 0, 0, 0, 0, t.TempDir()))
+		encodeShipped(ctx, pool, []*pairPlan{plan}, encodeOptions{
+			Mode: "auto", Fingerprint: DefaultFingerprinter{}, Reporter: rep, Workdir: t.TempDir(),
+		}))
 
 	require.NotEmpty(t, rep.layers, "encodeShipped should have started at least one layer")
 	for _, layer := range rep.layers {
@@ -145,7 +147,9 @@ func TestEncodeShipped_WarningOnError_FallbackToFull(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err = encodeShipped(ctx, pool, []*pairPlan{plan}, "auto", DefaultFingerprinter{}, progress.NewLine(&buf), 0, 0, 0, 0, t.TempDir())
+	err = encodeShipped(ctx, pool, []*pairPlan{plan}, encodeOptions{
+		Mode: "auto", Fingerprint: DefaultFingerprinter{}, Reporter: progress.NewLine(&buf), Workdir: t.TempDir(),
+	})
 	require.NoError(t, err, "encodeShipped must tolerate per-layer errors")
 
 	for _, s := range plan.Shipped {
@@ -185,7 +189,9 @@ func TestEncodeShipped_WorkdirCleanupAfterEncode(t *testing.T) {
 		pool.countShipped(s.Digest)
 	}
 
-	require.NoError(t, encodeShipped(ctx, pool, []*pairPlan{plan}, "auto", DefaultFingerprinter{}, nil, 0, 0, 1, 1, workdir))
+	require.NoError(t, encodeShipped(ctx, pool, []*pairPlan{plan}, encodeOptions{
+		Mode: "auto", Fingerprint: DefaultFingerprinter{}, Candidates: 1, Workers: 1, Workdir: workdir,
+	}))
 
 	// targets/ must be empty: all target spools renamed into blobs/ or deleted.
 	targetsDir := filepath.Join(workdir, "targets")

@@ -13,53 +13,66 @@ import (
 	"github.com/leosocy/diffah/pkg/progress"
 )
 
+// encodeOptions holds all tunables threaded from Options into the encode
+// pipeline. Using a struct instead of positional args keeps function signatures
+// within the 4-parameter hard limit from CLAUDE.md and makes PR 6's addition
+// of MemoryBudget non-breaking.
+type encodeOptions struct {
+	Mode         string
+	Fingerprint  Fingerprinter
+	Reporter     progress.Reporter
+	Level        int
+	WindowLog    int
+	Candidates   int
+	Workers      int
+	Workdir      string
+	MemoryBudget int64
+}
+
 // encodeShipped streams every shipped target layer through the encoder
 // pipeline and writes the result into pool. PR-3 splits the work into
-// two phases driven by a bounded worker pool:
+// two phases driven by bounded worker pools:
 //
 //   - E1: prime baselineSpool for the union of distinct baseline layers
 //     across all pairs (in parallel; singleflight collapses duplicate
 //     fetches). Blobs are streamed to <workdir>/baselines/<digest>.
+//     priming uses workerPool — no per-task RSS estimate.
 //   - E2: per (pair, shipped) tuple, spool the target to disk via spoolBlob
 //     (write-tmp + atomic rename) and run the planner against the primed
 //     spool, then adopt the winning path into the blob pool via
 //     pool.addEntryFromPath (also in parallel).
+//     encodes use encodePool with admission gates (workerSem + memSem).
 //
 // Output bytes are byte-identical across worker counts because:
 //   - blobPool is content-addressed and first-write-wins
 //   - fullBlobEntry only depends on s, not on iteration order
 //   - PlanShippedTopK is deterministic for fixed inputs
 //
-// workers<1 collapses to serial; candidates<1 collapses to single-best.
-func encodeShipped(
-	ctx context.Context, pool *blobPool, pairs []*pairPlan,
-	mode string, fp Fingerprinter, rep progress.Reporter,
-	level, windowLog, candidates, workers int,
-	workdir string,
-) error {
-	if rep == nil {
-		rep = progress.NewDiscard()
+// opts.Workers<1 collapses to serial; opts.Candidates<1 collapses to
+// single-best.
+func encodeShipped(ctx context.Context, pool *blobPool, pairs []*pairPlan, opts encodeOptions) error {
+	if opts.Reporter == nil {
+		opts.Reporter = progress.NewDiscard()
 	}
-	if workers < 1 {
-		workers = 1
+	if opts.Workers < 1 {
+		opts.Workers = 1
 	}
-	if candidates < 1 {
-		candidates = 1
+	if opts.Candidates < 1 {
+		opts.Candidates = 1
 	}
-	if fp == nil {
-		fp = DefaultFingerprinter{}
+	if opts.Fingerprint == nil {
+		opts.Fingerprint = DefaultFingerprinter{}
 	}
 
-	baselinesDir := filepath.Join(workdir, "baselines")
+	baselinesDir := filepath.Join(opts.Workdir, "baselines")
 	if err := os.MkdirAll(baselinesDir, 0o700); err != nil {
 		return fmt.Errorf("create baselines spool dir: %w", err)
 	}
 	spool := newBaselineSpool(baselinesDir)
-	if err := primeBaselineSpool(ctx, pairs, spool, fp, workers); err != nil {
+	if err := primeBaselineSpool(ctx, pairs, spool, opts.Fingerprint, opts.Workers); err != nil {
 		return fmt.Errorf("prime baseline fingerprints: %w", err)
 	}
-	return encodeTargets(ctx, pool, pairs, mode, fp, rep, spool,
-		level, windowLog, candidates, workers, workdir)
+	return encodeTargets(ctx, pool, pairs, opts, spool)
 }
 
 // primeBaselineSpool pre-fetches every distinct baseline layer digest
@@ -72,6 +85,10 @@ func encodeShipped(
 // breaking TestEncodeShipped_WarningOnError_FallbackToFull and the
 // matching real-world resilience guarantee. ctx-cancellation errors
 // still propagate so cancellation flows.
+//
+// priming uses workerPool — no per-task RSS estimate.
+// encodes use encodePool with admission gates — the two pool types
+// coexist deliberately because priming has no windowLog-driven RSS profile.
 func primeBaselineSpool(
 	ctx context.Context, pairs []*pairPlan,
 	spool *baselineSpool, fp Fingerprinter, workers int,
@@ -107,12 +124,11 @@ func primeBaselineSpool(
 // encodeTargets runs phase E2: for every (pair, shipped) tuple it spools
 // the target blob to disk, resolves the layer's encoding through
 // PlanShippedTopK against the primed spool, and adopts the winning path
-// into the blob pool, in parallel up to `workers`.
+// into the blob pool, in parallel up to opts.Workers. The encodePool gates
+// admission by both worker count and memory budget (spec §4.3, §5.3).
 func encodeTargets(
 	ctx context.Context, pool *blobPool, pairs []*pairPlan,
-	mode string, fp Fingerprinter, rep progress.Reporter, spool *baselineSpool,
-	level, windowLog, candidates, workers int,
-	workdir string,
+	opts encodeOptions, spool *baselineSpool,
 ) error {
 	// fingerprint snapshot taken once after Phase E1: every per-pair
 	// Planner is seeded with the same map so a baseline shared across N
@@ -120,15 +136,15 @@ func encodeTargets(
 	// Planner.ensureBaselineFP). Spec §4.2.
 	seedFP := spool.SnapshotFingerprints()
 
-	targetsDir := filepath.Join(workdir, "targets")
-	blobsDir := filepath.Join(workdir, "blobs")
+	targetsDir := filepath.Join(opts.Workdir, "targets")
+	blobsDir := filepath.Join(opts.Workdir, "blobs")
 	for _, sub := range []string{targetsDir, blobsDir} {
 		if err := os.MkdirAll(sub, 0o700); err != nil {
 			return fmt.Errorf("create spool subdir %s: %w", sub, err)
 		}
 	}
 
-	encPool, _ := newWorkerPool(ctx, workers)
+	encPool := newEncodePool(ctx, opts.Workers, opts.MemoryBudget)
 	for _, p := range pairs {
 		// Each pair builds its own Planner that defers all baseline reads
 		// to the shared spool. Phase E1 has already primed every digest in
@@ -147,7 +163,7 @@ func encodeTargets(
 			}
 			return "", fmt.Errorf("baseline %s not primed (fetch may have failed during E1)", d)
 		}
-		planner := NewPlanner(p.BaselineLayerMeta, readBaselinePath, fp, level, windowLog)
+		planner := NewPlanner(p.BaselineLayerMeta, readBaselinePath, opts.Fingerprint, opts.Level, opts.WindowLog)
 		planner.SeedBaselineFingerprints(seedFP)
 
 		for _, s := range p.Shipped {
@@ -160,9 +176,10 @@ func encodeTargets(
 			if pool.has(s.Digest) {
 				continue
 			}
-			encPool.Submit(func() error {
-				return encodeOneShipped(ctx, pool, p, s, planner, mode, rep,
-					candidates, targetsDir, blobsDir)
+			est := estimateRSSForWindowLog(ResolveWindowLog(opts.WindowLog, s.Size))
+			encPool.Submit(s.Digest, est, func() error {
+				return encodeOneShipped(ctx, pool, p, s, planner, opts.Mode, opts.Reporter,
+					opts.Candidates, targetsDir, blobsDir)
 			})
 		}
 	}
