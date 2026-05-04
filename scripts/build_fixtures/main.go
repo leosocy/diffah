@@ -18,6 +18,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"math/rand"
@@ -857,8 +858,282 @@ func v4ImageRef(isOCI bool, tarPath, tag, name string) (types.ImageReference, er
 	return ref, nil
 }
 
+// buildScaleLayerFile streams a deterministic gzip+tar layer of approxBytes
+// total content into destPath without materialising the full layer in memory.
+// Content is a hash-chain so zstd can compress it modestly (not RLE-collapse).
+// The gzip headers and tar headers are pinned for determinism.
+// Returns the BlobInfo (digest + size) of the written compressed file.
+func buildScaleLayerFile(
+	destPath string, approxBytes, seed int64, includeExtra bool,
+) (types.BlobInfo, digest.Digest, error) {
+	const fileSize = 2 << 20 // 2 MiB per tar entry
+	nFiles := int(approxBytes / fileSize)
+
+	f, err := os.Create(destPath)
+	if err != nil {
+		return types.BlobInfo{}, "", fmt.Errorf("create scale layer file: %w", err)
+	}
+	defer f.Close()
+
+	// Track compressed bytes and digest of compressed output.
+	compHash := sha256.New()
+	compSize := &writeCounter{}
+	mw := io.MultiWriter(f, compHash, compSize)
+
+	gz, err := gzip.NewWriterLevel(mw, gzip.DefaultCompression)
+	if err != nil {
+		return types.BlobInfo{}, "", fmt.Errorf("gzip writer: %w", err)
+	}
+	// Pin all gzip header fields for determinism.
+	gz.ModTime = time.Time{}
+	gz.OS = 0xFF // "unknown"
+	gz.Name = ""
+	gz.Comment = ""
+	gz.Extra = nil
+
+	// Compute diffID (sha256 of uncompressed tar) via a TeeReader on the tar stream.
+	rawHash := sha256.New()
+	tw := tar.NewWriter(io.MultiWriter(gz, rawHash))
+
+	// patternBuf generates hash-chain content so compression ratio is realistic
+	// but content is deterministic. Writing in 32-byte chunks avoids alloc per entry.
+	var hashBuf [32]byte
+	writeEntry := func(name string, size int64, seed64, idx int64) error {
+		hdr := &tar.Header{
+			Name:     name,
+			Mode:     0o644,
+			Size:     size,
+			ModTime:  pinnedTime,
+			Typeflag: tar.TypeReg,
+			Uid:      0,
+			Gid:      0,
+			Uname:    "",
+			Gname:    "",
+		}
+		if err := tw.WriteHeader(hdr); err != nil {
+			return err
+		}
+		h := sha256.New()
+		var ibuf [16]byte
+		// Encode seed and index into initial hash input.
+		for i := range ibuf[:8] {
+			ibuf[i] = byte(seed64 >> (uint(i) * 8))
+		}
+		for i := range ibuf[8:] {
+			ibuf[8+i] = byte(idx >> (uint(i) * 8))
+		}
+		h.Write(ibuf[:])
+		chunk := h.Sum(hashBuf[:0])
+		var written int64
+		for written < size {
+			n := int64(len(chunk))
+			if written+n > size {
+				n = size - written
+			}
+			if _, err := tw.Write(chunk[:n]); err != nil {
+				return err
+			}
+			written += n
+			h.Reset()
+			h.Write(chunk)
+			chunk = h.Sum(hashBuf[:0])
+		}
+		return nil
+	}
+
+	for i := 0; i < nFiles; i++ {
+		name := fmt.Sprintf("file-%06d", i)
+		if err := writeEntry(name, fileSize, seed, int64(i)); err != nil {
+			return types.BlobInfo{}, "", fmt.Errorf("write tar entry %d: %w", i, err)
+		}
+	}
+	if includeExtra {
+		if err := writeEntry("file-extra", 4<<20, seed, int64(nFiles)+1); err != nil {
+			return types.BlobInfo{}, "", fmt.Errorf("write extra tar entry: %w", err)
+		}
+	}
+
+	if err := tw.Close(); err != nil {
+		return types.BlobInfo{}, "", fmt.Errorf("close tar writer: %w", err)
+	}
+	if err := gz.Close(); err != nil {
+		return types.BlobInfo{}, "", fmt.Errorf("close gzip writer: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return types.BlobInfo{}, "", fmt.Errorf("close layer file: %w", err)
+	}
+
+	rawDigest := digest.NewDigestFromEncoded(digest.SHA256, fmt.Sprintf("%x", rawHash.Sum(nil)))
+	compDigest := digest.NewDigestFromEncoded(digest.SHA256, fmt.Sprintf("%x", compHash.Sum(nil)))
+	blobInfo := types.BlobInfo{
+		Digest:    compDigest,
+		Size:      compSize.n,
+		MediaType: ociLayerMediaType,
+	}
+	return blobInfo, rawDigest, nil
+}
+
+// writeCounter counts bytes written through it.
+type writeCounter struct {
+	n int64
+}
+
+func (wc *writeCounter) Write(p []byte) (int, error) {
+	wc.n += int64(len(p))
+	return len(p), nil
+}
+
+// buildScaleFixtureOCI produces a pair of OCI archive fixtures at outDir/baseline.tar
+// and outDir/target.tar. Each has a single layer of approxBytes uncompressed content.
+// Target = baseline layer + one extra 4 MiB entry, so zstd-patch produces a smaller
+// output than full-encoding target alone.
+//
+// Content is deterministic (seed-based hash chain) across runs.
+// normalizeTar is NOT called: tar headers are pinned by construction.
+func buildScaleFixtureOCI(ctx context.Context, outDir string, approxBytes, seed int64) error {
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		return fmt.Errorf("mkdir outDir: %w", err)
+	}
+
+	// Remove any pre-existing files so OCI archive transport can create fresh ones.
+	for _, name := range []string{"baseline.tar", "target.tar"} {
+		if err := removeIfExists(filepath.Join(outDir, name)); err != nil {
+			return err
+		}
+	}
+
+	// Build baseline layer to a temp file, then put it into the OCI archive.
+	baselineTmp := filepath.Join(outDir, ".baseline_layer.tmp")
+	defer os.Remove(baselineTmp)
+
+	fmt.Printf("building scale baseline layer (~%d GiB uncompressed)...\n", approxBytes>>30)
+	baselineBlobInfo, baselineDiffID, err := buildScaleLayerFile(baselineTmp, approxBytes, seed, false)
+	if err != nil {
+		return fmt.Errorf("build baseline layer: %w", err)
+	}
+	fmt.Printf("baseline layer compressed: %d MiB (digest %s)\n", baselineBlobInfo.Size>>20, baselineBlobInfo.Digest)
+
+	// Build target layer to a temp file (same seed, includes extra entry).
+	targetTmp := filepath.Join(outDir, ".target_layer.tmp")
+	defer os.Remove(targetTmp)
+
+	fmt.Printf("building scale target layer (~%d GiB + 4 MiB uncompressed)...\n", approxBytes>>30)
+	targetBlobInfo, targetDiffID, err := buildScaleLayerFile(targetTmp, approxBytes, seed, true)
+	if err != nil {
+		return fmt.Errorf("build target layer: %w", err)
+	}
+	fmt.Printf("target layer compressed: %d MiB (digest %s)\n", targetBlobInfo.Size>>20, targetBlobInfo.Digest)
+
+	// Write baseline OCI archive.
+	baselinePath := filepath.Join(outDir, "baseline.tar")
+	baselineConfigJSON := buildConfig([]digest.Digest{baselineDiffID})
+	bh := sha256.New()
+	bh.Write(baselineConfigJSON)
+	baselineConfigDigest := digest.NewDigestFromEncoded(digest.SHA256, fmt.Sprintf("%x", bh.Sum(nil)))
+	baselineConfigInfo := types.BlobInfo{Digest: baselineConfigDigest, Size: int64(len(baselineConfigJSON))}
+	baselineManifest := buildManifest(baselineConfigInfo, []types.BlobInfo{baselineBlobInfo},
+		ociManifestMT, ociLayerMediaType, ociConfigMediaType)
+
+	baselineRef, err := ociarchive.NewReference(baselinePath, "diffah-scale-fixture:baseline")
+	if err != nil {
+		return fmt.Errorf("oci ref baseline: %w", err)
+	}
+	baselineDest, err := baselineRef.NewImageDestination(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("new image destination baseline: %w", err)
+	}
+	if err := streamLayerToOCI(ctx, baselineDest,
+		baselineTmp, baselineBlobInfo, baselineConfigJSON, baselineConfigInfo, baselineManifest,
+	); err != nil {
+		return fmt.Errorf("write baseline archive: %w", err)
+	}
+	fmt.Printf("wrote %s\n", baselinePath)
+
+	// Write target OCI archive.
+	targetPath := filepath.Join(outDir, "target.tar")
+	targetConfigJSON := buildConfig([]digest.Digest{targetDiffID})
+	th := sha256.New()
+	th.Write(targetConfigJSON)
+	targetConfigDigest := digest.NewDigestFromEncoded(digest.SHA256, fmt.Sprintf("%x", th.Sum(nil)))
+	targetConfigInfo := types.BlobInfo{Digest: targetConfigDigest, Size: int64(len(targetConfigJSON))}
+	targetManifest := buildManifest(targetConfigInfo, []types.BlobInfo{targetBlobInfo},
+		ociManifestMT, ociLayerMediaType, ociConfigMediaType)
+
+	targetRef, err := ociarchive.NewReference(targetPath, "diffah-scale-fixture:target")
+	if err != nil {
+		return fmt.Errorf("oci ref target: %w", err)
+	}
+	targetDest, err := targetRef.NewImageDestination(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("new image destination target: %w", err)
+	}
+	if err := streamLayerToOCI(ctx, targetDest,
+		targetTmp, targetBlobInfo, targetConfigJSON, targetConfigInfo, targetManifest,
+	); err != nil {
+		return fmt.Errorf("write target archive: %w", err)
+	}
+	fmt.Printf("wrote %s\n", targetPath)
+	return nil
+}
+
+// streamLayerToOCI streams a pre-built compressed layer file into an image
+// destination, then puts config+manifest and commits. This avoids materialising
+// the entire layer in a bytes.Buffer.
+func streamLayerToOCI(
+	ctx context.Context,
+	dest types.ImageDestination,
+	layerPath string,
+	layerInfo types.BlobInfo,
+	configJSON []byte,
+	configInfo types.BlobInfo,
+	manifestBytes []byte,
+) error {
+	defer dest.Close()
+	cache := none.NoCache
+
+	lf, err := os.Open(layerPath)
+	if err != nil {
+		return fmt.Errorf("open layer file: %w", err)
+	}
+	defer lf.Close()
+	if _, err := dest.PutBlob(ctx, lf, layerInfo, cache, false); err != nil {
+		return fmt.Errorf("put layer blob: %w", err)
+	}
+
+	if _, err := dest.PutBlob(ctx, bytes.NewReader(configJSON), configInfo, cache, true); err != nil {
+		return fmt.Errorf("put config blob: %w", err)
+	}
+	if err := dest.PutManifest(ctx, manifestBytes, nil); err != nil {
+		return fmt.Errorf("put manifest: %w", err)
+	}
+	if err := dest.PutSignatures(ctx, nil, nil); err != nil {
+		return fmt.Errorf("put signatures: %w", err)
+	}
+	if err := dest.Commit(ctx, nil); err != nil {
+		return fmt.Errorf("commit: %w", err)
+	}
+	return nil
+}
+
 func main() {
 	ctx := context.Background()
+
+	var scaleBytes int64
+	var scaleOut string
+	const scaleHelp = "produce a scale fixture pair with this many uncompressed bytes per layer" +
+		" (e.g. 2147483648 for 2GiB); skips the default fixture set"
+	flag.Int64Var(&scaleBytes, "scale", 0, scaleHelp)
+	flag.StringVar(&scaleOut, "out", "testdata/fixtures/scale", "output directory for -scale mode")
+	flag.Parse()
+
+	if scaleBytes > 0 {
+		if err := buildScaleFixtureOCI(ctx, scaleOut, scaleBytes, 42); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	if err := buildFixtures(ctx); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
