@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"time"
 
 	"go.podman.io/image/v5/types"
@@ -199,9 +198,10 @@ func signArchive(ctx context.Context, opts *Options) error {
 }
 
 func DryRun(ctx context.Context, opts Options) (DryRunStats, error) {
-	// DryRun needs a temporary workdir for the baseline spool (same
-	// contract as Export, but without a permanent output path).
-	wd, cleanup, err := ensureWorkdir(opts.Workdir, os.TempDir())
+	// DryRun needs a workdir for the baseline spool, same as Export.
+	// resolveWorkdir colocates with opts.OutputPath when set, and falls
+	// back to os.TempDir when OutputPath is empty (API callers).
+	wd, cleanup, err := ensureWorkdir(opts.Workdir, opts.OutputPath)
 	if err != nil {
 		return DryRunStats{}, fmt.Errorf("prepare workdir: %w", err)
 	}

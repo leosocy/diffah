@@ -13,6 +13,11 @@ import (
 //  2. DIFFAH_WORKDIR env
 //  3. <dir(outputPath)>/.diffah-tmp/<random16hex>
 //
+// When outputPath is empty (e.g. DryRun API callers without an output
+// file), the default base is os.TempDir() — filepath.Dir("") would
+// yield "." and place spool dirs under CWD, which fails in read-only
+// working directories.
+//
 // See spec §4.2.
 func resolveWorkdir(flag, outputPath string) (string, error) {
 	if flag != "" {
@@ -25,7 +30,11 @@ func resolveWorkdir(flag, outputPath string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("generate workdir suffix: %w", err)
 	}
-	return filepath.Join(filepath.Dir(outputPath), ".diffah-tmp", suffix), nil
+	base := filepath.Dir(outputPath)
+	if outputPath == "" {
+		base = os.TempDir()
+	}
+	return filepath.Join(base, ".diffah-tmp", suffix), nil
 }
 
 // ensureWorkdir creates the workdir and its three subdirs (baselines, targets,

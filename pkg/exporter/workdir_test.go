@@ -82,6 +82,18 @@ func TestResolveWorkdir_FlagBeatsEnvBeatsDefault(t *testing.T) {
 	}
 }
 
+func TestResolveWorkdir_EmptyOutputPathFallsBackToTempDir(t *testing.T) {
+	t.Setenv("DIFFAH_WORKDIR", "")
+	got, err := resolveWorkdir("", "")
+	if err != nil {
+		t.Fatalf("resolveWorkdir(empty): %v", err)
+	}
+	wantPrefix := filepath.Join(os.TempDir(), ".diffah-tmp") + string(os.PathSeparator)
+	if !strings.HasPrefix(got, wantPrefix) {
+		t.Fatalf("empty outputPath should default under %q, got %q", wantPrefix, got)
+	}
+}
+
 func TestEnsureWorkdir_CreatesAllSubdirsAndCleansUp(t *testing.T) {
 	outputDir := t.TempDir()
 	wd, cleanup, err := ensureWorkdir("", filepath.Join(outputDir, "bundle.tar"))
