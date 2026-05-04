@@ -33,8 +33,12 @@ jobs:
               -v \
               -run TestScaleBench_2GiBLayer \
               ./pkg/exporter/...
-          cat time.out
-          rss_kib=$(grep -oP 'Maximum resident set size \(kbytes\): \K[0-9]+' time.out)
+          rss_kib=$(grep -oP 'Maximum resident set size \(kbytes\): \K[0-9]+' time.out || true)
+          if [ -z "${rss_kib}" ]; then
+            echo "FAIL: could not parse peak RSS from /usr/bin/time output"
+            cat time.out
+            exit 1
+          fi
           echo "Peak RSS: ${rss_kib} KiB"
           if [ "${rss_kib}" -gt 8388608 ]; then
             echo "FAIL: peak RSS ${rss_kib} KiB exceeds 8 GiB ceiling (spec §13)"
