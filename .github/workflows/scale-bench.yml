@@ -48,7 +48,7 @@ jobs:
 
       - name: Upload /usr/bin/time output
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: scale-bench-time-${{ github.run_id }}
           path: time.out
