@@ -49,7 +49,7 @@ func TestBundleImageSource_GetManifest_ReturnsStoredBytes(t *testing.T) {
 		sidecar:      b.sidecar,
 		baseline:     openBaseline(t, "../../testdata/fixtures/v1_oci.tar"),
 		imageName:    img.Name,
-		cache:        newBaselineBlobCache(),
+		spool:        NewBaselineSpool(t.TempDir()),
 	}
 
 	gotBytes, gotMime, err := src.GetManifest(context.Background(), nil)
@@ -87,7 +87,7 @@ func TestBundleImageSource_GetBlob_FullEncoding_ReturnsVerifiedBytes(t *testing.
 		sidecar:      b.sidecar,
 		baseline:     openBaseline(t, "../../testdata/fixtures/v1_oci.tar"),
 		imageName:    img.Name,
-		cache:        newBaselineBlobCache(),
+		spool:        NewBaselineSpool(t.TempDir()),
 	}
 
 	rc, size, err := src.GetBlob(context.Background(), types.BlobInfo{Digest: fullDigest}, nil)
@@ -143,7 +143,7 @@ func TestBundleImageSource_GetBlob_PatchEncoding_DecodesAndVerifies(t *testing.T
 		sidecar:      b.sidecar,
 		baseline:     openBaseline(t, "../../testdata/fixtures/v1_oci.tar"),
 		imageName:    img.Name,
-		cache:        newBaselineBlobCache(),
+		spool:        NewBaselineSpool(t.TempDir()),
 	}
 
 	rc, size, err := src.GetBlob(context.Background(), types.BlobInfo{Digest: patchDigest}, nil)
@@ -202,7 +202,7 @@ func TestBundleImageSource_GetBlob_PatchEncoding_CorruptedBlob_RaisesAssemblyMis
 		sidecar:      b.sidecar,
 		baseline:     openBaseline(t, "../../testdata/fixtures/v1_oci.tar"),
 		imageName:    img.Name,
-		cache:        newBaselineBlobCache(),
+		spool:        NewBaselineSpool(t.TempDir()),
 	}
 	_, _, err = src.GetBlob(context.Background(), types.BlobInfo{Digest: patchDigest}, nil)
 	require.Error(t, err)
@@ -259,7 +259,7 @@ func TestBundleImageSource_GetBlob_BaselineDelegation_Verified(t *testing.T) {
 		sidecar:      b.sidecar,
 		baseline:     openBaseline(t, "../../testdata/fixtures/v1_oci.tar"),
 		imageName:    img.Name,
-		cache:        newBaselineBlobCache(),
+		spool:        NewBaselineSpool(t.TempDir()),
 	}
 	rc, size, err := src.GetBlob(context.Background(), types.BlobInfo{Digest: requiredDigest}, nil)
 	require.NoError(t, err)
@@ -297,7 +297,7 @@ func TestServePatch_BlobNotFound_WrapsB1(t *testing.T) {
 		blobDir:   blobDir,
 		imageName: "svc-x",
 		baseline:  &fakeBlobNotFoundSource{},
-		cache:     newBaselineBlobCache(),
+		spool:     NewBaselineSpool(t.TempDir()),
 		sidecar:   &diff.Sidecar{},
 	}
 	entry := diff.BlobEntry{
@@ -357,7 +357,7 @@ func TestGetBlob_BaselineOnlyMissing_WrapsB2(t *testing.T) {
 		blobDir:   t.TempDir(),
 		imageName: "svc-y",
 		baseline:  &fakeBlobNotFoundSource{},
-		cache:     newBaselineBlobCache(),
+		spool:     NewBaselineSpool(t.TempDir()),
 		sidecar:   &diff.Sidecar{Blobs: map[digest.Digest]diff.BlobEntry{}},
 	}
 	_, _, err := src.GetBlob(context.Background(),
