@@ -369,3 +369,9 @@ The spec is satisfied when **all of the following** are demonstrable on master:
 13. **Cleanup contract (Goal 5).** Integration tests cover three of the §7 cleanup paths and assert `os.Stat(workdir) == NotExist`: (a) successful `Import()`, (b) ctx-cancel mid-apply, (c) injected worker-goroutine panic. The remaining paths (partial mode, all-fail, disk-full simulation) are covered by unit tests on the relevant components.
 
 When all 13 hold, set this spec's `Status:` field to `Done`.
+
+---
+
+## See also
+
+- [`../lessons-learned/2026-05-04-import-streaming-lessons.md`](../lessons-learned/2026-05-04-import-streaming-lessons.md) — accumulating per-PR amendments. Read before implementing any PR; append after each PR ships if the plan body diverged from reality.
