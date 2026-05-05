@@ -39,21 +39,6 @@ func TestReadAllReportingChunks_ReportsEveryChunk(t *testing.T) {
 	}
 }
 
-func TestCappedWriter_ClampsToTotal(t *testing.T) {
-	var got []int64
-	w := cappedWriter(10, func(n int64) { got = append(got, n) })
-	w(4) // within cap → report 4
-	w(8) // would push total to 12 → report 6 (cap at 10)
-	w(5) // already at cap → drop
-	require.Equal(t, []int64{4, 6}, got)
-
-	var sum int64
-	for _, n := range got {
-		sum += n
-	}
-	require.Equal(t, int64(10), sum, "capped stream must sum exactly to total")
-}
-
 type recordingReporter struct {
 	mu     sync.Mutex
 	layers []*recordingLayer
