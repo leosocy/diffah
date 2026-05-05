@@ -14,6 +14,7 @@ var applyFlags = struct {
 	dryRun             bool
 	buildSystemContext registryContextBuilder
 	buildVerify        verifyConfigBuilder
+	buildImportSpool   importSpoolOptsBuilder
 }{}
 
 const applyExample = `  # Registry round-trip
@@ -29,6 +30,9 @@ func newApplyCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "apply DELTA-IN BASELINE-IMAGE TARGET-IMAGE",
 		Short: "Reconstruct a single image from a delta archive and a baseline.",
+		Long: `Reconstruct a single image from a delta archive and a baseline.
+
+` + importSpoolHelp,
 		Args: requireArgs("apply",
 			[]string{"DELTA-IN", "BASELINE-IMAGE", "TARGET-IMAGE"},
 			"diffah apply delta.tar docker-archive:/tmp/old.tar docker-archive:/tmp/restored.tar"),
@@ -45,6 +49,7 @@ func newApplyCommand() *cobra.Command {
 	f.BoolVarP(&applyFlags.dryRun, "dry-run", "n", false, "verify baseline reachability without writing")
 	applyFlags.buildSystemContext = installRegistryFlags(c)
 	applyFlags.buildVerify = installVerifyFlags(c)
+	applyFlags.buildImportSpool = installImportSpoolFlags(c)
 	installUsageTemplate(c)
 	return c
 }
@@ -62,27 +67,9 @@ func runApply(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	sc, retryTimes, retryDelay, err := applyFlags.buildSystemContext()
+	opts, err := buildApplyOptions(cmd, deltaIn, baseline, target)
 	if err != nil {
 		return err
-	}
-	vc, err := applyFlags.buildVerify()
-	if err != nil {
-		return err
-	}
-
-	opts := importer.Options{
-		DeltaPath:        deltaIn,
-		Baselines:        map[string]string{"default": baseline.Raw},
-		Outputs:          map[string]string{"default": target.Raw},
-		Strict:           true,
-		AllowConvert:     applyFlags.allowConvert,
-		SystemContext:    sc,
-		RetryTimes:       retryTimes,
-		RetryDelay:       retryDelay,
-		ProgressReporter: newProgressReporter(cmd.ErrOrStderr()),
-		VerifyPubKeyPath: vc.PubKeyPath,
-		VerifyRekorURL:   vc.RekorURL,
 	}
 	ctx := context.Background()
 
@@ -102,4 +89,39 @@ func runApply(cmd *cobra.Command, args []string) error {
 
 	fmt.Fprintf(cmd.OutOrStdout(), "wrote %s\n", target.Raw)
 	return nil
+}
+
+func buildApplyOptions(cmd *cobra.Command, deltaIn string, baseline, target ImageRef) (importer.Options, error) {
+	sc, retryTimes, retryDelay, err := applyFlags.buildSystemContext()
+	if err != nil {
+		return importer.Options{}, err
+	}
+	vc, err := applyFlags.buildVerify()
+	if err != nil {
+		return importer.Options{}, err
+	}
+	imp, err := applyFlags.buildImportSpool()
+	if err != nil {
+		return importer.Options{}, err
+	}
+
+	return importer.Options{
+		DeltaPath:        deltaIn,
+		Baselines:        map[string]string{"default": baseline.Raw},
+		Outputs:          map[string]string{"default": target.Raw},
+		Strict:           true,
+		AllowConvert:     applyFlags.allowConvert,
+		SystemContext:    sc,
+		RetryTimes:       retryTimes,
+		RetryDelay:       retryDelay,
+		ProgressReporter: newProgressReporter(cmd.ErrOrStderr()),
+		VerifyPubKeyPath: vc.PubKeyPath,
+		VerifyRekorURL:   vc.RekorURL,
+		// Streaming I/O knobs (plumbing only for PR1; consumed in PR3-PR5).
+		// Workers > 1 is accepted silently on apply (single-image path)
+		// for CLI symmetry; PR5 activates it on the unbundle path.
+		Workdir:      imp.Workdir,
+		MemoryBudget: imp.MemoryBudget,
+		Workers:      imp.Workers,
+	}, nil
 }

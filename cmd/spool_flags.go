@@ -52,6 +52,48 @@ func installSpoolFlags(cmd *cobra.Command) spoolOptsBuilder {
 	}
 }
 
+// importSpoolOpts adds Workers on top of the export-side spool knobs.
+type importSpoolOpts struct {
+	Workdir      string
+	MemoryBudget int64
+	Workers      int
+}
+
+type importSpoolOptsBuilder func() (importSpoolOpts, error)
+
+const importSpoolHelp = `Spool, memory & concurrency:
+  --workdir DIR              spool location for per-Import disk-backed blobs
+                             (default: <dir(OUTPUT)>/.diffah-tmp/<random>; also DIFFAH_WORKDIR env)
+  --memory-budget BYTES      admission cap for concurrent image applies; if any single image's
+                             estimated RSS exceeds this value, Import fails immediately before
+                             starting any worker (fail-fast); 0 disables admission
+                             (default: 8GiB; supports KiB/MiB/GiB/KB/MB/GB)
+  --workers N                max concurrent image applies in a bundle (default 8)
+`
+
+// installImportSpoolFlags registers --workdir, --memory-budget, --workers on cmd.
+func installImportSpoolFlags(cmd *cobra.Command) importSpoolOptsBuilder {
+	o := &importSpoolOpts{}
+	var memStr string
+
+	f := cmd.Flags()
+	f.StringVar(&o.Workdir, "workdir", "",
+		"spool location for per-Import disk-backed blobs (default <dir(OUTPUT)>/.diffah-tmp/<random>; also DIFFAH_WORKDIR)")
+	f.StringVar(&memStr, "memory-budget", "8GiB",
+		"admission cap for concurrent image applies; suffixes KiB/MiB/GiB/KB/MB/GB; 0 disables")
+	f.IntVar(&o.Workers, "workers", 8,
+		"max concurrent image applies in a bundle")
+
+	return func() (importSpoolOpts, error) {
+		n, err := parseMemoryBudget(memStr)
+		if err != nil {
+			return importSpoolOpts{}, &cliErr{cat: errs.CategoryUser, msg: err.Error()}
+		}
+		o.MemoryBudget = n
+		return *o, nil
+	}
+}
+
 // parseMemoryBudget accepts decimal suffixes (KB/MB/GB) and binary
 // suffixes (KiB/MiB/GiB), case-insensitive on the suffix. "0" disables
 // admission control. Bare integer means bytes.

@@ -44,6 +44,16 @@ type Options struct {
 	// consulted when .rekor.json is present; missing bundle does not
 	// fail the verify.
 	VerifyRekorURL string
+	// Streaming I/O — Import side. Workdir is the spool root for
+	// disk-backed baselines and per-image scratch. Empty selects the
+	// default placement; see internal/workdir.Resolve for precedence.
+	// MemoryBudget caps concurrent image-apply RSS via the admission
+	// controller (spec §5.6). Zero disables admission entirely (operator
+	// opt-out). Workers bounds the number of concurrent image applies in
+	// a multi-image bundle; defaults applied at the CLI layer (8).
+	Workdir      string
+	MemoryBudget int64
+	Workers      int
 }
 
 func (o *Options) reporter() progress.Reporter {
