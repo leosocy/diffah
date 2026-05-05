@@ -125,8 +125,8 @@ func buildUnbundleOptions(
 		ProgressReporter: newProgressReporter(cmd.ErrOrStderr()),
 		VerifyPubKeyPath: vc.PubKeyPath,
 		VerifyRekorURL:   vc.RekorURL,
-		Workdir:      imp.Workdir,
-		MemoryBudget: imp.MemoryBudget,
-		Workers:      imp.Workers,
+		Workdir:          imp.Workdir,
+		MemoryBudget:     imp.MemoryBudget,
+		Workers:          imp.Workers,
 	}, nil
 }
