@@ -125,8 +125,6 @@ func buildUnbundleOptions(
 		ProgressReporter: newProgressReporter(cmd.ErrOrStderr()),
 		VerifyPubKeyPath: vc.PubKeyPath,
 		VerifyRekorURL:   vc.RekorURL,
-		// Streaming I/O knobs (plumbing only for PR1; consumed in PR3-PR5).
-		// Workers activates concurrent image applies on unbundle path in PR5.
 		Workdir:      imp.Workdir,
 		MemoryBudget: imp.MemoryBudget,
 		Workers:      imp.Workers,

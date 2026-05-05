@@ -20,8 +20,8 @@ import (
 //
 // See spec §4.2. Delegates to internal/workdir.Resolve which is shared
 // with the importer side.
-func resolveWorkdir(flag, outputPath string) (string, error) {
-	return workdir.Resolve(flag, outputPath), nil
+func resolveWorkdir(flag, outputPath string) string {
+	return workdir.Resolve(flag, outputPath)
 }
 
 // ensureWorkdir creates the workdir and its three subdirs (baselines, targets,

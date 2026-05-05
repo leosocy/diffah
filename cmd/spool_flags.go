@@ -10,10 +10,10 @@ import (
 	"github.com/leosocy/diffah/pkg/diff/errs"
 )
 
-// spoolOpts holds Phase-4-streaming runtime knobs that govern where the
-// exporter spills its per-Export workdir and how much encoder RAM the
-// admission controller is allowed to grant. Both have sane defaults; the
-// flags are advanced operator escape hatches.
+// spoolOpts holds runtime knobs that govern where the exporter spills its
+// per-Export workdir and how much encoder RAM the admission controller is
+// allowed to grant. Both have sane defaults; the flags are advanced
+// operator escape hatches.
 type spoolOpts struct {
 	Workdir      string
 	MemoryBudget int64

@@ -34,13 +34,15 @@ func TestConfigDefaults_MatchCobraFlagDefaults(t *testing.T) {
 		{"candidates", "3", newDiffCommand},
 		{"workdir", d.Workdir, newDiffCommand},
 		{"memory-budget", d.MemoryBudget, newDiffCommand},
-		// apply-side spool flags
-		{"workdir", d.ApplyWorkdir, newApplyCommand},
-		{"memory-budget", d.ApplyMemoryBudget, newApplyCommand},
+		// apply-side spool flags share the same config keys as diff (workdir,
+		// memory-budget). The --workers default is hard-coded in the spool
+		// flag installer because Workers is also bound by diff to its own
+		// concurrency knob; per-command differentiation is via CLI flags.
+		{"workdir", d.Workdir, newApplyCommand},
+		{"memory-budget", d.MemoryBudget, newApplyCommand},
 		{"workers", "8", newApplyCommand},
-		// unbundle-side spool flags
-		{"workdir", d.ApplyWorkdir, newUnbundleCommand},
-		{"memory-budget", d.ApplyMemoryBudget, newUnbundleCommand},
+		{"workdir", d.Workdir, newUnbundleCommand},
+		{"memory-budget", d.MemoryBudget, newUnbundleCommand},
 		{"workers", "8", newUnbundleCommand},
 	}
 
@@ -62,5 +64,4 @@ func TestConfigDefaults_MatchCobraFlagDefaults(t *testing.T) {
 	require.Equal(t, 22, d.ZstdLevel)
 	require.Equal(t, 8, d.Workers)
 	require.Equal(t, 3, d.Candidates)
-	require.Equal(t, 8, d.ApplyWorkers)
 }

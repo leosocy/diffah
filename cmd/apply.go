@@ -117,9 +117,8 @@ func buildApplyOptions(cmd *cobra.Command, deltaIn string, baseline, target Imag
 		ProgressReporter: newProgressReporter(cmd.ErrOrStderr()),
 		VerifyPubKeyPath: vc.PubKeyPath,
 		VerifyRekorURL:   vc.RekorURL,
-		// Streaming I/O knobs (plumbing only for PR1; consumed in PR3-PR5).
-		// Workers > 1 is accepted silently on apply (single-image path)
-		// for CLI symmetry; PR5 activates it on the unbundle path.
+		// Workers > 1 is accepted silently on apply (single-image path) for
+		// CLI symmetry with unbundle; only the unbundle path fans images out.
 		Workdir:      imp.Workdir,
 		MemoryBudget: imp.MemoryBudget,
 		Workers:      imp.Workers,

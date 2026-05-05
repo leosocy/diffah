@@ -145,7 +145,7 @@ func TestBundleImageSource_GetBlob_PatchEncoding_DecodesAndVerifies(t *testing.T
 		baseline:     openBaseline(t, "../../testdata/fixtures/v1_oci.tar"),
 		imageName:    img.Name,
 		spool:        NewBaselineSpool(t.TempDir()),
-		workdir:      t.TempDir(),
+		scratchDir:   t.TempDir(),
 	}
 
 	rc, size, err := src.GetBlob(context.Background(), types.BlobInfo{Digest: patchDigest}, nil)
@@ -205,7 +205,7 @@ func TestBundleImageSource_GetBlob_PatchEncoding_CorruptedBlob_RaisesAssemblyMis
 		baseline:     openBaseline(t, "../../testdata/fixtures/v1_oci.tar"),
 		imageName:    img.Name,
 		spool:        NewBaselineSpool(t.TempDir()),
-		workdir:      t.TempDir(),
+		scratchDir:   t.TempDir(),
 	}
 	rc, _, err := src.GetBlob(context.Background(), types.BlobInfo{Digest: patchDigest}, nil)
 	if err == nil {

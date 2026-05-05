@@ -1,25 +1,20 @@
 // Package importer — disk-backed baseline spool.
 //
-// BaselineSpool replaces baselineBlobCache: instead of pinning every
-// baseline blob as []byte for the full Import() lifetime, it streams
-// each blob to <dir>/<digest> on first touch via TeeReader while
-// digest-verifying it on the same pass. Subsequent calls for the same
-// digest hit the in-memory entries map (RLock fast path) and return
+// BaselineSpool replaces the old in-memory baselineBlobCache: instead of
+// pinning every baseline blob as []byte for the full Import() lifetime,
+// it streams each blob to <dir>/<digest> on first touch via TeeReader
+// while digest-verifying it on the same pass. Subsequent calls for the
+// same digest hit the in-memory entries map (RLock fast path) and return
 // the already-written path.
 //
 // Concurrent first-touches for the same digest are collapsed to a
-// single underlying fetch via singleflight.Group (mirrors the old
-// blob cache's behaviour). Failed fetches do not cache: the next
-// caller retries.
+// single underlying fetch via singleflight.Group. Failed fetches do not
+// cache: the next caller retries.
 //
-// Mirrors pkg/exporter/baselinespool.go in shape and the singleflight /
-// drain / committed-sentinel pattern. Importer additionally publishes via
-// tmp + atomic rename (CreateTemp → Sync → Close → Rename) for defense-
-// in-depth: even if a future caller bypasses singleflight (as the atomic-
-// rename test does directly), concurrent writers race on distinct tmp
-// files and only the digest-matching writer's payload reaches dst. The
-// exporter does not need this because all of its writers go through the
-// singleflight gate.
+// Publish via tmp + atomic rename (CreateTemp → Sync → Close → Rename)
+// is defense-in-depth: even if a caller bypasses singleflight (as the
+// atomic-rename test does), concurrent writers race on distinct tmp
+// files and only the digest-matching writer's payload reaches dst.
 package importer
 
 import (
@@ -115,9 +110,10 @@ func (s *BaselineSpool) getOrSpoolWithVerifier(
 // spoolOnce performs a single fetch+stream+verify+rename cycle for
 // digest d. Called at most once per digest per Import() run for any
 // successful flight; failed flights leave nothing behind and let the
-// next caller retry.
+// next caller retry. Hashes the payload on the streaming pass so a
+// multi-GiB baseline is never re-read just to verify its digest.
 func (s *BaselineSpool) spoolOnce(
-	ctx context.Context,
+	_ context.Context,
 	d digest.Digest,
 	fetch func() (io.ReadCloser, error),
 	verifier func(io.Reader) error,
@@ -135,8 +131,6 @@ func (s *BaselineSpool) spoolOnce(
 	}
 	tmpPath := tmp.Name()
 
-	// committed gates the deferred cleanup so any failure before atomic
-	// rename + entry recording leaves no partial file behind.
 	committed := false
 	defer func() {
 		if !committed {
@@ -145,15 +139,15 @@ func (s *BaselineSpool) spoolOnce(
 		}
 	}()
 
-	tee := io.TeeReader(rc, tmp)
+	hasher := d.Algorithm().Hash()
+	tee := io.TeeReader(rc, io.MultiWriter(tmp, hasher))
 	if verifier != nil {
 		if vErr := verifier(tee); vErr != nil {
 			return "", vErr
 		}
 	}
-	// Drain whatever the verifier (or any future inline consumer) left
-	// unconsumed so the on-disk file is byte-identical to rc — mirrors
-	// the exporter spool's contract.
+	// Drain whatever the verifier left unconsumed so the on-disk file is
+	// byte-identical to rc and the hasher sees every byte.
 	if _, drainErr := io.Copy(io.Discard, tee); drainErr != nil {
 		return "", fmt.Errorf("drain spool tmp for %s: %w", d, drainErr)
 	}
@@ -164,10 +158,7 @@ func (s *BaselineSpool) spoolOnce(
 		return "", fmt.Errorf("close spool tmp for %s: %w", d, err)
 	}
 
-	got, err := digestFile(tmpPath)
-	if err != nil {
-		return "", fmt.Errorf("digest spool tmp for %s: %w", d, err)
-	}
+	got := digest.NewDigest(d.Algorithm(), hasher)
 	if got != d {
 		return "", &diff.ErrBaselineBlobDigestMismatch{Digest: d.String(), Got: got.String()}
 	}
@@ -183,18 +174,5 @@ func (s *BaselineSpool) spoolOnce(
 	s.entries[d] = dst
 	s.mu.Unlock()
 	committed = true
-
-	_ = ctx // ctx kept on the signature for future cancellation propagation
 	return dst, nil
-}
-
-// digestFile re-reads p and returns its digest. Used to verify the
-// on-disk spool after streaming finishes.
-func digestFile(p string) (digest.Digest, error) {
-	f, err := os.Open(p)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-	return digest.FromReader(f)
 }

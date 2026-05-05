@@ -505,8 +505,8 @@ func preApplyChecks(ctx context.Context, opts Options, bundle *extractedBundle) 
 	return validatePositionalBaseline(bundle.sidecar, opts.Baselines)
 }
 
-// ensureImportWorkdir resolves and creates the per-Import workdir.
-// Spool (PR3) and per-image scratch (PR4) live underneath. The hint
+// ensureImportWorkdir resolves and creates the per-Import workdir; the
+// baseline spool and per-image scratch dirs live underneath. The hint
 // biases default placement toward the first file-transport output so a
 // bundle written to /vol/X spills its baselines next to it instead of
 // /tmp, keeping cross-mount renames off the hot path.
@@ -699,7 +699,7 @@ func buildImageDryRuns(bundle *extractedBundle, resolved []resolvedBaseline) ([]
 	}
 	images := make([]ImageDryRun, 0, len(bundle.sidecar.Images))
 	for _, img := range bundle.sidecar.Images {
-		layers, err := readManifestLayers(bundle, img.Target.ManifestDigest)
+		layers, err := readManifestLayers(bundle.blobDir, img.Target.ManifestDigest)
 		if err != nil {
 			return nil, fmt.Errorf("read target manifest for %q: %w", img.Name, err)
 		}
@@ -734,8 +734,12 @@ func buildImageDryRuns(bundle *extractedBundle, resolved []resolvedBaseline) ([]
 	return images, nil
 }
 
-func readManifestLayers(bundle *extractedBundle, mfDigest digest.Digest) ([]digest.Digest, error) {
-	path := filepath.Join(bundle.blobDir, mfDigest.Algorithm().String(), mfDigest.Encoded())
+// readManifestLayers reads <blobDir>/<algo>/<digest> as an OCI/Docker
+// manifest and returns the layer digest list. Tolerates both OCI v1 and
+// Docker schema-2 manifests because both store layers under the same JSON
+// shape. Callers wrap the returned error with their own context.
+func readManifestLayers(blobDir string, mfDigest digest.Digest) ([]digest.Digest, error) {
+	path := filepath.Join(blobDir, mfDigest.Algorithm().String(), mfDigest.Encoded())
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
