@@ -53,29 +53,20 @@ func TestResolveWorkdir_FlagBeatsEnvBeatsDefault(t *testing.T) {
 	t.Setenv("DIFFAH_WORKDIR", filepath.Join(outputDir, "from-env"))
 
 	// 1. Flag wins
-	got, err := resolveWorkdir("from-flag", outputPath)
-	if err != nil {
-		t.Fatalf("resolveWorkdir(flag): %v", err)
-	}
+	got := resolveWorkdir("from-flag", outputPath)
 	if got != "from-flag" {
 		t.Fatalf("flag should win: got %q", got)
 	}
 
 	// 2. Env wins when flag empty
-	got, err = resolveWorkdir("", outputPath)
-	if err != nil {
-		t.Fatalf("resolveWorkdir(env): %v", err)
-	}
+	got = resolveWorkdir("", outputPath)
 	if got != filepath.Join(outputDir, "from-env") {
 		t.Fatalf("env should win: got %q", got)
 	}
 
 	// 3. Default = <outputDir>/.diffah-tmp/<random>
 	t.Setenv("DIFFAH_WORKDIR", "")
-	got, err = resolveWorkdir("", outputPath)
-	if err != nil {
-		t.Fatalf("resolveWorkdir(default): %v", err)
-	}
+	got = resolveWorkdir("", outputPath)
 	wantPrefix := filepath.Join(outputDir, ".diffah-tmp") + string(os.PathSeparator)
 	if !strings.HasPrefix(got, wantPrefix) {
 		t.Fatalf("default should be under %q, got %q", wantPrefix, got)
@@ -84,10 +75,7 @@ func TestResolveWorkdir_FlagBeatsEnvBeatsDefault(t *testing.T) {
 
 func TestResolveWorkdir_EmptyOutputPathFallsBackToTempDir(t *testing.T) {
 	t.Setenv("DIFFAH_WORKDIR", "")
-	got, err := resolveWorkdir("", "")
-	if err != nil {
-		t.Fatalf("resolveWorkdir(empty): %v", err)
-	}
+	got := resolveWorkdir("", "")
 	// Shared internal/workdir places the dash-prefixed siblings of os.TempDir
 	// when no hint is provided, rather than the .diffah-tmp/<random> subdir
 	// pattern used when a hint is present.

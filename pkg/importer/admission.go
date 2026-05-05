@@ -16,10 +16,7 @@
 package importer
 
 import (
-	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 
 	"github.com/opencontainers/go-digest"
 
@@ -27,60 +24,6 @@ import (
 	"github.com/leosocy/diffah/pkg/diff/errs"
 	"github.com/leosocy/diffah/pkg/exporter"
 )
-
-// userError is an importer-package error that carries an errs.Category
-// and a remediation hint, satisfying errs.Categorized and errs.Advised
-// for the cmd/ exit-code mapper. Mirrors pkg/exporter.userError; the two
-// stay duplicated to keep pkg/importer ⊥ pkg/exporter at the package
-// boundary (the dependency arrow in this codebase already points
-// importer → exporter for the RSS table; importing the type would
-// reverse it for shared error machinery).
-type userError struct {
-	cat  errs.Category
-	msg  string
-	hint string
-}
-
-var (
-	_ errs.Categorized = (*userError)(nil)
-	_ errs.Advised     = (*userError)(nil)
-)
-
-func (e *userError) Error() string           { return e.msg }
-func (e *userError) Category() errs.Category { return e.cat }
-func (e *userError) NextAction() string      { return e.hint }
-
-// extractLayerDigests reads the per-image target manifest from disk and
-// returns its layer digests. Tolerates both OCI v1 and Docker schema-2
-// manifests because both store layers under the same JSON shape.
-//
-// Returns the underlying os/json error wrapped with the manifest digest
-// for context; the caller decides whether to treat parse failures as
-// per-image failures (preserving sibling progress) or fatal.
-func extractLayerDigests(img diff.ImageEntry, blobDir string) ([]digest.Digest, error) {
-	mfDigest := img.Target.ManifestDigest
-	path := filepath.Join(blobDir, mfDigest.Algorithm().String(), mfDigest.Encoded())
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("read target manifest %s: %w", mfDigest, err)
-	}
-	var m struct {
-		Layers []struct {
-			Digest digest.Digest `json:"digest"`
-		} `json:"layers"`
-	}
-	if err := json.Unmarshal(raw, &m); err != nil {
-		return nil, fmt.Errorf("parse target manifest %s: %w", mfDigest, err)
-	}
-	if len(m.Layers) == 0 {
-		return nil, fmt.Errorf("target manifest %s has no layers", mfDigest)
-	}
-	out := make([]digest.Digest, 0, len(m.Layers))
-	for _, l := range m.Layers {
-		out = append(out, l.Digest)
-	}
-	return out, nil
-}
 
 // estimatePerImageRSS returns the conservative peak RSS the apply pipeline
 // will hold for one image. It walks every layer in the image's target
@@ -105,9 +48,9 @@ func estimatePerImageRSS(
 	blobs map[digest.Digest]diff.BlobEntry,
 	userWindowLog int,
 ) (int64, error) {
-	layers, err := extractLayerDigests(img, blobDir)
+	layers, err := readManifestLayers(blobDir, img.Target.ManifestDigest)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("read target manifest %s: %w", img.Target.ManifestDigest, err)
 	}
 	var maxEst int64
 	for _, ld := range layers {
@@ -153,12 +96,12 @@ func checkSingleImageFitsInBudget(
 			return err
 		}
 		if est > memBudget {
-			return &userError{
-				cat: errs.CategoryUser,
-				msg: fmt.Sprintf(
+			return &errs.UserError{
+				Cat: errs.CategoryUser,
+				Msg: fmt.Sprintf(
 					"image %q requires %d byte(s) of admission budget; --memory-budget is %d",
 					img.Name, est, memBudget),
-				hint: "increase --memory-budget or set --memory-budget=0 to disable admission",
+				Hint: "increase --memory-budget or set --memory-budget=0 to disable admission",
 			}
 		}
 	}

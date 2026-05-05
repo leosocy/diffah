@@ -18,7 +18,7 @@ import (
 // writeFakeManifest synthesizes a minimal OCI-shaped manifest containing
 // the given layer digests and writes it to <blobDir>/<algo>/<encoded>,
 // returning the manifest's own digest. The shape matches what the real
-// extract step puts on disk and is what extractLayerDigests parses.
+// extract step puts on disk and is what readManifestLayers parses.
 func writeFakeManifest(t *testing.T, blobDir string, layerDigests []digest.Digest) digest.Digest {
 	t.Helper()
 

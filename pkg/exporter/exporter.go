@@ -93,22 +93,6 @@ type ImageStats struct {
 	ArchiveSize  int64
 }
 
-// userError is an exporter-package error that carries an errs.Category
-// and a remediation hint, satisfying errs.Categorized and errs.Advised
-// for the cmd/ exit-code mapper.
-type userError struct {
-	cat  errs.Category
-	msg  string
-	hint string
-}
-
-var _ errs.Categorized = (*userError)(nil)
-var _ errs.Advised = (*userError)(nil)
-
-func (e *userError) Error() string           { return e.msg }
-func (e *userError) Category() errs.Category { return e.cat }
-func (e *userError) NextAction() string      { return e.hint }
-
 type builtBundle struct {
 	plans []*pairPlan
 	pool  *blobPool
@@ -195,12 +179,12 @@ func checkSingleLayerFitsInBudget(plans []*pairPlan, windowLog int, memBudget in
 		}
 	}
 	if maxEst > memBudget {
-		return &userError{
-			cat: errs.CategoryUser,
-			msg: fmt.Sprintf(
+		return &errs.UserError{
+			Cat: errs.CategoryUser,
+			Msg: fmt.Sprintf(
 				"layer %s requires %d byte(s) of admission budget; --memory-budget is %d",
 				offendingDigest, maxEst, memBudget),
-			hint: "increase --memory-budget or reduce --zstd-window-log",
+			Hint: "increase --memory-budget or reduce --zstd-window-log",
 		}
 	}
 	return nil

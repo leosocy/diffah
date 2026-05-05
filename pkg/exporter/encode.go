@@ -9,14 +9,14 @@ import (
 
 	"github.com/opencontainers/go-digest"
 
+	"github.com/leosocy/diffah/internal/admission"
 	"github.com/leosocy/diffah/pkg/diff"
 	"github.com/leosocy/diffah/pkg/progress"
 )
 
 // encodeOptions holds all tunables threaded from Options into the encode
-// pipeline. Using a struct instead of positional args keeps function signatures
-// within the 4-parameter hard limit from CLAUDE.md and makes PR 6's addition
-// of MemoryBudget non-breaking.
+// pipeline. Using a struct instead of positional args keeps function
+// signatures within the 4-parameter hard limit from CLAUDE.md.
 type encodeOptions struct {
 	Mode         string
 	Fingerprint  Fingerprinter
@@ -30,18 +30,18 @@ type encodeOptions struct {
 }
 
 // encodeShipped streams every shipped target layer through the encoder
-// pipeline and writes the result into pool. PR-3 splits the work into
-// two phases driven by bounded worker pools:
+// pipeline and writes the result into pool. The work runs in two phases
+// driven by bounded worker pools:
 //
 //   - E1: prime baselineSpool for the union of distinct baseline layers
 //     across all pairs (in parallel; singleflight collapses duplicate
 //     fetches). Blobs are streamed to <workdir>/baselines/<digest>.
-//     priming uses workerPool — no per-task RSS estimate.
+//     Priming uses a plain WorkerPool — no per-task RSS estimate.
 //   - E2: per (pair, shipped) tuple, spool the target to disk via spoolBlob
 //     (write-tmp + atomic rename) and run the planner against the primed
 //     spool, then adopt the winning path into the blob pool via
-//     pool.addEntryFromPath (also in parallel).
-//     encodes use encodePool with admission gates (workerSem + memSem).
+//     pool.addEntryFromPath. Encodes run under an AdmissionPool with
+//     worker + memory gates.
 //
 // Output bytes are byte-identical across worker counts because:
 //   - blobPool is content-addressed and first-write-wins
@@ -144,7 +144,7 @@ func encodeTargets(
 		}
 	}
 
-	encPool := newEncodePool(ctx, opts.Workers, opts.MemoryBudget)
+	encPool := admission.NewAdmissionPool(ctx, opts.Workers, opts.MemoryBudget)
 	for _, p := range pairs {
 		// Each pair builds its own Planner that defers all baseline reads
 		// to the shared spool. Phase E1 has already primed every digest in
@@ -177,7 +177,7 @@ func encodeTargets(
 				continue
 			}
 			est := EstimateRSSForWindowLog(ResolveWindowLog(opts.WindowLog, s.Size))
-			encPool.Submit(s.Digest, est, func() error {
+			encPool.Submit(string(s.Digest), est, func() error {
 				return encodeOneShipped(ctx, pool, p, s, planner, opts.Mode, opts.Reporter,
 					opts.Candidates, targetsDir, blobsDir)
 			})

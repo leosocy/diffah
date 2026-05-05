@@ -3,7 +3,6 @@ package importer
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"hash"
@@ -40,10 +39,9 @@ const (
 // blobs come from a wrapped baseline source. Every served blob is digest-
 // verified before return.
 //
-// Streaming I/O (PR4): serveFull returns a path-backed *verifyingReadCloser,
-// servePatch shells out to zstdpatch.DecodeStream and returns a
-// *verifyingReadCloser around the scratch file (cleaned up on Close).
-// workdir is the per-Import scratch root (parent: <workdir>/scratch/<image>).
+// scratchDir is <workdir>/scratch/<image>; composeImage creates it once
+// per image so servePatch can do per-blob CreateTemp without paying a
+// MkdirAll syscall on every patched layer.
 type bundleImageSource struct {
 	blobDir      string
 	manifest     []byte
@@ -53,7 +51,7 @@ type bundleImageSource struct {
 	imageName    string
 	ref          types.ImageReference
 	spool        *BaselineSpool
-	workdir      string
+	scratchDir   string
 }
 
 var _ types.ImageSource = (*bundleImageSource)(nil)
@@ -68,21 +66,15 @@ func (s *bundleImageSource) GetManifest(_ context.Context, instance *digest.Dige
 	return s.manifest, s.manifestMime, nil
 }
 
-// HasThreadSafeGetBlob returns true unconditionally as of PR5.
+// HasThreadSafeGetBlob returns true unconditionally.
 //
-// PR3 spool (singleflight + atomic rename) + PR4 per-call scratch
-// CreateTemp suffix + PR4 path-backed verifyingReadCloser make both
-// serveFull and servePatch safe under concurrent same-digest GetBlob
-// within the same image source. PR5's importEachImage drives parallel
-// image applies through copy.Image which now relies on this flag.
-//
-// Note: this does NOT delegate to s.baseline.HasThreadSafeGetBlob().
-// copy.Image consults this flag *per-source* — when the bundle source
-// returns true, it may concurrently call GetBlob on the bundle, but the
-// underlying baseline calls (made through fetchVerifiedBaselineBlob and
-// the spool fetch closure) are still serialized by BaselineSpool's
-// singleflight Do — only one underlying baseline GetBlob runs at a time
-// per digest, regardless of the baseline's own thread-safety.
+// Concurrent same-digest GetBlob is safe because the spool publishes via
+// atomic rename under singleflight, the per-call scratch CreateTemp suffix
+// gives each patch its own output path, and verifyingReadCloser owns its
+// *os.File and scratch file lifetime. This does NOT delegate to
+// s.baseline.HasThreadSafeGetBlob() — concurrent baseline fetches are
+// serialized through the spool's singleflight regardless of the baseline's
+// own thread-safety.
 func (s *bundleImageSource) HasThreadSafeGetBlob() bool {
 	return true
 }
@@ -141,7 +133,7 @@ func (s *bundleImageSource) serveFull(d digest.Digest) (io.ReadCloser, int64, er
 		return nil, 0, fmt.Errorf("stat full blob %s: %w", d, err)
 	}
 	return &verifyingReadCloser{
-		f: f, expected: d, hasher: sha256.New(),
+		f: f, expected: d, hasher: d.Algorithm().Hash(),
 		imageName: s.imageName, kind: kindShipped,
 	}, st.Size(), nil
 }
@@ -155,9 +147,8 @@ func (s *bundleImageSource) serveFull(d digest.Digest) (io.ReadCloser, int64, er
 //
 // The cache parameter is forwarded into the baseline GetBlob fetch
 // closure unchanged: the docker registry transport requires a non-nil
-// types.BlobInfoCache to construct its per-blob lookup state, so passing
-// nil here panics inside containers-image. The spool dedups by digest
-// and is unrelated to this cache.
+// types.BlobInfoCache to construct its per-blob lookup state. The spool
+// dedups by digest and is unrelated to this cache.
 //
 // Errors:
 //   - baseline blob-not-found → *ErrMissingPatchSource (B1, CategoryContent)
@@ -189,18 +180,10 @@ func (s *bundleImageSource) servePatch(
 		return nil, 0, fmt.Errorf("baseline spool %s: %w", entry.PatchFromDigest, err)
 	}
 
-	scratchDir := filepath.Join(s.workdir, "scratch", s.imageName)
-	if err := os.MkdirAll(scratchDir, 0o700); err != nil {
-		return nil, 0, fmt.Errorf("mkdir scratch for %s: %w", target, err)
-	}
-	// Per-call uniqueness via CreateTemp so two concurrent GetBlob() for
-	// the same target digest don't race on a shared output path. The
-	// upstream copier (copy.Image) is currently serial per manifest, but
-	// HasThreadSafeGetBlob already delegates true for registry baselines,
-	// so any future caller that fans out same-image blobs in parallel
-	// would otherwise truncate-while-reading. Per-call temps remove the
-	// hazard entirely; verifyingReadCloser.Close removes its own temp.
-	tmp, err := os.CreateTemp(scratchDir, target.Encoded()+"-*")
+	// Per-call uniqueness via CreateTemp so two concurrent same-digest
+	// GetBlob calls don't race on a shared output path; verifyingReadCloser
+	// owns the temp file lifetime via its Close.
+	tmp, err := os.CreateTemp(s.scratchDir, target.Encoded()+"-*")
 	if err != nil {
 		return nil, 0, fmt.Errorf("create scratch tmp for %s: %w", target, err)
 	}
@@ -231,7 +214,7 @@ func (s *bundleImageSource) servePatch(
 	}
 	committed = true
 	return &verifyingReadCloser{
-		f: f, expected: target, hasher: sha256.New(),
+		f: f, expected: target, hasher: target.Algorithm().Hash(),
 		imageName: s.imageName, kind: kindAssembled, scratchPath: scratchPath,
 	}, st.Size(), nil
 }
@@ -268,7 +251,7 @@ func (r *verifyingReadCloser) Read(p []byte) (int, error) {
 		_, _ = r.hasher.Write(p[:n])
 	}
 	if errors.Is(err, io.EOF) {
-		got := digest.NewDigestFromBytes(digest.SHA256, r.hasher.Sum(nil))
+		got := digest.NewDigest(r.expected.Algorithm(), r.hasher)
 		if got != r.expected {
 			return n, r.mismatchErr(got)
 		}
@@ -312,10 +295,10 @@ func (r *verifyingReadCloser) Close() error {
 // blob info cache and is forwarded to s.baseline.GetBlob unchanged — it is
 // a separate concern from s.spool.
 //
-// PR4 streamed servePatch directly off the spool path (no longer going
-// through this helper). The remaining caller is the baseline-delegate
-// branch in GetBlob, which still returns []byte; that branch is the next
-// streaming candidate but is left as-is until a later PR.
+// TODO: this helper still slurps the spooled file fully into memory via
+// os.ReadFile so multi-GiB baseline-only-reuse blobs round-trip through
+// RAM. Streaming the io.ReadCloser straight off the spool path is the
+// follow-up; spec §13 acceptance is closed by the disk spool itself.
 //
 // Re-wraps any *diff.ErrBaselineBlobDigestMismatch returned by the spool
 // to repopulate ImageName: the spool is per-Import (image-agnostic) but
@@ -384,8 +367,10 @@ func (r *staticSourceRef) DeleteImage(_ context.Context, _ *types.SystemContext)
 // streams the result to destRef via copy.Image. rb.Src must already be open —
 // this function does not open a new baseline source and does not close rb.Src.
 //
-// workdir is the per-Import scratch root (parent: <workdir>/scratch/<image>
-// for patch decoding); cleanup is owned by Import via the workdir defer.
+// workdir is the per-Import scratch root; composeImage creates
+// <workdir>/scratch/<image> once so patched-layer GetBlob calls reuse it
+// without a per-blob MkdirAll syscall. Cleanup is owned by Import via the
+// workdir defer.
 func composeImage(
 	ctx context.Context,
 	img diff.ImageEntry,
@@ -404,6 +389,11 @@ func composeImage(
 		return fmt.Errorf("read target manifest %s: %w", img.Target.ManifestDigest, err)
 	}
 
+	scratchDir := filepath.Join(workdir, "scratch", img.Name)
+	if err := os.MkdirAll(scratchDir, 0o700); err != nil {
+		return fmt.Errorf("mkdir scratch for %s: %w", img.Name, err)
+	}
+
 	src := &bundleImageSource{
 		blobDir:      bundle.blobDir,
 		manifest:     mfBytes,
@@ -412,7 +402,7 @@ func composeImage(
 		baseline:     rb.Src, // already open — DO NOT open a fresh one
 		imageName:    img.Name,
 		spool:        spool,
-		workdir:      workdir,
+		scratchDir:   scratchDir,
 	}
 	src.ref = &staticSourceRef{src: src}
 
@@ -434,10 +424,10 @@ func composeImage(
 		// estimate (max-across-layers) holds for thread-safe-PutBlob
 		// destinations (dir:/oci:/docker://). Without this, copy.Image
 		// fans out 6 concurrent layer copies by default once the
-		// bundle's HasThreadSafeGetBlob flips to true (PR5), and the
-		// real peak RSS becomes min(6, layers) × max-per-layer, silently
-		// blowing through --memory-budget. Image-level parallelism is
-		// already provided by importEachImage's AdmissionPool.
+		// bundle's HasThreadSafeGetBlob flips to true, and the real peak
+		// RSS becomes min(6, layers) × max-per-layer, silently blowing
+		// through --memory-budget. Image-level parallelism is already
+		// provided by importEachImage's AdmissionPool.
 		MaxParallelDownloads: 1,
 	}
 	if destRef.Transport().Name() == FormatDir {

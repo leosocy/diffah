@@ -52,7 +52,7 @@ func TestBundleImageSource_ConcurrentSameDigestReadersAreByteIdentical(t *testin
 				d: {Encoding: diff.EncodingFull, Size: int64(len(payload))},
 			},
 		},
-		workdir: t.TempDir(),
+		scratchDir: t.TempDir(),
 	}
 
 	const N = 8
