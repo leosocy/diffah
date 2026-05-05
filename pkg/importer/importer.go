@@ -257,6 +257,30 @@ func importEachImage(
 		return report
 	}
 
+	// Serial path: with Workers<=1 the admission pool's errgroup.Go
+	// scheduling is non-deterministic — observable order of the shared
+	// BaselineSpool's first-touches depends on which task's goroutine
+	// reaches workerSem.Acquire first, not on submission order. Run
+	// inline in applyList order to give the spool a deterministic
+	// view of who fetches first. checkSingleImageFitsInBudget already
+	// capped each image at the budget, so a single-task-at-a-time
+	// sequence cannot exceed it.
+	if opts.Workers <= 1 {
+		for _, name := range applyList {
+			if err := ctx.Err(); err != nil {
+				break
+			}
+			r := tryApplyOneImageSync(ctx, name, bundle,
+				resolvedByName, outputs, opts, spool)
+			report.Results = append(report.Results, r)
+			if opts.Strict && r.Status != ApplyImageOK {
+				break
+			}
+		}
+		sortResultsByApplyList(&report, applyList)
+		return report
+	}
+
 	pool := admission.NewAdmissionPool(ctx, opts.Workers, opts.MemoryBudget)
 	var mu sync.Mutex
 	for _, name := range applyList {
@@ -276,6 +300,31 @@ func importEachImage(
 	// can) sort to the end in insertion order.
 	sortResultsByApplyList(&report, applyList)
 	return report
+}
+
+// tryApplyOneImageSync is the synchronous twin of submitOneImage's
+// closure body: precheck the image (sidecar lookup, manifest parse), then
+// run applyOneImage. Used by the Workers<=1 serial path so submission
+// order maps cleanly onto execution order.
+func tryApplyOneImageSync(
+	ctx context.Context, name string, bundle *extractedBundle,
+	resolvedByName map[string]resolvedBaseline, outputs map[string]string,
+	opts Options, spool *BaselineSpool,
+) ApplyImageResult {
+	img, found := findImageByName(bundle.sidecar.Images, name)
+	if !found {
+		return ApplyImageResult{
+			ImageName: name, Status: ApplyImageFailedCompose,
+			Err: fmt.Errorf("image %q not found in sidecar", name),
+		}
+	}
+	if _, eerr := estimatePerImageRSS(img, bundle.blobDir,
+		bundle.sidecar.Blobs, opts.WindowLog); eerr != nil {
+		return ApplyImageResult{
+			ImageName: name, Status: ApplyImageFailedCompose, Err: eerr,
+		}
+	}
+	return applyOneImage(ctx, name, bundle, resolvedByName, outputs, opts, spool)
 }
 
 // submitOneImage handles the per-image pre-flight + admission Submit. It is
