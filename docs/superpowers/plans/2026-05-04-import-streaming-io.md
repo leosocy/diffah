@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Amendments live in [`../lessons-learned/2026-05-04-import-streaming-lessons.md`](../lessons-learned/2026-05-04-import-streaming-lessons.md)** — read it before implementing any PR in this series. Plan body stays static; amendments evolve there.
+
 **Goal:** Mirror Phase 4's streaming pipeline on the importer side — peak `Import()` RSS ≤ `--memory-budget` (default 8 GiB) regardless of bundle size, plus per-image apply parallelism gated by an admission controller, plus three G7 acceptance items (I4/I5/I6) committed to lock the production-readiness contract.
 
 **Architecture:** Lift `pkg/exporter/{admission,pool,workerpool}` common parts to `internal/admission/` (worker pool + dual-semaphore admission + singleflight + worker-boundary panic recover); introduce `pkg/importer/baselinespool.go` (disk-backed, singleflight-deduped, atomic-rename committed) and rewrite `bundleImageSource.serveFull/servePatch` on file paths via `zstdpatch.DecodeStream`; replace serial `importEachImage` with `applyImagesPool`; flip `HasThreadSafeGetBlob` to `true` once concurrent-reader tests are green. Sidecar parser gains a `DisallowUnknownFields` probe + `slog.Debug`. A windowLog≥28 fail-closed regression and a Phase-3 fixture pin land in PR6 alongside an apply-side scale-bench step.
