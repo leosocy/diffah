@@ -139,6 +139,62 @@ the breadcrumb.
 (future), revisit `cmd/unbundle_preflight_integration_test.go`'s
 `--workers=1` pins and remove them.
 
+## Post-PR-6 amendments
+
+**A11. I5 windowLog fail-closed test does NOT exercise the production
+decode path.** PR6 ships `pkg/importer/decode_windowlog_test.go` with a
+`zstd.WithDecoderMaxWindow(1<<27)` cap, but the production decode path
+in `internal/zstdpatch/fullgo.go::DecodeFull` uses `1<<31` and the patch
+path (`stream.go`) shells out to `zstd --long=31`. **Neither caps at
+1<<27 today.** The test locks in DEFENSIVE behavior for a hypothetical
+future caller that calls `zstd.NewReader` without an explicit cap
+override; it does NOT prove that today's importer rejects windowLog≥28
+frames.
+**How to apply:** Spec §13 acceptance #8 should be considered OPEN until
+either (a) the production caps are tightened to align with the test, or
+(b) the spec is amended to scope the I5 contract to "defensive
+in-process klauspost cap." A follow-up PR is needed; the I4 / scale-
+bench / I6 follow-ups should be bundled if they cluster naturally.
+
+**A12. I5 windowLog range scoped to {28, 29}, not {28-31}.**
+klauspost/compress's encoder hard-caps `WithWindowSize` at `1<<29`
+(`MaxWindowSize` constant). Frames declaring wl=30 or wl=31 cannot be
+synthesized in-process via the klauspost encoder. The test exercises
+both wl=28 (2× cap) and wl=29 (4× cap), which is sufficient to prove
+the rejection path; wl ∈ {30, 31} verification would require shelling
+out to the zstd CLI binary or hand-crafting a frame header — neither is
+worth the complexity.
+**How to apply:** Don't write tests that drive klauspost beyond
+`MaxWindowSize`. If a future regression requires verifying wl=30/31
+specifically, use the zstd CLI with a temp-file fixture.
+
+**A13. Apply scale-bench step in nightly CI is a no-op until follow-up
+lands.** PR6 wires `.github/workflows/scale-bench.yml` with an "Apply
+(scale)" step, but `TestImport_ScaleApply2GiB` `t.Skip`s its body until
+the apply scale-bench fixture infrastructure (fixture builder
+`buildScale2GiBFixture` + in-process `runImportInProcess` helper) lands
+in a follow-up. The workflow log will read "PASS: apply peak RSS X KiB
+<= 8 GiB ceiling" but that proof is meaningless — the skipped test
+allocates negligible RSS, so the guard trivially passes.
+**How to apply:** Spec §13 acceptance #10 is OPEN. Follow-up PR must
+land both the fixture builder and the in-process import helper. The
+step now carries a deferred-body comment so on-call review of the
+nightly log isn't misled. Until that follow-up ships, treat the green
+nightly as silence on apply RSS, not a guarantee.
+
+**A14. I6 (Phase-3 fixture round-trip) deferred entirely.** PR6 did not
+ship `testdata/fixtures/phase3-bundle-min.tar`, the generator script,
+or `pkg/importer/compose_phase3_test.go`. The Phase-3-vintage bundle
+generator requires synthesizing a v0.1.0-shape diffah bundle directly
+(no shell-out to a frozen binary), which means encoding precise
+historical bundle layout knowledge that the team has not validated.
+**How to apply:** Spec §13 acceptance #9 is OPEN. Before implementing,
+check `git log --all -- testdata/fixtures/` and `git log v0.1.0..` to
+locate the historical sidecar shape. The lookup may turn up that v0.1.0
+shipped without all the schema fields current `diff.Sidecar` requires —
+the generator may need to mark legacy fields with `omitempty` or the
+test may need a tolerant parse path.
+
 ---
 
 (End of current amendments. Future PRs append below.)
