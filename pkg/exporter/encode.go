@@ -205,7 +205,7 @@ func encodeOneShipped(
 	// declared s.Size. Cap progress reports to s.Size so the bar stops at
 	// 100 % instead of overshooting.
 	if _, err := spoolBlob(ctx, p.TargetImageRef, p.SystemContext, s.Digest, targetPath,
-		cappedWriter(s.Size, layer.Written)); err != nil {
+		progress.CappedWriter(s.Size, layer.Written)); err != nil {
 		// spoolBlob's committed-sentinel already cleaned up its tmp file; the
 		// rename never happened, so targetPath does not exist. No Remove needed.
 		layer.Fail(err)
@@ -244,22 +244,6 @@ func encodeOneShipped(
 	}
 	layer.Done()
 	return nil
-}
-
-// cappedWriter returns an onChunk callback that forwards up to total bytes to
-// sink, clamping chunks that would cross the cap and dropping anything after.
-func cappedWriter(total int64, sink func(int64)) func(int64) {
-	remaining := total
-	return func(n int64) {
-		if remaining <= 0 {
-			return
-		}
-		if n > remaining {
-			n = remaining
-		}
-		sink(n)
-		remaining -= n
-	}
 }
 
 func blobEntryFromPlanner(entry diff.BlobRef) diff.BlobEntry {

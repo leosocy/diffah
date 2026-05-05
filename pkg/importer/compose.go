@@ -3,8 +3,10 @@ package importer
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"os"
 	"path/filepath"
@@ -37,8 +39,12 @@ const (
 // one resolved image inside a bundle. Shipped blobs come from the extracted
 // bundle's blobs/ directory (decoded on the fly for encoding=patch); required
 // blobs come from a wrapped baseline source. Every served blob is digest-
-// verified before return. No tmpdir is ever written to — copy.Image reads
-// via GetBlob, which returns in-memory bytes.
+// verified before return.
+//
+// Streaming I/O (PR4): serveFull returns a path-backed *verifyingReadCloser,
+// servePatch shells out to zstdpatch.DecodeStream and returns a
+// *verifyingReadCloser around the scratch file (cleaned up on Close).
+// workdir is the per-Import scratch root (parent: <workdir>/scratch/<image>).
 type bundleImageSource struct {
 	blobDir      string
 	manifest     []byte
@@ -48,6 +54,7 @@ type bundleImageSource struct {
 	imageName    string
 	ref          types.ImageReference
 	spool        *BaselineSpool
+	workdir      string
 }
 
 var _ types.ImageSource = (*bundleImageSource)(nil)
@@ -104,29 +111,55 @@ func (s *bundleImageSource) GetBlob(
 	return nil, 0, fmt.Errorf("unknown encoding %q for blob %s", entry.Encoding, info.Digest)
 }
 
+// serveFull streams a shipped full-encoded blob from disk. Returns a
+// *verifyingReadCloser that hashes bytes during Read and surfaces
+// *diff.ErrShippedBlobDigestMismatch on EOF if the running sha256 does
+// not match d. The reader owns the *os.File; closing it closes the file.
 func (s *bundleImageSource) serveFull(d digest.Digest) (io.ReadCloser, int64, error) {
 	path := filepath.Join(s.blobDir, d.Algorithm().String(), d.Encoded())
-	data, err := os.ReadFile(path)
+	f, err := os.Open(path)
 	if err != nil {
-		return nil, 0, fmt.Errorf("read full blob %s: %w", d, err)
+		return nil, 0, fmt.Errorf("open full blob %s: %w", d, err)
 	}
-	if got := digest.FromBytes(data); got != d {
-		return nil, 0, &diff.ErrShippedBlobDigestMismatch{
-			ImageName: s.imageName, Digest: d.String(), Got: got.String(),
-		}
+	st, err := f.Stat()
+	if err != nil {
+		_ = f.Close()
+		return nil, 0, fmt.Errorf("stat full blob %s: %w", d, err)
 	}
-	return io.NopCloser(bytes.NewReader(data)), int64(len(data)), nil
+	return &verifyingReadCloser{
+		f: f, expected: d, hasher: sha256.New(),
+		imageName: s.imageName, kind: kindShipped,
+	}, st.Size(), nil
 }
 
+// servePatch reconstructs a patched blob via zstdpatch.DecodeStream and
+// returns a *verifyingReadCloser around the scratch output file. The
+// patch sits at <blobDir>/<algo>/<digest> from the bundle extraction;
+// the patch-from baseline is materialized through the per-Import spool
+// (singleflight + atomic rename + digest-verify) and consumed directly
+// via DecodeStream — no in-memory buffering.
+//
+// The cache parameter is forwarded into the baseline GetBlob fetch
+// closure unchanged: the docker registry transport requires a non-nil
+// types.BlobInfoCache to construct its per-blob lookup state, so passing
+// nil here panics inside containers-image. The spool dedups by digest
+// and is unrelated to this cache.
+//
+// Errors:
+//   - baseline blob-not-found → *ErrMissingPatchSource (B1, CategoryContent)
+//   - baseline digest mismatch → *diff.ErrBaselineBlobDigestMismatch
+//     (re-wrapped with ImageName, mirroring fetchVerifiedBaselineBlob)
+//   - decode failure → fmt.Errorf wrap
+//   - on-EOF digest mismatch → *diff.ErrIntraLayerAssemblyMismatch
+//     (raised from verifyingReadCloser.Read at io.EOF)
 func (s *bundleImageSource) servePatch(
 	ctx context.Context, target digest.Digest, entry diff.BlobEntry, cache types.BlobInfoCache,
 ) (io.ReadCloser, int64, error) {
 	patchPath := filepath.Join(s.blobDir, target.Algorithm().String(), target.Encoded())
-	patchBytes, err := os.ReadFile(patchPath)
-	if err != nil {
-		return nil, 0, fmt.Errorf("read patch blob %s: %w", target, err)
-	}
-	baseBytes, err := s.fetchVerifiedBaselineBlob(ctx, entry.PatchFromDigest, cache)
+	refPath, err := s.spool.GetOrSpool(ctx, entry.PatchFromDigest, func() (io.ReadCloser, error) {
+		rc, _, gerr := s.baseline.GetBlob(ctx, types.BlobInfo{Digest: entry.PatchFromDigest}, cache)
+		return rc, gerr
+	})
 	if err != nil {
 		if isBlobNotFound(err) {
 			return nil, 0, &ErrMissingPatchSource{
@@ -135,34 +168,112 @@ func (s *bundleImageSource) servePatch(
 				PatchFromDigest: entry.PatchFromDigest,
 			}
 		}
-		return nil, 0, fmt.Errorf("fetch patch-from blob %s: %w", entry.PatchFromDigest, err)
+		var mismatch *diff.ErrBaselineBlobDigestMismatch
+		if errors.As(err, &mismatch) && mismatch.ImageName == "" {
+			mismatch.ImageName = s.imageName
+		}
+		return nil, 0, fmt.Errorf("baseline spool %s: %w", entry.PatchFromDigest, err)
 	}
-	//nolint:staticcheck // intentional: Decode is deprecated but retained for importer hot path; see deprecation comment.
-	out, err := zstdpatch.Decode(ctx, baseBytes, patchBytes)
-	if err != nil {
+
+	scratchPath := filepath.Join(s.workdir, "scratch", s.imageName, target.Encoded())
+	if err := os.MkdirAll(filepath.Dir(scratchPath), 0o700); err != nil {
+		return nil, 0, fmt.Errorf("mkdir scratch for %s: %w", target, err)
+	}
+	if _, err := zstdpatch.DecodeStream(ctx, refPath, patchPath, scratchPath); err != nil {
 		return nil, 0, fmt.Errorf("decode patch for %s: %w", target, err)
 	}
-	if got := digest.FromBytes(out); got != target {
-		return nil, 0, &diff.ErrIntraLayerAssemblyMismatch{
-			Digest: target.String(), Got: got.String(),
+	f, err := os.Open(scratchPath)
+	if err != nil {
+		return nil, 0, fmt.Errorf("open decoded %s: %w", target, err)
+	}
+	st, err := f.Stat()
+	if err != nil {
+		_ = f.Close()
+		return nil, 0, fmt.Errorf("stat decoded %s: %w", target, err)
+	}
+	return &verifyingReadCloser{
+		f: f, expected: target, hasher: sha256.New(),
+		imageName: s.imageName, kind: kindAssembled, scratchPath: scratchPath,
+	}, st.Size(), nil
+}
+
+// readerKind discriminates which sentinel verifyingReadCloser raises on a
+// post-Read digest mismatch: kindShipped for full bundle blobs (-> B-class
+// shipped-blob mismatch), kindAssembled for patch-decode outputs
+// (-> intra-layer assembly mismatch).
+type readerKind int
+
+const (
+	kindShipped readerKind = iota
+	kindAssembled
+)
+
+// verifyingReadCloser wraps an *os.File, accumulating sha256 on each Read.
+// At io.EOF it compares the running digest to expected and surfaces
+// *diff.ErrShippedBlobDigestMismatch (kindShipped) or
+// *diff.ErrIntraLayerAssemblyMismatch (kindAssembled) on mismatch. Close
+// closes the underlying file and (for kindAssembled) removes the scratch
+// path.
+type verifyingReadCloser struct {
+	f           *os.File
+	expected    digest.Digest
+	hasher      hash.Hash
+	imageName   string
+	kind        readerKind
+	scratchPath string // non-empty iff kind == kindAssembled
+}
+
+func (r *verifyingReadCloser) Read(p []byte) (int, error) {
+	n, err := r.f.Read(p)
+	if n > 0 {
+		_, _ = r.hasher.Write(p[:n])
+	}
+	if errors.Is(err, io.EOF) {
+		got := digest.NewDigestFromBytes(digest.SHA256, r.hasher.Sum(nil))
+		if got != r.expected {
+			return n, r.mismatchErr(got)
 		}
 	}
-	return io.NopCloser(bytes.NewReader(out)), int64(len(out)), nil
+	return n, err
+}
+
+func (r *verifyingReadCloser) mismatchErr(got digest.Digest) error {
+	switch r.kind {
+	case kindShipped:
+		return &diff.ErrShippedBlobDigestMismatch{
+			ImageName: r.imageName, Digest: r.expected.String(), Got: got.String(),
+		}
+	case kindAssembled:
+		return &diff.ErrIntraLayerAssemblyMismatch{
+			Digest: r.expected.String(), Got: got.String(),
+		}
+	}
+	return nil
+}
+
+func (r *verifyingReadCloser) Close() error {
+	err := r.f.Close()
+	if r.scratchPath != "" {
+		_ = os.Remove(r.scratchPath)
+	}
+	return err
 }
 
 // fetchVerifiedBaselineBlob reads `d` from the wrapped baseline source and
-// verifies its digest. Used both for patch-from references (Task 4) and for
-// blobs the sidecar did not ship (Task 5). Routed through s.spool so each
+// verifies its digest. Used for blobs the sidecar did not ship (the
+// baseline-only-reuse path in GetBlob). Routed through s.spool so each
 // distinct digest is fetched at most once per Import() call regardless of
-// how many shipped patches reference it or how many images in a multi-image
-// bundle share it; the on-disk spool also keeps RSS bounded vs the previous
-// in-memory cache.
+// how many images in a multi-image bundle share it; the on-disk spool also
+// keeps RSS bounded vs the previous in-memory cache.
 //
 // The cache types.BlobInfoCache parameter is the upstream containers-image
 // blob info cache and is forwarded to s.baseline.GetBlob unchanged — it is
-// a separate concern from s.spool. PR4 will rewrite serveFull/servePatch to
-// stream from disk; PR3 keeps the []byte return so this PR is purely a
-// backend swap.
+// a separate concern from s.spool.
+//
+// PR4 streamed servePatch directly off the spool path (no longer going
+// through this helper). The remaining caller is the baseline-delegate
+// branch in GetBlob, which still returns []byte; that branch is the next
+// streaming candidate but is left as-is until a later PR.
 //
 // Re-wraps any *diff.ErrBaselineBlobDigestMismatch returned by the spool
 // to repopulate ImageName: the spool is per-Import (image-agnostic) but
@@ -230,6 +341,9 @@ func (r *staticSourceRef) DeleteImage(_ context.Context, _ *types.SystemContext)
 // composeImage assembles a single image from bundle blobs + baseline and
 // streams the result to destRef via copy.Image. rb.Src must already be open —
 // this function does not open a new baseline source and does not close rb.Src.
+//
+// workdir is the per-Import scratch root (parent: <workdir>/scratch/<image>
+// for patch decoding); cleanup is owned by Import via the workdir defer.
 func composeImage(
 	ctx context.Context,
 	img diff.ImageEntry,
@@ -240,6 +354,7 @@ func composeImage(
 	allowConvert bool,
 	_ progress.Reporter, // hook site for per-blob pull/push progress; not yet wired
 	spool *BaselineSpool,
+	workdir string,
 ) error {
 	mfPath := filepath.Join(bundle.blobDir, img.Target.ManifestDigest.Algorithm().String(),
 		img.Target.ManifestDigest.Encoded())
@@ -256,6 +371,7 @@ func composeImage(
 		baseline:     rb.Src, // already open — DO NOT open a fresh one
 		imageName:    img.Name,
 		spool:        spool,
+		workdir:      workdir,
 	}
 	src.ref = &staticSourceRef{src: src}
 
