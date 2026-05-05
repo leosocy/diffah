@@ -56,7 +56,19 @@ func TestUnbundleCLI_PartialModeRecordsApplyTimeB2(t *testing.T) {
 		},
 	})
 
-	_, stderr, exit := runDiffahBin(t, bin, "unbundle", bundlePath, baselinesPath, outputsPath)
+	// --workers=1 pins serial execution. See buildTwoImageBundleWithB2's
+	// comment: the importer's shared BaselineSpool dedups blob fetches by
+	// digest across images, so if svc-a (with the complete baseline) ran
+	// concurrently with svc-b, svc-a's successful fetch of the shared
+	// reuse-layer digest would prime the spool and mask svc-b's B2. The
+	// "svc-b first" ordering trick from PR3 only works under serial; PR5's
+	// admission pool removes that ordering guarantee. Whether to enforce
+	// per-image baseline completeness in a multi-baseline scenario is a
+	// follow-up; this test continues to assert the per-image error path
+	// when serial ordering is preserved.
+	_, stderr, exit := runDiffahBin(t, bin, "unbundle",
+		"--workers", "1",
+		bundlePath, baselinesPath, outputsPath)
 
 	require.Equalf(t, 0, exit, "partial mode: exit = %d, want 0; stderr=%s", exit, stderr)
 	require.Containsf(t, stderr, "applied 1/2",
@@ -107,7 +119,11 @@ func TestUnbundleCLI_StrictAbortsOnFirstApplyFailure(t *testing.T) {
 		},
 	})
 
+	// --workers=1 pins serial execution; same rationale as
+	// TestUnbundleCLI_PartialModeRecordsApplyTimeB2: shared BaselineSpool
+	// would otherwise let svc-a satisfy svc-b's B2-trigger fetch.
 	_, stderr, exit := runDiffahBin(t, bin, "unbundle", "--strict",
+		"--workers", "1",
 		bundlePath, baselinesPath, outputsPath)
 
 	require.Equalf(t, 4, exit, "strict mode: exit = %d, want 4; stderr=%s", exit, stderr)

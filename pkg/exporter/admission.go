@@ -17,10 +17,14 @@ var rssEstimateByWindowLog = map[int]int64{
 	31: 4 << 30,
 }
 
-// estimateRSSForWindowLog returns the conservative peak RSS estimate for the
+// EstimateRSSForWindowLog returns the conservative peak RSS estimate for the
 // given windowLog. Unknown values fall back to the largest table entry so that
 // out-of-range inputs never under-count memory.
-func estimateRSSForWindowLog(wl int) int64 {
+//
+// Exported so the importer-side admission controller can reuse the same
+// per-encode RSS envelope when sizing concurrent image applies (the
+// patch-decode side hits the same zstd window cost as the encode side).
+func EstimateRSSForWindowLog(wl int) int64 {
 	if v, ok := rssEstimateByWindowLog[wl]; ok {
 		return v
 	}

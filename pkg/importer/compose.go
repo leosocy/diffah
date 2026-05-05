@@ -68,8 +68,23 @@ func (s *bundleImageSource) GetManifest(_ context.Context, instance *digest.Dige
 	return s.manifest, s.manifestMime, nil
 }
 
+// HasThreadSafeGetBlob returns true unconditionally as of PR5.
+//
+// PR3 spool (singleflight + atomic rename) + PR4 per-call scratch
+// CreateTemp suffix + PR4 path-backed verifyingReadCloser make both
+// serveFull and servePatch safe under concurrent same-digest GetBlob
+// within the same image source. PR5's importEachImage drives parallel
+// image applies through copy.Image which now relies on this flag.
+//
+// Note: this does NOT delegate to s.baseline.HasThreadSafeGetBlob().
+// copy.Image consults this flag *per-source* — when the bundle source
+// returns true, it may concurrently call GetBlob on the bundle, but the
+// underlying baseline calls (made through fetchVerifiedBaselineBlob and
+// the spool fetch closure) are still serialized by BaselineSpool's
+// singleflight Do — only one underlying baseline GetBlob runs at a time
+// per digest, regardless of the baseline's own thread-safety.
 func (s *bundleImageSource) HasThreadSafeGetBlob() bool {
-	return s.baseline.HasThreadSafeGetBlob()
+	return true
 }
 
 func (s *bundleImageSource) GetSignatures(
@@ -415,6 +430,15 @@ func composeImage(
 		SourceCtx:      sysctx,
 		DestinationCtx: sysctx,
 		ReportWriter:   io.Discard,
+		// Force serial intra-image layer copies so the per-image RSS
+		// estimate (max-across-layers) holds for thread-safe-PutBlob
+		// destinations (dir:/oci:/docker://). Without this, copy.Image
+		// fans out 6 concurrent layer copies by default once the
+		// bundle's HasThreadSafeGetBlob flips to true (PR5), and the
+		// real peak RSS becomes min(6, layers) × max-per-layer, silently
+		// blowing through --memory-budget. Image-level parallelism is
+		// already provided by importEachImage's AdmissionPool.
+		MaxParallelDownloads: 1,
 	}
 	if destRef.Transport().Name() == FormatDir {
 		copyOpts.PreserveDigests = true
