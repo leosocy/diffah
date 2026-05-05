@@ -34,6 +34,14 @@ func TestConfigDefaults_MatchCobraFlagDefaults(t *testing.T) {
 		{"candidates", "3", newDiffCommand},
 		{"workdir", d.Workdir, newDiffCommand},
 		{"memory-budget", d.MemoryBudget, newDiffCommand},
+		// apply-side spool flags
+		{"workdir", d.ApplyWorkdir, newApplyCommand},
+		{"memory-budget", d.ApplyMemoryBudget, newApplyCommand},
+		{"workers", "8", newApplyCommand},
+		// unbundle-side spool flags
+		{"workdir", d.ApplyWorkdir, newUnbundleCommand},
+		{"memory-budget", d.ApplyMemoryBudget, newUnbundleCommand},
+		{"workers", "8", newUnbundleCommand},
 	}
 
 	for _, c := range cases {
@@ -54,4 +62,5 @@ func TestConfigDefaults_MatchCobraFlagDefaults(t *testing.T) {
 	require.Equal(t, 22, d.ZstdLevel)
 	require.Equal(t, 8, d.Workers)
 	require.Equal(t, 3, d.Candidates)
+	require.Equal(t, 8, d.ApplyWorkers)
 }
