@@ -253,7 +253,7 @@ func applyOneImage(
 		}
 	}
 	if err := composeImage(ctx, img, bundle, rb, destRef,
-		opts.SystemContext, opts.AllowConvert, opts.reporter(), spool, opts.Workdir); err != nil {
+		opts.SystemContext, opts.AllowConvert, spool, opts.Workdir); err != nil {
 		return ApplyImageResult{
 			ImageName: name, Status: ApplyImageFailedCompose, Err: err,
 		}

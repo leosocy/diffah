@@ -22,13 +22,16 @@ import (
 // streams must not interfere.
 //
 // Gate for PR5's HasThreadSafeGetBlob = true: PR4 keeps the flag at its
-// current value (delegating to s.baseline.HasThreadSafeGetBlob()), but the
-// EncodingFull contract this test pins down is the prerequisite the flag
-// flip will rely on. The EncodingPatch path is NOT covered here — PR4 writes
-// to a deterministic scratch path keyed on (workdir, image, digest), so
-// concurrent GetBlobs on the same patched digest would race on the same
-// scratch file. PR5 must add per-call scratch uniqueness or singleflight
-// before flipping the flag for patched layers.
+// current value (still delegating to s.baseline.HasThreadSafeGetBlob(), which
+// returns true for registry baselines today). The EncodingFull contract this
+// test pins down is the prerequisite the deliberate-flip-to-true relies on.
+//
+// EncodingPatch concurrency is bounded by the per-call CreateTemp suffix
+// PR4 added in servePatch (compose.go) — distinct goroutines now decode to
+// distinct scratch files, so HasThreadSafeGetBlob = true is safe for both
+// encodings on the importer side. PR5 should extend this test with an
+// EncodingPatch case BEFORE flipping the flag, so the contract is locked
+// in code and not just in scratch-path naming.
 func TestBundleImageSource_ConcurrentSameDigestReadersAreByteIdentical(t *testing.T) {
 	blobDir := t.TempDir()
 	payload := []byte("PR5-thread-safe-contract-gate-payload-bytes-here")

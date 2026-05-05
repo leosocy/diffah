@@ -19,7 +19,6 @@ import (
 	"github.com/leosocy/diffah/internal/imageio"
 	"github.com/leosocy/diffah/internal/zstdpatch"
 	"github.com/leosocy/diffah/pkg/diff"
-	"github.com/leosocy/diffah/pkg/progress"
 )
 
 const (
@@ -175,10 +174,34 @@ func (s *bundleImageSource) servePatch(
 		return nil, 0, fmt.Errorf("baseline spool %s: %w", entry.PatchFromDigest, err)
 	}
 
-	scratchPath := filepath.Join(s.workdir, "scratch", s.imageName, target.Encoded())
-	if err := os.MkdirAll(filepath.Dir(scratchPath), 0o700); err != nil {
+	scratchDir := filepath.Join(s.workdir, "scratch", s.imageName)
+	if err := os.MkdirAll(scratchDir, 0o700); err != nil {
 		return nil, 0, fmt.Errorf("mkdir scratch for %s: %w", target, err)
 	}
+	// Per-call uniqueness via CreateTemp so two concurrent GetBlob() for
+	// the same target digest don't race on a shared output path. The
+	// upstream copier (copy.Image) is currently serial per manifest, but
+	// HasThreadSafeGetBlob already delegates true for registry baselines,
+	// so any future caller that fans out same-image blobs in parallel
+	// would otherwise truncate-while-reading. Per-call temps remove the
+	// hazard entirely; verifyingReadCloser.Close removes its own temp.
+	tmp, err := os.CreateTemp(scratchDir, target.Encoded()+"-*")
+	if err != nil {
+		return nil, 0, fmt.Errorf("create scratch tmp for %s: %w", target, err)
+	}
+	scratchPath := tmp.Name()
+	_ = tmp.Close() // DecodeStream will rewrite the file
+	var committed bool
+	defer func() {
+		// On any post-DecodeStream failure (Open, Stat) the scratch file
+		// is no longer reachable through verifyingReadCloser.Close, so we
+		// remove it here. The successful path returns before this deferred
+		// closure has anything to do (committed = true).
+		if !committed {
+			_ = os.Remove(scratchPath)
+		}
+	}()
+
 	if _, err := zstdpatch.DecodeStream(ctx, refPath, patchPath, scratchPath); err != nil {
 		return nil, 0, fmt.Errorf("decode patch for %s: %w", target, err)
 	}
@@ -191,6 +214,7 @@ func (s *bundleImageSource) servePatch(
 		_ = f.Close()
 		return nil, 0, fmt.Errorf("stat decoded %s: %w", target, err)
 	}
+	committed = true
 	return &verifyingReadCloser{
 		f: f, expected: target, hasher: sha256.New(),
 		imageName: s.imageName, kind: kindAssembled, scratchPath: scratchPath,
@@ -248,7 +272,10 @@ func (r *verifyingReadCloser) mismatchErr(got digest.Digest) error {
 			Digest: r.expected.String(), Got: got.String(),
 		}
 	}
-	return nil
+	// Defensive: a future kind addition that forgets to wire a sentinel
+	// must not silently downgrade a digest mismatch to "no error".
+	return fmt.Errorf("verifyingReadCloser: unknown kind %d for %s (got %s)",
+		r.kind, r.expected, got)
 }
 
 func (r *verifyingReadCloser) Close() error {
@@ -352,7 +379,6 @@ func composeImage(
 	destRef types.ImageReference,
 	sysctx *types.SystemContext,
 	allowConvert bool,
-	_ progress.Reporter, // hook site for per-blob pull/push progress; not yet wired
 	spool *BaselineSpool,
 	workdir string,
 ) error {
