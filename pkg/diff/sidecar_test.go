@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -198,6 +200,57 @@ func TestSidecar_RequiresZstd(t *testing.T) {
 		s := Sidecar{Blobs: map[digest.Digest]BlobEntry{}}
 		require.False(t, s.RequiresZstd())
 	})
+}
+
+// capturedLog buffers slog output written through the test-installed
+// default handler so probeUnknownFields' debug emission can be asserted.
+type capturedLog struct{ buf *bytes.Buffer }
+
+func (c *capturedLog) Contains(s string) bool { return strings.Contains(c.buf.String(), s) }
+func (c *capturedLog) All() string            { return c.buf.String() }
+
+// captureSlogDebug installs a memory-backed text handler at slog.Default
+// for the test's lifetime. log() in pkg/diff calls slog.Default().With(...)
+// each time, so the swap reaches every emission inside ParseSidecar.
+func captureSlogDebug(t *testing.T) *capturedLog {
+	t.Helper()
+	buf := &bytes.Buffer{}
+	h := slog.NewTextHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug})
+	prev := slog.Default()
+	slog.SetDefault(slog.New(h))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	return &capturedLog{buf: buf}
+}
+
+// TestParseSidecar_UnknownOptionalFieldEmitsDebugLog locks in G7 acceptance
+// I4: a sidecar carrying a field unknown to the v1 schema parses leniently
+// AND ParseSidecar emits a slog.Debug line naming the unknown field. The
+// lenient parse keeps its existing schema-error classification responsibility;
+// the probe is observability-only.
+func TestParseSidecar_UnknownOptionalFieldEmitsDebugLog(t *testing.T) {
+	captured := captureSlogDebug(t)
+	raw := []byte(`{
+		"version": "v1",
+		"feature": "bundle",
+		"tool": "diffah",
+		"tool_version": "0.2.0",
+		"created_at": "2026-01-01T00:00:00Z",
+		"platform": "linux/amd64",
+		"images": [{
+			"name": "svc",
+			"baseline": {"manifest_digest": "sha256:cafe", "media_type": "application/vnd.oci.image.manifest.v1+json"},
+			"target": {"manifest_digest": "sha256:beef", "manifest_size": 5, "media_type": "application/vnd.oci.image.manifest.v1+json"}
+		}],
+		"blobs": {"sha256:beef": {"size": 5, "media_type": "application/vnd.oci.image.manifest.v1+json", "encoding": "full", "archive_size": 5}},
+		"newField_unknown_to_v1": "ignored"
+	}`)
+	sc, err := ParseSidecar(raw)
+	require.NoError(t, err, "lenient parse must not fail on unknown optional fields")
+	require.Equal(t, "v1", sc.Version)
+	require.True(t, captured.Contains("unknown"),
+		"expected debug log mentioning 'unknown', got %q", captured.All())
+	require.True(t, captured.Contains("newField_unknown_to_v1"),
+		"expected debug log naming the field, got %q", captured.All())
 }
 
 func orderOfTopLevelBlobsKeys(t *testing.T, raw []byte) []string {
