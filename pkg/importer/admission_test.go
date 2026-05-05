@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/opencontainers/go-digest"
@@ -142,10 +143,10 @@ func TestCheckSingleImageFitsInBudget_RejectsOversize(t *testing.T) {
 	if !errors.As(err, &cat) || cat.Category() != errs.CategoryUser {
 		t.Fatalf("expected CategoryUser error, got %T %v", err, err)
 	}
-	if !contains(err.Error(), "huge-image") {
+	if !strings.Contains(err.Error(), "huge-image") {
 		t.Fatalf("expected error to mention image name 'huge-image'; got %q", err.Error())
 	}
-	if !contains(err.Error(), fmt.Sprintf("%d", budget)) {
+	if !strings.Contains(err.Error(), fmt.Sprintf("%d", budget)) {
 		t.Fatalf("expected error to mention budget bytes %d; got %q", budget, err.Error())
 	}
 }
@@ -173,16 +174,4 @@ func TestCheckSingleImageFitsInBudget_BudgetZeroOptsOut(t *testing.T) {
 	if err := checkSingleImageFitsInBudget([]diff.ImageEntry{img}, blobDir, blobs, 0, 0); err != nil {
 		t.Fatalf("expected nil with budget=0; got %v", err)
 	}
-}
-
-func contains(haystack, needle string) bool {
-	if needle == "" {
-		return true
-	}
-	for i := 0; i+len(needle) <= len(haystack); i++ {
-		if haystack[i:i+len(needle)] == needle {
-			return true
-		}
-	}
-	return false
 }

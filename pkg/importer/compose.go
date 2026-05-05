@@ -430,6 +430,15 @@ func composeImage(
 		SourceCtx:      sysctx,
 		DestinationCtx: sysctx,
 		ReportWriter:   io.Discard,
+		// Force serial intra-image layer copies so the per-image RSS
+		// estimate (max-across-layers) holds for thread-safe-PutBlob
+		// destinations (dir:/oci:/docker://). Without this, copy.Image
+		// fans out 6 concurrent layer copies by default once the
+		// bundle's HasThreadSafeGetBlob flips to true (PR5), and the
+		// real peak RSS becomes min(6, layers) × max-per-layer, silently
+		// blowing through --memory-budget. Image-level parallelism is
+		// already provided by importEachImage's AdmissionPool.
+		MaxParallelDownloads: 1,
 	}
 	if destRef.Transport().Name() == FormatDir {
 		copyOpts.PreserveDigests = true
