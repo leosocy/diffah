@@ -46,9 +46,40 @@ jobs:
           fi
           echo "PASS: peak RSS ${rss_kib} KiB <= 8 GiB ceiling"
 
+      - name: Apply (scale)
+        # NOTE: as of streaming PR6, TestImport_ScaleApply2GiB t.Skip's its
+        # body until the apply scale-bench infrastructure (fixture + helper)
+        # lands in a follow-up PR. Until then this step's "PASS" log line
+        # only proves /usr/bin/time -v invoked go test successfully — NOT
+        # that apply RSS is under 8 GiB. Spec §13 acceptance #10 remains
+        # open. See lessons-learned 2026-05-04-import-streaming-lessons.md
+        # post-PR-6 amendment.
+        run: |
+          /usr/bin/time -v -o apply_time.out \
+            go test \
+              -tags='big containers_image_openpgp exclude_graphdriver_btrfs exclude_graphdriver_devicemapper' \
+              -timeout=75m \
+              -v \
+              -run TestImport_ScaleApply2GiB \
+              ./pkg/importer/...
+          rss_kib=$(grep -oP 'Maximum resident set size \(kbytes\): \K[0-9]+' apply_time.out || true)
+          if [ -z "${rss_kib}" ]; then
+            echo "FAIL: could not parse peak RSS from /usr/bin/time output"
+            cat apply_time.out
+            exit 1
+          fi
+          echo "Apply Peak RSS: ${rss_kib} KiB"
+          if [ "${rss_kib}" -gt 8388608 ]; then
+            echo "FAIL: apply peak RSS ${rss_kib} KiB exceeds 8 GiB ceiling (spec §13)"
+            exit 1
+          fi
+          echo "PASS: apply peak RSS ${rss_kib} KiB <= 8 GiB ceiling"
+
       - name: Upload /usr/bin/time output
         if: always()
         uses: actions/upload-artifact@v5
         with:
           name: scale-bench-time-${{ github.run_id }}
-          path: time.out
+          path: |
+            time.out
+            apply_time.out

@@ -1,9 +1,11 @@
 package diff
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/opencontainers/go-digest"
@@ -155,6 +157,15 @@ func (s Sidecar) Marshal() ([]byte, error) {
 }
 
 func ParseSidecar(raw []byte) (*Sidecar, error) {
+	// G7 acceptance I4: probe for unknown optional fields BEFORE the lenient
+	// parse so a sidecar from a newer diffah version logs the unrecognized
+	// field names at slog.Debug, while the lenient json.Unmarshal below
+	// still ignores them. Schema-error classification stays the lenient
+	// pass's responsibility — the probe itself never fails ParseSidecar.
+	if names := probeUnknownFields(raw); len(names) > 0 {
+		log().Debug("sidecar has unknown optional fields", "fields", names)
+	}
+
 	var s Sidecar
 	if err := json.Unmarshal(raw, &s); err != nil {
 		return nil, &ErrInvalidBundleFormat{Cause: err}
@@ -172,4 +183,29 @@ func ParseSidecar(raw []byte) (*Sidecar, error) {
 		"version", s.Version, "feature", s.Feature,
 		"images", len(s.Images), "blobs", len(s.Blobs))
 	return &s, nil
+}
+
+// probeUnknownFields runs a strict json.Decoder pass over raw to surface
+// fields that are not declared on the Sidecar struct. Returns the unknown
+// field names found at the top level (json.Decoder's DisallowUnknownFields
+// errors on the first one it encounters, so this is single-shot — at most
+// one name per top-level invocation). Returns nil on any error other than
+// the "unknown field" sentinel; the lenient parse in ParseSidecar owns
+// schema-error classification.
+func probeUnknownFields(raw []byte) []string {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	var s Sidecar
+	if err := dec.Decode(&s); err != nil {
+		const prefix = "json: unknown field "
+		msg := err.Error()
+		if idx := strings.Index(msg, prefix); idx >= 0 {
+			name := strings.TrimSpace(msg[idx+len(prefix):])
+			name = strings.Trim(name, `"`)
+			if name != "" {
+				return []string{name}
+			}
+		}
+	}
+	return nil
 }
