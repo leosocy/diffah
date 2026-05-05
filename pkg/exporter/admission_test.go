@@ -12,13 +12,13 @@ func TestEstimateRSSForWindowLog_TableIsConservative(t *testing.T) {
 		{31, 4 << 30},
 	}
 	for _, c := range cases {
-		got := estimateRSSForWindowLog(c.windowLog)
+		got := EstimateRSSForWindowLog(c.windowLog)
 		if got < c.min {
 			t.Errorf("windowLog=%d: estimate %d < min %d", c.windowLog, got, c.min)
 		}
 	}
 	// Out-of-table values fall back to the largest entry.
-	if got := estimateRSSForWindowLog(99); got < (4 << 30) {
+	if got := EstimateRSSForWindowLog(99); got < (4 << 30) {
 		t.Errorf("out-of-table fallback too small: %d", got)
 	}
 }

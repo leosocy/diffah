@@ -9,11 +9,13 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/opencontainers/go-digest"
 	"go.podman.io/image/v5/types"
 
+	"github.com/leosocy/diffah/internal/admission"
 	"github.com/leosocy/diffah/internal/imageio"
 	"github.com/leosocy/diffah/internal/workdir"
 	"github.com/leosocy/diffah/internal/zstdpatch"
@@ -21,6 +23,12 @@ import (
 	"github.com/leosocy/diffah/pkg/progress"
 	"github.com/leosocy/diffah/pkg/signer"
 )
+
+// budgetSentinelName is the synthetic ImageName recorded in the apply
+// report when checkSingleImageFitsInBudget rejects the bundle pre-pool.
+// Quoted so renderSummary's per-image row doesn't conflate it with a
+// real image name (no real name can contain '<' per the sidecar regex).
+const budgetSentinelName = "<budget>"
 
 type Options struct {
 	DeltaPath        string
@@ -56,6 +64,11 @@ type Options struct {
 	Workdir      string
 	MemoryBudget int64
 	Workers      int
+	// WindowLog overrides automatic window-size selection used by the
+	// admission RSS estimator. 0 (default) selects per-layer-size automatic
+	// resolution via pkg/exporter.ResolveWindowLog. Non-zero forces that
+	// window. Symmetric with exporter.Options.ZstdWindowLog.
+	WindowLog int
 }
 
 func (o *Options) reporter() progress.Reporter {
@@ -195,10 +208,27 @@ func splitPreflightResults(results []PreflightResult) ([]string, map[string]Pref
 }
 
 // importEachImage composes and verifies the images named in applyList,
-// recording per-image outcomes in an ApplyReport. In strict mode the loop
-// stops at the first compose/invariant failure (preserving the "abort on
-// first error" feel for callers that opted in via --strict). In partial mode
-// the loop continues so the final summary captures every outcome.
+// recording per-image outcomes in an ApplyReport. Submission is gated by
+// internal/admission.AdmissionPool so concurrent applies share a CPU
+// worker semaphore (Workers) and a memory semaphore (MemoryBudget).
+// Determinism contract: admission only changes WHEN images run, not WHAT
+// they produce; the final report is post-sorted to applyList order so the
+// per-image rows are byte-identical regardless of worker count.
+//
+// Pre-pool, checkSingleImageFitsInBudget rejects bundles whose largest
+// image cannot fit under MemoryBudget — surfaces a CategoryUser error
+// before any worker starts.
+//
+// Partial mode (opts.Strict=false): submitted closures always return nil
+// so errgroup never cancels queued siblings; per-image errors are
+// recorded under the report mutex.
+//
+// Strict mode (opts.Strict=true): the closure returns the underlying
+// error, which propagates through pool.Wait(); queued siblings that
+// haven't started are skipped (errgroup cancels gctx). Already-running
+// siblings finish — the closure captures the outer ctx, not the
+// errgroup's, mirroring the old serial loop's "in-flight applies aren't
+// killed mid-stream" behavior.
 func importEachImage(
 	ctx context.Context,
 	bundle *extractedBundle,
@@ -209,14 +239,128 @@ func importEachImage(
 	applyList []string,
 ) ApplyReport {
 	report := ApplyReport{}
-	for _, name := range applyList {
-		result := applyOneImage(ctx, name, bundle, resolvedByName, outputs, opts, spool)
-		report.Results = append(report.Results, result)
-		if opts.Strict && result.Status != ApplyImageOK {
-			return report
-		}
+
+	// Pre-pool admission gate: fail fast with the offending image's name
+	// when the operator's budget cannot fit even a single image. The
+	// admission pool's memSem clamps oversized estimates internally to
+	// avoid deadlock, but that's a safety net — the operator-facing
+	// contract is "you'll learn before any image starts."
+	if err := checkSingleImageFitsInBudget(
+		bundle.sidecar.Images, bundle.blobDir, bundle.sidecar.Blobs,
+		opts.WindowLog, opts.MemoryBudget,
+	); err != nil {
+		report.Results = append(report.Results, ApplyImageResult{
+			ImageName: budgetSentinelName,
+			Status:    ApplyImageFailedCompose,
+			Err:       err,
+		})
+		return report
 	}
+
+	pool := admission.NewAdmissionPool(ctx, opts.Workers, opts.MemoryBudget)
+	var mu sync.Mutex
+	for _, name := range applyList {
+		submitOneImage(ctx, name, bundle, resolvedByName, outputs, opts,
+			spool, pool, &report, &mu)
+	}
+
+	// Wait blocks until every submitted task has returned. The error is
+	// only consulted in strict mode (it's the first errgroup error); in
+	// partial mode it is always nil because all closures return nil.
+	_ = pool.Wait()
+
+	// Determinism: re-order results by applyList rank so the report rows
+	// (and any byte-identity test that hashes them) are independent of
+	// goroutine scheduling. Pre-pool synthetic entries (the budget
+	// sentinel above never reaches here, but findImageByName failures
+	// can) sort to the end in insertion order.
+	sortResultsByApplyList(&report, applyList)
 	return report
+}
+
+// submitOneImage handles the per-image pre-flight + admission Submit. It is
+// called once per applyList entry from importEachImage:
+//
+//   - findImageByName lookup failure → record per-image compose failure;
+//     do not Submit.
+//   - manifest-parse failure inside estimatePerImageRSS → record per-image
+//     compose failure; do not Submit (compose would fail at the same parse
+//     step downstream, so we skip the work).
+//   - happy path → Submit applyOneImage to pool with the per-image RSS
+//     estimate; the closure records the result under mu.
+//
+// In strict mode the closure returns the underlying err so errgroup cancels
+// queued siblings; in partial mode it always returns nil so siblings keep
+// running.
+func submitOneImage(
+	ctx context.Context,
+	name string,
+	bundle *extractedBundle,
+	resolvedByName map[string]resolvedBaseline,
+	outputs map[string]string,
+	opts Options,
+	spool *BaselineSpool,
+	pool *admission.AdmissionPool,
+	report *ApplyReport,
+	mu *sync.Mutex,
+) {
+	img, found := findImageByName(bundle.sidecar.Images, name)
+	if !found {
+		recordResult(report, mu, ApplyImageResult{
+			ImageName: name, Status: ApplyImageFailedCompose,
+			Err: fmt.Errorf("image %q not found in sidecar", name),
+		})
+		return
+	}
+	est, eerr := estimatePerImageRSS(img, bundle.blobDir, bundle.sidecar.Blobs, opts.WindowLog)
+	if eerr != nil {
+		recordResult(report, mu, ApplyImageResult{
+			ImageName: name, Status: ApplyImageFailedCompose, Err: eerr,
+		})
+		return
+	}
+	pool.Submit(name, est, func() error {
+		result := applyOneImage(ctx, name, bundle, resolvedByName, outputs, opts, spool)
+		recordResult(report, mu, result)
+		if opts.Strict && result.Status != ApplyImageOK {
+			return result.Err
+		}
+		return nil
+	})
+}
+
+// recordResult appends one ApplyImageResult to report.Results under mu.
+// Centralizes the lock so submitOneImage can keep its lock discipline visible
+// at a glance and so a future change (e.g. progress emission per result)
+// only touches one place.
+func recordResult(report *ApplyReport, mu *sync.Mutex, r ApplyImageResult) {
+	mu.Lock()
+	report.Results = append(report.Results, r)
+	mu.Unlock()
+}
+
+// sortResultsByApplyList stably reorders report.Results so entries
+// matching applyList appear in applyList order, with any non-applyList
+// entries appended at the end in their original insertion order. The
+// "applyList" key uses the lowest valid rank, so missing entries get a
+// rank larger than any valid one and naturally sort last.
+func sortResultsByApplyList(report *ApplyReport, applyList []string) {
+	rank := make(map[string]int, len(applyList))
+	for i, n := range applyList {
+		rank[n] = i
+	}
+	missingRankBase := len(applyList)
+	sort.SliceStable(report.Results, func(i, j int) bool {
+		ri, oki := rank[report.Results[i].ImageName]
+		rj, okj := rank[report.Results[j].ImageName]
+		if !oki {
+			ri = missingRankBase
+		}
+		if !okj {
+			rj = missingRankBase
+		}
+		return ri < rj
+	})
 }
 
 // applyOneImage runs the full per-image pipeline (resolve output, compose,

@@ -187,7 +187,7 @@ func checkSingleLayerFitsInBudget(plans []*pairPlan, windowLog int, memBudget in
 	var offendingDigest string
 	for _, plan := range plans {
 		for _, s := range plan.Shipped {
-			e := estimateRSSForWindowLog(ResolveWindowLog(windowLog, s.Size))
+			e := EstimateRSSForWindowLog(ResolveWindowLog(windowLog, s.Size))
 			if e > maxEst {
 				maxEst = e
 				offendingDigest = s.Digest.String()

@@ -176,7 +176,7 @@ func encodeTargets(
 			if pool.has(s.Digest) {
 				continue
 			}
-			est := estimateRSSForWindowLog(ResolveWindowLog(opts.WindowLog, s.Size))
+			est := EstimateRSSForWindowLog(ResolveWindowLog(opts.WindowLog, s.Size))
 			encPool.Submit(s.Digest, est, func() error {
 				return encodeOneShipped(ctx, pool, p, s, planner, opts.Mode, opts.Reporter,
 					opts.Candidates, targetsDir, blobsDir)

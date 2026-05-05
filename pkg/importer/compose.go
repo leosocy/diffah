@@ -68,8 +68,23 @@ func (s *bundleImageSource) GetManifest(_ context.Context, instance *digest.Dige
 	return s.manifest, s.manifestMime, nil
 }
 
+// HasThreadSafeGetBlob returns true unconditionally as of PR5.
+//
+// PR3 spool (singleflight + atomic rename) + PR4 per-call scratch
+// CreateTemp suffix + PR4 path-backed verifyingReadCloser make both
+// serveFull and servePatch safe under concurrent same-digest GetBlob
+// within the same image source. PR5's importEachImage drives parallel
+// image applies through copy.Image which now relies on this flag.
+//
+// Note: this does NOT delegate to s.baseline.HasThreadSafeGetBlob().
+// copy.Image consults this flag *per-source* — when the bundle source
+// returns true, it may concurrently call GetBlob on the bundle, but the
+// underlying baseline calls (made through fetchVerifiedBaselineBlob and
+// the spool fetch closure) are still serialized by BaselineSpool's
+// singleflight Do — only one underlying baseline GetBlob runs at a time
+// per digest, regardless of the baseline's own thread-safety.
 func (s *bundleImageSource) HasThreadSafeGetBlob() bool {
-	return s.baseline.HasThreadSafeGetBlob()
+	return true
 }
 
 func (s *bundleImageSource) GetSignatures(
