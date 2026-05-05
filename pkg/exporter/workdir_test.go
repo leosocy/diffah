@@ -88,7 +88,10 @@ func TestResolveWorkdir_EmptyOutputPathFallsBackToTempDir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveWorkdir(empty): %v", err)
 	}
-	wantPrefix := filepath.Join(os.TempDir(), ".diffah-tmp") + string(os.PathSeparator)
+	// Shared internal/workdir places the dash-prefixed siblings of os.TempDir
+	// when no hint is provided, rather than the .diffah-tmp/<random> subdir
+	// pattern used when a hint is present.
+	wantPrefix := filepath.Join(os.TempDir(), "diffah-tmp-")
 	if !strings.HasPrefix(got, wantPrefix) {
 		t.Fatalf("empty outputPath should default under %q, got %q", wantPrefix, got)
 	}

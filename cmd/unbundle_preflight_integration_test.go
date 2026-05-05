@@ -136,7 +136,7 @@ func buildTwoImageBundleWithB2(t *testing.T, bin, root, tmp string) (
 	v2 := "oci-archive:" + filepath.Join(root, "testdata/fixtures/v2_oci.tar")
 
 	// svc-b is listed first so the importer attempts it before svc-a; this
-	// matters because the importer's baselineBlobCache is keyed by digest
+	// matters because the importer's BaselineSpool is keyed by digest
 	// and shared across images in a single Import call. If svc-a (with a
 	// complete baseline) ran first, its successful fetch of the shared
 	// reuse-layer digest would populate the cache and silently satisfy
