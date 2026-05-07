@@ -122,3 +122,6 @@ build_fixtures
 # Local diffah run artifacts (default delta output, default log directory)
 /delta.tar
 /log/
+
+# Codex / AI tooling session state (per-developer, never committed)
+.context/
