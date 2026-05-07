@@ -441,3 +441,65 @@ func TestGetBlob_BaselineOnlyMissing_WrapsB2(t *testing.T) {
 		t.Errorf("ImageName = %v, want svc-y", b2.ImageName)
 	}
 }
+
+// TestGetBlob_BaselineReuse_StreamsFromFile verifies that a baseline-only
+// layer (absent from sidecar.Blobs) is streamed from the spool file as an
+// *os.File, not buffered into []byte and wrapped in a bytes.NewReader.
+// This is the hardening-PR2 contract: for a 1 GiB baseline layer the old
+// path held 1 GiB of heap; the new path holds one OS file descriptor.
+func TestGetBlob_BaselineReuse_StreamsFromFile(t *testing.T) {
+	payload := []byte("baseline-only-reuse-layer-payload-for-streaming")
+	d := digest.FromBytes(payload)
+
+	src := &bundleImageSource{
+		blobDir:   t.TempDir(),
+		imageName: "svc-stream",
+		baseline:  &fakeFixedBytesSource{bytes: payload},
+		spool:     NewBaselineSpool(t.TempDir()),
+		sidecar:   &diff.Sidecar{Blobs: map[digest.Digest]diff.BlobEntry{}},
+	}
+
+	rc, size, err := src.GetBlob(context.Background(), types.BlobInfo{Digest: d}, nil)
+	require.NoError(t, err)
+	defer rc.Close()
+
+	f, ok := rc.(*os.File)
+	require.True(t, ok, "expected *os.File (streamed from spool), got %T", rc)
+
+	got, err := io.ReadAll(f)
+	require.NoError(t, err)
+	require.Equal(t, payload, got)
+
+	st, err := f.Stat()
+	require.NoError(t, err)
+	require.Equal(t, st.Size(), size, "reported size must match file stat, not len([]byte)")
+}
+
+// TestFetchVerifiedBaselineBlob_ReturnsReadCloser verifies that
+// fetchVerifiedBaselineBlob returns an *os.File opened on the spool path
+// rather than a []byte buffer. The spool already verified the digest on
+// the streaming pass, so the returned file needs no additional
+// verification.
+func TestFetchVerifiedBaselineBlob_ReturnsReadCloser(t *testing.T) {
+	payload := []byte("fetch-verified-baseline-blob-payload")
+	d := digest.FromBytes(payload)
+
+	src := &bundleImageSource{
+		blobDir:   t.TempDir(),
+		imageName: "svc-rc",
+		baseline:  &fakeFixedBytesSource{bytes: payload},
+		spool:     NewBaselineSpool(t.TempDir()),
+		sidecar:   &diff.Sidecar{Blobs: map[digest.Digest]diff.BlobEntry{}},
+	}
+
+	rc, err := src.fetchVerifiedBaselineBlob(context.Background(), d, nil)
+	require.NoError(t, err)
+	defer rc.Close()
+
+	f, ok := rc.(*os.File)
+	require.True(t, ok, "expected *os.File, got %T", rc)
+
+	got, err := io.ReadAll(f)
+	require.NoError(t, err)
+	require.Equal(t, payload, got)
+}

@@ -1,7 +1,6 @@
 package importer
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -96,17 +95,7 @@ func (s *bundleImageSource) GetBlob(
 ) (io.ReadCloser, int64, error) {
 	entry, ok := s.sidecar.Blobs[info.Digest]
 	if !ok {
-		data, err := s.fetchVerifiedBaselineBlob(ctx, info.Digest, cache)
-		if err != nil {
-			if isBlobNotFound(err) {
-				return nil, 0, &ErrMissingBaselineReuseLayer{
-					ImageName:   s.imageName,
-					LayerDigest: info.Digest,
-				}
-			}
-			return nil, 0, fmt.Errorf("baseline serve %s: %w", info.Digest, err)
-		}
-		return io.NopCloser(bytes.NewReader(data)), int64(len(data)), nil
+		return s.serveBaseline(ctx, info.Digest, cache)
 	}
 	switch entry.Encoding {
 	case diff.EncodingFull:
@@ -115,6 +104,38 @@ func (s *bundleImageSource) GetBlob(
 		return s.servePatch(ctx, info.Digest, entry, cache)
 	}
 	return nil, 0, fmt.Errorf("unknown encoding %q for blob %s", entry.Encoding, info.Digest)
+}
+
+// serveBaseline streams a baseline-only reuse blob from the spool. Used
+// when the target manifest references a layer the bundle did not ship
+// (absent from sidecar.Blobs). The spool already verified the digest on
+// the streaming pass, so the returned *os.File needs no additional
+// verification — the caller owns the file descriptor and must close it.
+//
+// Errors:
+//   - baseline blob-not-found → *ErrMissingBaselineReuseLayer (B2, CategoryContent)
+//   - baseline digest mismatch → *diff.ErrBaselineBlobDigestMismatch
+//     (re-wrapped with ImageName by fetchVerifiedBaselineBlob)
+//   - stat failure → fmt.Errorf wrap (file opened but stat failed; file is closed)
+func (s *bundleImageSource) serveBaseline(
+	ctx context.Context, d digest.Digest, cache types.BlobInfoCache,
+) (io.ReadCloser, int64, error) {
+	rc, err := s.fetchVerifiedBaselineBlob(ctx, d, cache)
+	if err != nil {
+		if isBlobNotFound(err) {
+			return nil, 0, &ErrMissingBaselineReuseLayer{
+				ImageName:   s.imageName,
+				LayerDigest: d,
+			}
+		}
+		return nil, 0, fmt.Errorf("baseline serve %s: %w", d, err)
+	}
+	st, err := rc.(*os.File).Stat()
+	if err != nil {
+		_ = rc.Close()
+		return nil, 0, fmt.Errorf("stat spooled baseline blob %s: %w", d, err)
+	}
+	return rc, st.Size(), nil
 }
 
 // serveFull streams a shipped full-encoded blob from disk. Returns a
@@ -295,10 +316,9 @@ func (r *verifyingReadCloser) Close() error {
 // blob info cache and is forwarded to s.baseline.GetBlob unchanged — it is
 // a separate concern from s.spool.
 //
-// TODO: this helper still slurps the spooled file fully into memory via
-// os.ReadFile so multi-GiB baseline-only-reuse blobs round-trip through
-// RAM. Streaming the io.ReadCloser straight off the spool path is the
-// follow-up; spec §13 acceptance is closed by the disk spool itself.
+// Returns an *os.File opened on the spool path; the caller is responsible
+// for closing it. The spool already verified the digest on the streaming
+// pass, so no additional verification is needed.
 //
 // Re-wraps any *diff.ErrBaselineBlobDigestMismatch returned by the spool
 // to repopulate ImageName: the spool is per-Import (image-agnostic) but
@@ -306,7 +326,7 @@ func (r *verifyingReadCloser) Close() error {
 // so support flows can locate the apply context.
 func (s *bundleImageSource) fetchVerifiedBaselineBlob(
 	ctx context.Context, d digest.Digest, cache types.BlobInfoCache,
-) ([]byte, error) {
+) (io.ReadCloser, error) {
 	path, err := s.spool.GetOrSpool(ctx, d, func() (io.ReadCloser, error) {
 		rc, _, gerr := s.baseline.GetBlob(ctx, types.BlobInfo{Digest: d}, cache)
 		return rc, gerr
@@ -318,7 +338,11 @@ func (s *bundleImageSource) fetchVerifiedBaselineBlob(
 		}
 		return nil, err
 	}
-	return os.ReadFile(path)
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("open spooled baseline blob %s: %w", d, err)
+	}
+	return f, nil
 }
 
 // staticSourceRef wraps a prebuilt ImageSource so copy.Image can consume it
