@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/opencontainers/go-digest"
@@ -527,11 +528,15 @@ func copyBundleImage(
 }
 
 func classifyCopyError(destRef types.ImageReference, src *bundleImageSource, err error) error {
+	ref := destRef.StringWithinTransport()
 	if closeErr := src.Close(); closeErr != nil {
-		return fmt.Errorf("copy to %s: %w", destRef.StringWithinTransport(), closeErr)
+		if strings.TrimSpace(err.Error()) == fmt.Sprintf("(src: %s)", closeErr.Error()) {
+			return fmt.Errorf("copy to %s: %w", ref, closeErr)
+		}
+		return fmt.Errorf("copy to %s: %w (source close: %s)",
+			ref, diff.ClassifyRegistryErr(err, ref), closeErr.Error())
 	}
-	return fmt.Errorf("copy to %s: %w", destRef.StringWithinTransport(),
-		diff.ClassifyRegistryErr(err, destRef.StringWithinTransport()))
+	return fmt.Errorf("copy to %s: %w", ref, diff.ClassifyRegistryErr(err, ref))
 }
 
 // enforceOutputCompat rejects a destination transport + source manifest

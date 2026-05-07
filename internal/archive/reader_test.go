@@ -3,6 +3,7 @@ package archive
 import (
 	"archive/tar"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -285,6 +286,15 @@ func TestWriteFile_TruncatedTarEntryRejected(t *testing.T) {
 	require.ErrorContains(t, err, "truncated tar entry")
 }
 
+func TestWriteFile_NonShortCopyErrorIsNotTruncation(t *testing.T) {
+	err := writeFile(filepath.Join(t.TempDir(), "blob.bin"), errReader{}, 1024)
+
+	require.Error(t, err)
+	var truncated *ErrTruncatedEntry
+	require.False(t, errors.As(err, &truncated))
+	require.ErrorContains(t, err, "read failed")
+}
+
 func TestExtract_TruncatedTarEntryRejected(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "truncated.tar")
 	f, err := os.Create(out)
@@ -309,4 +319,10 @@ func TestExtract_TruncatedTarEntryRejected(t *testing.T) {
 	require.ErrorAs(t, err, &truncated)
 	require.ErrorContains(t, err, "truncated tar entry")
 	require.ErrorContains(t, err, "blob.bin")
+}
+
+type errReader struct{}
+
+func (errReader) Read([]byte) (int, error) {
+	return 0, errors.New("read failed")
 }

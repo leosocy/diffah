@@ -133,6 +133,9 @@ func writeFile(path string, r io.Reader, size int64) error {
 	}
 	defer f.Close()
 	if _, err := io.CopyN(f, r, size); err != nil {
+		if !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
+			return fmt.Errorf("write %s: %w", path, err)
+		}
 		return &ErrTruncatedEntry{Path: path, Err: err}
 	}
 	return nil

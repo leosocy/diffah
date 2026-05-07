@@ -578,6 +578,31 @@ func TestBundleImageSource_CloseSurfacesReaderCloseError(t *testing.T) {
 	require.Equal(t, "svc-close", incomplete.ImageName)
 }
 
+func TestClassifyCopyError_PreservesPrimaryCopyError(t *testing.T) {
+	closeErr := &diff.ErrBlobIncompletelyConsumed{Kind: "shipped", Digest: "sha256:test"}
+	src := &bundleImageSource{closeErr: closeErr}
+	dest := fakeDestRef{}
+
+	err := classifyCopyError(dest, src, context.Canceled)
+
+	require.ErrorIs(t, err, context.Canceled)
+	var incomplete *diff.ErrBlobIncompletelyConsumed
+	require.False(t, errors.As(err, &incomplete), "copy error should stay primary when another failure exists")
+	require.ErrorContains(t, err, closeErr.Error())
+}
+
+func TestClassifyCopyError_ReturnsTypedCloseErrorWhenOnlyFailure(t *testing.T) {
+	closeErr := &diff.ErrBlobIncompletelyConsumed{Kind: "shipped", Digest: "sha256:test"}
+	src := &bundleImageSource{closeErr: closeErr}
+	dest := fakeDestRef{}
+
+	err := classifyCopyError(dest, src, fmt.Errorf(" (src: %s)", closeErr.Error()))
+
+	var incomplete *diff.ErrBlobIncompletelyConsumed
+	require.ErrorAs(t, err, &incomplete)
+	require.Equal(t, closeErr, incomplete)
+}
+
 func TestVerifyingReadCloser_CloseAfterEOFReturnsNil(t *testing.T) {
 	payload := []byte("verify-after-eof-payload")
 	expected := digest.FromBytes(payload)
