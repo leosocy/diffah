@@ -28,6 +28,10 @@ const (
 	// PreflightMissingReuseLayer, or PreflightError) and partial
 	// mode skipped it. The dest was not touched.
 	ApplyImageSkippedPreflight
+	// ApplyImageNotAppliedPreflight means strict mode aborted before
+	// apply because a sibling image failed preflight. The image itself
+	// passed preflight, but the dest was not touched.
+	ApplyImageNotAppliedPreflight
 )
 
 // ApplyImageResult is the per-image record in the final ApplyReport.
@@ -76,6 +80,8 @@ func renderSummary(w io.Writer, r ApplyReport) {
 				x.ImageName, x.Err)
 		case ApplyImageSkippedPreflight:
 			fmt.Fprintf(w, "  skip %s: preflight skipped (%v)\n", x.ImageName, x.Err)
+		case ApplyImageNotAppliedPreflight:
+			fmt.Fprintf(w, "  skip %s: not applied (--strict preflight abort)\n", x.ImageName)
 		}
 	}
 	if r.Successful() < r.Total {

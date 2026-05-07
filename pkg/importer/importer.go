@@ -656,7 +656,7 @@ func abortWithPreflightSummary(results []PreflightResult) error {
 	for _, r := range results {
 		if r.Status == PreflightOK {
 			report.Results = append(report.Results, ApplyImageResult{
-				ImageName: r.ImageName, Status: ApplyImageOK,
+				ImageName: r.ImageName, Status: ApplyImageNotAppliedPreflight,
 			})
 			continue
 		}

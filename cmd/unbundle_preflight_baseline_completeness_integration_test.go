@@ -49,6 +49,10 @@ func TestUnbundleCLI_PerImageBaselineCompletenessPreflight(t *testing.T) {
 			bundlePath, baselinesPath, outputsPath)
 
 		require.Equalf(t, 4, exit, "strict mode exit = %d, stderr=%s", exit, stderr)
+		require.Contains(t, stderr, "applied 0/2")
+		require.NotContains(t, stderr, "applied 1/2")
+		require.NotContains(t, stderr, "ok  svc-a: applied + verified")
+		require.Contains(t, stderr, "skip svc-a: not applied (--strict preflight abort)")
 		require.Contains(t, stderr, "skip svc-b: preflight skipped")
 		if _, err := os.Stat(svcAOut); err == nil {
 			t.Fatalf("svc-a output should not exist after strict preflight abort")
