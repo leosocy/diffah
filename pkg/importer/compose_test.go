@@ -492,7 +492,7 @@ func TestFetchVerifiedBaselineBlob_ReturnsReadCloser(t *testing.T) {
 		sidecar:   &diff.Sidecar{Blobs: map[digest.Digest]diff.BlobEntry{}},
 	}
 
-	rc, err := src.fetchVerifiedBaselineBlob(context.Background(), d, nil)
+	rc, size, err := src.fetchVerifiedBaselineBlob(context.Background(), d, nil)
 	require.NoError(t, err)
 	defer rc.Close()
 
@@ -502,4 +502,5 @@ func TestFetchVerifiedBaselineBlob_ReturnsReadCloser(t *testing.T) {
 	got, err := io.ReadAll(f)
 	require.NoError(t, err)
 	require.Equal(t, payload, got)
+	require.Equal(t, int64(len(payload)), size)
 }

@@ -1,10 +1,9 @@
 // Package importer — per-image admission RSS estimation.
 //
-// estimatePerImageRSS walks the layers of one ImageEntry's target manifest,
-// keeps only those that ship in the bundle (others are baseline-only and
-// produce no decoder RSS), and returns the maximum exporter-side RSS
-// envelope across them — copy.Image streams layers serially within one
-// image, so peak RSS for the image is the worst single layer, not the sum.
+// estimatePerImageRSS walks the layers of one ImageEntry's target manifest
+// and returns the maximum apply-time RSS contribution across shipped and
+// baseline-only layers. copy.Image streams layers serially within one image,
+// so peak RSS for the image is the worst single layer, not the sum.
 //
 // checkSingleImageFitsInBudget mirrors exporter's checkSingleLayerFitsInBudget
 // for the importer side: if any single image's per-image estimate exceeds the
@@ -16,7 +15,10 @@
 package importer
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/opencontainers/go-digest"
 
@@ -29,15 +31,14 @@ import (
 // will hold for one image. It walks every layer in the image's target
 // manifest and:
 //
-//   - skips layers absent from sidecar.Blobs — those are baseline-only
-//     reuses (B2 path); they stream from the baseline source without going
-//     through DecodeStream, so they don't contribute to the windowLog RSS
-//     envelope.
-//   - looks up each shipped layer's BlobEntry.Size (uncompressed, used to
-//     resolve windowLog), and takes the MAX RSS across all shipped layers.
+//   - shipped layers contribute EstimateRSSForWindowLog(ResolveWindowLog(...))
+//     using the encoder-committed window envelope.
+//   - baseline-only layers contribute LayerRef.Size, because the spooled file
+//     is streamed into the destination and the page-cache envelope still counts
+//     against the operator's --memory-budget mental model.
 //
 // Why max-not-sum: copy.Image() within a single image processes layers
-// sequentially; only one zstd decoder is ever live for one image at a time.
+// sequentially (MaxParallelDownloads: 1 is enforced in composeImage).
 // The pool sums these per-image estimates across concurrent images via the
 // admission semaphore — that's where parallelism's RSS cost actually shows up.
 //
@@ -48,19 +49,19 @@ func estimatePerImageRSS(
 	blobs map[digest.Digest]diff.BlobEntry,
 	userWindowLog int,
 ) (int64, error) {
-	layers, err := readManifestLayers(blobDir, img.Target.ManifestDigest)
+	layers, err := readManifestLayerRefs(blobDir, img.Target.ManifestDigest)
 	if err != nil {
 		return 0, fmt.Errorf("read target manifest %s: %w", img.Target.ManifestDigest, err)
 	}
 	var maxEst int64
 	for _, ld := range layers {
-		entry, ok := blobs[ld]
-		if !ok {
-			// Baseline-only reuse layer; no DecodeStream RSS cost.
-			continue
+		var est int64
+		if entry, ok := blobs[ld.Digest]; ok {
+			wl := exporter.ResolveWindowLog(userWindowLog, entry.Size)
+			est = exporter.EstimateRSSForWindowLog(wl)
+		} else {
+			est = ld.Size
 		}
-		wl := exporter.ResolveWindowLog(userWindowLog, entry.Size)
-		est := exporter.EstimateRSSForWindowLog(wl)
 		if est > maxEst {
 			maxEst = est
 		}
@@ -106,4 +107,26 @@ func checkSingleImageFitsInBudget(
 		}
 	}
 	return nil
+}
+
+func readManifestLayerRefs(blobDir string, mfDigest digest.Digest) ([]LayerRef, error) {
+	path := filepath.Join(blobDir, mfDigest.Algorithm().String(), mfDigest.Encoded())
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var m struct {
+		Layers []struct {
+			Digest digest.Digest `json:"digest"`
+			Size   int64         `json:"size"`
+		} `json:"layers"`
+	}
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return nil, fmt.Errorf("parse manifest: %w", err)
+	}
+	out := make([]LayerRef, 0, len(m.Layers))
+	for _, l := range m.Layers {
+		out = append(out, LayerRef{Digest: l.Digest, Size: l.Size})
+	}
+	return out, nil
 }

@@ -15,6 +15,11 @@ import (
 	"github.com/leosocy/diffah/pkg/diff/errs"
 )
 
+type fakeManifestLayer struct {
+	Digest digest.Digest `json:"digest"`
+	Size   int64         `json:"size"`
+}
+
 // writeFakeManifest synthesizes a minimal OCI-shaped manifest containing
 // the given layer digests and writes it to <blobDir>/<algo>/<encoded>,
 // returning the manifest's own digest. The shape matches what the real
@@ -22,17 +27,21 @@ import (
 func writeFakeManifest(t *testing.T, blobDir string, layerDigests []digest.Digest) digest.Digest {
 	t.Helper()
 
-	type layer struct {
-		Digest digest.Digest `json:"digest"`
-	}
-	type manifest struct {
-		SchemaVersion int     `json:"schemaVersion"`
-		Layers        []layer `json:"layers"`
-	}
-	mf := manifest{SchemaVersion: 2}
+	layers := make([]fakeManifestLayer, 0, len(layerDigests))
 	for _, ld := range layerDigests {
-		mf.Layers = append(mf.Layers, layer{Digest: ld})
+		layers = append(layers, fakeManifestLayer{Digest: ld})
 	}
+	return writeFakeManifestWithLayers(t, blobDir, layers)
+}
+
+func writeFakeManifestWithLayers(t *testing.T, blobDir string, layers []fakeManifestLayer) digest.Digest {
+	t.Helper()
+
+	type manifest struct {
+		SchemaVersion int                 `json:"schemaVersion"`
+		Layers        []fakeManifestLayer `json:"layers"`
+	}
+	mf := manifest{SchemaVersion: 2, Layers: layers}
 	raw, err := json.Marshal(mf)
 	if err != nil {
 		t.Fatalf("marshal manifest: %v", err)
@@ -83,13 +92,16 @@ func TestEstimatePerImageRSS_TakesMaxAcrossShippedLayers(t *testing.T) {
 	}
 }
 
-func TestEstimatePerImageRSS_SkipsBaselineOnlyLayers(t *testing.T) {
+func TestEstimatePerImageRSS_CountsBaselineOnlyLayers(t *testing.T) {
 	tmp := t.TempDir()
 	blobDir := filepath.Join(tmp, "blobs")
 
 	shippedDigest := fakeShippedDigest("shipped")
 	baselineOnlyDigest := fakeShippedDigest("baseline-only")
-	mfDigest := writeFakeManifest(t, blobDir, []digest.Digest{shippedDigest, baselineOnlyDigest})
+	mfDigest := writeFakeManifestWithLayers(t, blobDir, []fakeManifestLayer{
+		{Digest: shippedDigest, Size: 16 << 20},
+		{Digest: baselineOnlyDigest, Size: 4 << 30},
+	})
 
 	img := diff.ImageEntry{
 		Name: "img",
@@ -98,9 +110,6 @@ func TestEstimatePerImageRSS_SkipsBaselineOnlyLayers(t *testing.T) {
 			MediaType:      "application/vnd.oci.image.manifest.v1+json",
 		},
 	}
-	// Only the shipped layer appears in blobs; baselineOnlyDigest is
-	// resolved from the baseline source at apply time and contributes no
-	// DecodeStream RSS.
 	blobs := map[digest.Digest]diff.BlobEntry{
 		shippedDigest: {Size: 16 << 20, Encoding: diff.EncodingFull, ArchiveSize: 16 << 20},
 	}
@@ -109,10 +118,30 @@ func TestEstimatePerImageRSS_SkipsBaselineOnlyLayers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// 16 MiB → wl=27 → 256 MiB. The baseline-only layer (which would
-	// otherwise dominate at any size) must NOT contribute.
-	if est != (256 << 20) {
-		t.Fatalf("expected only-shipped-layer to drive estimate (256 MiB); got %d bytes", est)
+	if est != (4 << 30) {
+		t.Fatalf("expected baseline-only layer size to drive estimate (4 GiB); got %d bytes", est)
+	}
+}
+
+func TestEstimatePerImageRSS_ZeroLayers(t *testing.T) {
+	tmp := t.TempDir()
+	blobDir := filepath.Join(tmp, "blobs")
+	mfDigest := writeFakeManifestWithLayers(t, blobDir, nil)
+
+	img := diff.ImageEntry{
+		Name: "empty",
+		Target: diff.TargetRef{
+			ManifestDigest: mfDigest,
+			MediaType:      "application/vnd.oci.image.manifest.v1+json",
+		},
+	}
+
+	est, err := estimatePerImageRSS(img, blobDir, nil, 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if est != 0 {
+		t.Fatalf("expected zero-layer manifest estimate 0; got %d", est)
 	}
 }
 

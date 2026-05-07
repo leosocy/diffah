@@ -43,3 +43,19 @@ func TestImportSpoolFlags_DefaultsAndParse(t *testing.T) {
 		t.Fatalf("expected parse error, got %v", err)
 	}
 }
+
+func TestImportSpoolFlags_HelpMentionsBaselineOnlyReuse(t *testing.T) {
+	if !strings.Contains(importSpoolHelp, "Includes baseline-only reuse layer sizes") {
+		t.Fatalf("importSpoolHelp must mention baseline-only reuse layer sizing")
+	}
+
+	cmd := &cobra.Command{Use: "fake"}
+	installImportSpoolFlags(cmd)
+	flag := cmd.Flags().Lookup("memory-budget")
+	if flag == nil {
+		t.Fatal("memory-budget flag not registered")
+	}
+	if !strings.Contains(flag.Usage, "Includes baseline-only reuse layer sizes") {
+		t.Fatalf("memory-budget flag help must mention baseline-only reuse layer sizing; got %q", flag.Usage)
+	}
+}

@@ -75,6 +75,30 @@ jobs:
           fi
           echo "PASS: apply peak RSS ${rss_kib} KiB <= 8 GiB ceiling"
 
+      - name: Apply (baseline-only-reuse scale)
+        env:
+          DIFFAH_SCALE_BENCH: "1"
+        run: |
+          /usr/bin/time -v -o baseline_only_apply_time.out \
+            go test \
+              -tags='big containers_image_openpgp exclude_graphdriver_btrfs exclude_graphdriver_devicemapper' \
+              -timeout=30m \
+              -v \
+              -run TestImport_ScaleBaselineOnlyReuse4GiB \
+              ./pkg/importer/...
+          rss_kib=$(grep -oP 'Maximum resident set size \(kbytes\): \K[0-9]+' baseline_only_apply_time.out || true)
+          if [ -z "${rss_kib}" ]; then
+            echo "FAIL: could not parse baseline-only apply peak RSS from /usr/bin/time output"
+            cat baseline_only_apply_time.out
+            exit 1
+          fi
+          echo "Baseline-only apply Peak RSS: ${rss_kib} KiB"
+          if [ "${rss_kib}" -gt 12582912 ]; then
+            echo "FAIL: baseline-only apply peak RSS ${rss_kib} KiB exceeds 12 GiB ceiling"
+            exit 1
+          fi
+          echo "PASS: baseline-only apply peak RSS ${rss_kib} KiB <= 12 GiB ceiling"
+
       - name: Upload /usr/bin/time output
         if: always()
         uses: actions/upload-artifact@v7
@@ -83,3 +107,4 @@ jobs:
           path: |
             time.out
             apply_time.out
+            baseline_only_apply_time.out

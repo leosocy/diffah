@@ -120,7 +120,7 @@ func (s *bundleImageSource) GetBlob(
 func (s *bundleImageSource) serveBaseline(
 	ctx context.Context, d digest.Digest, cache types.BlobInfoCache,
 ) (io.ReadCloser, int64, error) {
-	rc, err := s.fetchVerifiedBaselineBlob(ctx, d, cache)
+	rc, size, err := s.fetchVerifiedBaselineBlob(ctx, d, cache)
 	if err != nil {
 		if isBlobNotFound(err) {
 			return nil, 0, &ErrMissingBaselineReuseLayer{
@@ -130,12 +130,7 @@ func (s *bundleImageSource) serveBaseline(
 		}
 		return nil, 0, fmt.Errorf("baseline serve %s: %w", d, err)
 	}
-	st, err := rc.(*os.File).Stat()
-	if err != nil {
-		_ = rc.Close()
-		return nil, 0, fmt.Errorf("stat spooled baseline blob %s: %w", d, err)
-	}
-	return rc, st.Size(), nil
+	return rc, size, nil
 }
 
 // serveFull streams a shipped full-encoded blob from disk. Returns a
@@ -326,7 +321,7 @@ func (r *verifyingReadCloser) Close() error {
 // so support flows can locate the apply context.
 func (s *bundleImageSource) fetchVerifiedBaselineBlob(
 	ctx context.Context, d digest.Digest, cache types.BlobInfoCache,
-) (io.ReadCloser, error) {
+) (io.ReadCloser, int64, error) {
 	path, err := s.spool.GetOrSpool(ctx, d, func() (io.ReadCloser, error) {
 		rc, _, gerr := s.baseline.GetBlob(ctx, types.BlobInfo{Digest: d}, cache)
 		return rc, gerr
@@ -336,13 +331,18 @@ func (s *bundleImageSource) fetchVerifiedBaselineBlob(
 		if errors.As(err, &mismatch) && mismatch.ImageName == "" {
 			mismatch.ImageName = s.imageName
 		}
-		return nil, err
+		return nil, 0, err
 	}
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, fmt.Errorf("open spooled baseline blob %s: %w", d, err)
+		return nil, 0, fmt.Errorf("open baseline spool %s: %w", d, err)
 	}
-	return f, nil
+	st, err := f.Stat()
+	if err != nil {
+		_ = f.Close()
+		return nil, 0, fmt.Errorf("stat baseline spool %s: %w", d, err)
+	}
+	return f, st.Size(), nil
 }
 
 // staticSourceRef wraps a prebuilt ImageSource so copy.Image can consume it

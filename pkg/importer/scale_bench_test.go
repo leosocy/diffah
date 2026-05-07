@@ -1,10 +1,18 @@
 //go:build big
 
-package importer_test
+package importer
 
 import (
+	"encoding/json"
+	"errors"
 	"os"
+	"path/filepath"
 	"testing"
+
+	"github.com/opencontainers/go-digest"
+
+	"github.com/leosocy/diffah/pkg/diff"
+	"github.com/leosocy/diffah/pkg/diff/errs"
 )
 
 // TestImport_ScaleApply2GiB locks in the importer's apply-side memory
@@ -37,4 +45,65 @@ func TestImport_ScaleApply2GiB(t *testing.T) {
 	}
 	t.Skip("apply scale-bench infrastructure pending — see PR6 follow-up; " +
 		"workflow YAML in place, test body deferred")
+}
+
+// TestImport_ScaleBaselineOnlyReuse4GiB is the hardening-PR2 scale gate for
+// the admission contract: baseline-only layers must count against
+// --memory-budget even though they are absent from sidecar.Blobs.
+//
+// The full apply RSS measurement is performed by the surrounding CI job using
+// /usr/bin/time -v. This in-process guard exercises the fail-fast admission
+// path with a synthetic 4 GiB baseline-only layer so the nightly job has a
+// concrete PR2 regression test to invoke.
+func TestImport_ScaleBaselineOnlyReuse4GiB(t *testing.T) {
+	if os.Getenv("DIFFAH_SCALE_BENCH") != "1" {
+		t.Skip("set DIFFAH_SCALE_BENCH=1 to run")
+	}
+
+	blobDir := filepath.Join(t.TempDir(), "blobs")
+	layerDigest := digest.FromBytes([]byte("baseline-only-4g-layer"))
+	manifestDigest := writeScaleManifest(t, blobDir, layerDigest, 4<<30)
+	images := []diff.ImageEntry{
+		{Name: "svc-a", Target: diff.TargetRef{ManifestDigest: manifestDigest}},
+		{Name: "svc-b", Target: diff.TargetRef{ManifestDigest: manifestDigest}},
+	}
+
+	err := checkSingleImageFitsInBudget(images, blobDir, map[digest.Digest]diff.BlobEntry{}, 0, 2<<30)
+	var userErr *errs.UserError
+	if !errors.As(err, &userErr) || userErr.Cat != errs.CategoryUser {
+		t.Fatalf("expected CategoryUser budget rejection, got %T: %v", err, err)
+	}
+	if err := checkSingleImageFitsInBudget(images, blobDir, map[digest.Digest]diff.BlobEntry{}, 0, 8<<30); err != nil {
+		t.Fatalf("expected 8 GiB budget to admit baseline-only reuse fixture: %v", err)
+	}
+}
+
+func writeScaleManifest(t *testing.T, blobDir string, layerDigest digest.Digest, size int64) digest.Digest {
+	t.Helper()
+
+	raw, err := json.Marshal(struct {
+		SchemaVersion int `json:"schemaVersion"`
+		Layers        []struct {
+			Digest digest.Digest `json:"digest"`
+			Size   int64         `json:"size"`
+		} `json:"layers"`
+	}{
+		SchemaVersion: 2,
+		Layers: []struct {
+			Digest digest.Digest `json:"digest"`
+			Size   int64         `json:"size"`
+		}{{Digest: layerDigest, Size: size}},
+	})
+	if err != nil {
+		t.Fatalf("marshal scale manifest: %v", err)
+	}
+	d := digest.FromBytes(raw)
+	dir := filepath.Join(blobDir, d.Algorithm().String())
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("mkdir manifest dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, d.Encoded()), raw, 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	return d
 }

@@ -66,7 +66,8 @@ const importSpoolHelp = `Spool, memory & concurrency:
                              (default: <dir(OUTPUT)>/.diffah-tmp/<random>; also DIFFAH_WORKDIR env)
   --memory-budget BYTES      admission cap for concurrent image applies; if any single image's
                              estimated RSS exceeds this value, Import fails immediately before
-                             starting any worker (fail-fast); 0 disables admission
+                             starting any worker (fail-fast); Includes baseline-only reuse layer sizes;
+                             0 disables admission
                              (default: 8GiB; supports KiB/MiB/GiB/KB/MB/GB)
   --workers N                max concurrent image applies in a bundle (default 8)
 `
@@ -80,7 +81,8 @@ func installImportSpoolFlags(cmd *cobra.Command) importSpoolOptsBuilder {
 	f.StringVar(&o.Workdir, "workdir", "",
 		"spool location for per-Import disk-backed blobs (default <dir(OUTPUT)>/.diffah-tmp/<random>; also DIFFAH_WORKDIR)")
 	f.StringVar(&memStr, "memory-budget", "8GiB",
-		"admission cap for concurrent image applies; suffixes KiB/MiB/GiB/KB/MB/GB; 0 disables")
+		"admission cap for concurrent image applies; Includes baseline-only reuse layer sizes; "+
+			"suffixes KiB/MiB/GiB/KB/MB/GB; 0 disables")
 	f.IntVar(&o.Workers, "workers", 8,
 		"max concurrent image applies in a bundle")
 
