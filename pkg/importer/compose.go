@@ -13,6 +13,7 @@ import (
 	"github.com/opencontainers/go-digest"
 	"go.podman.io/image/v5/copy"
 	"go.podman.io/image/v5/docker/reference"
+	"go.podman.io/image/v5/signature"
 	"go.podman.io/image/v5/types"
 
 	"github.com/leosocy/diffah/internal/imageio"
@@ -506,11 +507,31 @@ func composeImage(
 	if destRef.Transport().Name() == FormatDir {
 		copyOpts.PreserveDigests = true
 	}
+	return copyBundleImage(ctx, policyCtx, destRef, src, copyOpts)
+}
+
+func copyBundleImage(
+	ctx context.Context,
+	policyCtx *signature.PolicyContext,
+	destRef types.ImageReference,
+	src *bundleImageSource,
+	copyOpts *copy.Options,
+) error {
 	if _, err := copy.Image(ctx, policyCtx, destRef, src.Reference(), copyOpts); err != nil {
-		return fmt.Errorf("copy to %s: %w", destRef.StringWithinTransport(),
-			diff.ClassifyRegistryErr(err, destRef.StringWithinTransport()))
+		return classifyCopyError(destRef, src, err)
+	}
+	if closeErr := src.Close(); closeErr != nil {
+		return fmt.Errorf("copy to %s: %w", destRef.StringWithinTransport(), closeErr)
 	}
 	return nil
+}
+
+func classifyCopyError(destRef types.ImageReference, src *bundleImageSource, err error) error {
+	if closeErr := src.Close(); closeErr != nil {
+		return fmt.Errorf("copy to %s: %w", destRef.StringWithinTransport(), closeErr)
+	}
+	return fmt.Errorf("copy to %s: %w", destRef.StringWithinTransport(),
+		diff.ClassifyRegistryErr(err, destRef.StringWithinTransport()))
 }
 
 // enforceOutputCompat rejects a destination transport + source manifest

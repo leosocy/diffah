@@ -100,6 +100,7 @@ func TestEveryErrorType_IsCategorized(t *testing.T) {
 		&ErrIntraLayerAssemblyMismatch{},
 		&ErrBaselineBlobDigestMismatch{},
 		&ErrShippedBlobDigestMismatch{},
+		&ErrBlobIncompletelyConsumed{},
 		&ErrBaselineMissingPatchRef{},
 		&ErrIntraLayerUnsupported{},
 		&ErrPhase1Archive{},
