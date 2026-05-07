@@ -64,7 +64,7 @@ func firstUnavailableBaselineOnlyLayer(
 		if _, shipped := bundle.sidecar.Blobs[layer.Digest]; shipped {
 			continue
 		}
-		if err := checkBaselineBlobAvailable(ctx, rb.Src, img.Name, layer.Digest); err != nil {
+		if err := checkBaselineBlobVerified(ctx, rb.Src, img.Name, layer.Digest); err != nil {
 			if isBlobNotFound(err) {
 				return layer.Digest, nil
 			}
@@ -81,7 +81,7 @@ func baselineRefString(rb resolvedBaseline) string {
 	return rb.Ref.StringWithinTransport()
 }
 
-func checkBaselineBlobAvailable(
+func checkBaselineBlobVerified(
 	ctx context.Context, src types.ImageSource, imageName string, d digest.Digest,
 ) error {
 	rc, _, err := src.GetBlob(ctx, types.BlobInfo{Digest: d}, none.NoCache)
