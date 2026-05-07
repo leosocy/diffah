@@ -531,3 +531,47 @@ func TestFetchVerifiedBaselineBlob_ReturnsReadCloser(t *testing.T) {
 	require.Equal(t, payload, got)
 	require.Equal(t, int64(len(payload)), size)
 }
+
+func TestVerifyingReadCloser_CloseBeforeEOFSurfacesError(t *testing.T) {
+	payload := []byte("verify-on-close-payload")
+	expected := digest.FromBytes(payload)
+	path := filepath.Join(t.TempDir(), "blob")
+	require.NoError(t, os.WriteFile(path, payload, 0o600))
+
+	f, err := os.Open(path)
+	require.NoError(t, err)
+	rc := &verifyingReadCloser{
+		f: f, expected: expected, hasher: expected.Algorithm().Hash(),
+		imageName: "svc-close", kind: kindShipped,
+	}
+
+	buf := make([]byte, 4)
+	n, err := rc.Read(buf)
+	require.NoError(t, err)
+	require.Equal(t, 4, n)
+
+	err = rc.Close()
+	var incomplete *diff.ErrBlobIncompletelyConsumed
+	require.ErrorAs(t, err, &incomplete)
+	require.Equal(t, "svc-close", incomplete.ImageName)
+	require.Equal(t, expected.String(), incomplete.Digest)
+}
+
+func TestVerifyingReadCloser_CloseAfterEOFReturnsNil(t *testing.T) {
+	payload := []byte("verify-after-eof-payload")
+	expected := digest.FromBytes(payload)
+	path := filepath.Join(t.TempDir(), "blob")
+	require.NoError(t, os.WriteFile(path, payload, 0o600))
+
+	f, err := os.Open(path)
+	require.NoError(t, err)
+	rc := &verifyingReadCloser{
+		f: f, expected: expected, hasher: expected.Algorithm().Hash(),
+		imageName: "svc-close", kind: kindShipped,
+	}
+
+	got, err := io.ReadAll(rc)
+	require.NoError(t, err)
+	require.Equal(t, payload, got)
+	require.NoError(t, rc.Close())
+}

@@ -132,8 +132,8 @@ func writeFile(path string, r io.Reader, size int64) error {
 		return fmt.Errorf("create %s: %w", path, err)
 	}
 	defer f.Close()
-	if _, err := io.CopyN(f, r, size); err != nil && !errors.Is(err, io.EOF) {
-		return fmt.Errorf("write %s: %w", path, err)
+	if _, err := io.CopyN(f, r, size); err != nil {
+		return fmt.Errorf("write %s (truncated tar entry?): %w", path, err)
 	}
 	return nil
 }

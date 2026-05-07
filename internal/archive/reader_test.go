@@ -275,3 +275,34 @@ func TestReadSidecarAndManifestBlobs_MissingBlobReturnsError(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "not found in archive")
 }
+
+func TestWriteFile_TruncatedTarEntryRejected(t *testing.T) {
+	err := writeFile(filepath.Join(t.TempDir(), "blob.bin"), strings.NewReader("short"), 1024)
+
+	require.Error(t, err)
+	require.ErrorContains(t, err, "truncated tar entry")
+}
+
+func TestExtract_TruncatedTarEntryRejected(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "truncated.tar")
+	f, err := os.Create(out)
+	require.NoError(t, err)
+	tw := tar.NewWriter(f)
+
+	require.NoError(t, tw.WriteHeader(&tar.Header{
+		Name: diff.SidecarFilename, Mode: 0o644, Size: 2,
+	}))
+	_, err = tw.Write([]byte("{}"))
+	require.NoError(t, err)
+	require.NoError(t, tw.WriteHeader(&tar.Header{
+		Name: "blob.bin", Mode: 0o644, Size: 1024,
+	}))
+	_, err = tw.Write([]byte(strings.Repeat("x", 512)))
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
+
+	_, err = Extract(out, t.TempDir())
+	require.Error(t, err)
+	require.ErrorContains(t, err, "truncated tar entry")
+	require.ErrorContains(t, err, "blob.bin")
+}

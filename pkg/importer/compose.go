@@ -259,6 +259,7 @@ type verifyingReadCloser struct {
 	imageName   string
 	kind        readerKind
 	scratchPath string // non-empty iff kind == kindAssembled
+	verified    bool   // set only after EOF triggers digest verification
 }
 
 func (r *verifyingReadCloser) Read(p []byte) (int, error) {
@@ -267,6 +268,7 @@ func (r *verifyingReadCloser) Read(p []byte) (int, error) {
 		_, _ = r.hasher.Write(p[:n])
 	}
 	if errors.Is(err, io.EOF) {
+		r.verified = true
 		got := digest.NewDigest(r.expected.Algorithm(), r.hasher)
 		if got != r.expected {
 			return n, r.mismatchErr(got)
@@ -297,7 +299,30 @@ func (r *verifyingReadCloser) Close() error {
 	if r.scratchPath != "" {
 		_ = os.Remove(r.scratchPath)
 	}
+	if err == nil && !r.verified {
+		return r.incompleteErr()
+	}
 	return err
+}
+
+func (r *verifyingReadCloser) incompleteErr() error {
+	switch r.kind {
+	case kindShipped:
+		return &diff.ErrBlobIncompletelyConsumed{
+			Kind:      "shipped",
+			Digest:    r.expected.String(),
+			ImageName: r.imageName,
+		}
+	case kindAssembled:
+		return &diff.ErrBlobIncompletelyConsumed{
+			Kind:   "assembled",
+			Digest: r.expected.String(),
+		}
+	}
+	// Defensive: a future kind addition must not silently treat an
+	// unverified close as success.
+	return fmt.Errorf("verifyingReadCloser: closed unverified, unknown kind %d for %s",
+		r.kind, r.expected)
 }
 
 // fetchVerifiedBaselineBlob reads `d` from the wrapped baseline source and

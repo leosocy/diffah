@@ -120,6 +120,22 @@ func (e *ErrShippedBlobDigestMismatch) Error() string {
 		e.ImageName, e.Digest, e.Got)
 }
 
+// ErrBlobIncompletelyConsumed is returned when a blob verifier is closed
+// before EOF, so the final digest check never ran.
+type ErrBlobIncompletelyConsumed struct {
+	Kind      string
+	Digest    string
+	ImageName string
+}
+
+func (e *ErrBlobIncompletelyConsumed) Error() string {
+	if e.ImageName != "" {
+		return fmt.Sprintf("%s blob %s closed before EOF; integrity unverified (image=%s)",
+			e.Kind, e.Digest, e.ImageName)
+	}
+	return fmt.Sprintf("%s blob %s closed before EOF; integrity unverified", e.Kind, e.Digest)
+}
+
 // ErrBaselineMissingPatchRef is the patch-specific sibling of
 // ErrBaselineMissingBlob. Raised when a shipped layer with encoding=patch
 // names a patch_from_digest that is absent from the provided baseline.
@@ -323,6 +339,7 @@ func (*ErrIntraLayerAssemblyMismatch) Category() errs.Category { return errs.Cat
 
 func (*ErrBaselineBlobDigestMismatch) Category() errs.Category { return errs.CategoryContent }
 func (*ErrShippedBlobDigestMismatch) Category() errs.Category  { return errs.CategoryContent }
+func (*ErrBlobIncompletelyConsumed) Category() errs.Category   { return errs.CategoryContent }
 
 func (*ErrBaselineMissingPatchRef) Category() errs.Category { return errs.CategoryUser }
 func (*ErrBaselineMissingPatchRef) NextAction() string {
@@ -406,6 +423,7 @@ var (
 	_ errs.Categorized = (*ErrIntraLayerAssemblyMismatch)(nil)
 	_ errs.Categorized = (*ErrBaselineBlobDigestMismatch)(nil)
 	_ errs.Categorized = (*ErrShippedBlobDigestMismatch)(nil)
+	_ errs.Categorized = (*ErrBlobIncompletelyConsumed)(nil)
 	_ errs.Categorized = (*ErrBaselineMissingPatchRef)(nil)
 	_ errs.Categorized = (*ErrIntraLayerUnsupported)(nil)
 	_ errs.Categorized = (*ErrPhase1Archive)(nil)
