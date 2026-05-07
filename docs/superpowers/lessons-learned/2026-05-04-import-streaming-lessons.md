@@ -195,6 +195,61 @@ shipped without all the schema fields current `diff.Sidecar` requires —
 the generator may need to mark legacy fields with `omitempty` or the
 test may need a tolerant parse path.
 
+## Post-merge retrospective amendments
+
+**A15. Apply-side config keys consciously merged with diff-side,
+against the plan.**
+Plan PR1 (`docs/superpowers/plans/2026-05-04-import-streaming-io.md`
+lines 56, 84, 129-130, 265-266) and spec §4.4 + §13 acceptance #6
+(`docs/superpowers/specs/2026-05-04-import-streaming-io-design.md`
+lines 35, 223-224, 362) called for separate `apply-workdir` /
+`apply-memory-budget` / `apply-workers` keys in `pkg/config.Config`.
+The PR1 implementer collapsed them: apply / unbundle reuse `workdir`
+/ `memory-budget` from the diff-side and the `--workers=8` default
+is hard-coded inside `installImportSpoolFlags`. Decision rationale
+lives in the comment at `cmd/config_defaults_test.go:37-40`:
+per-command differentiation is via CLI flags, not config keys;
+sharing keeps the operator's mental model "one workdir, one budget"
+rather than "did I set both, which wins?"
+**How to apply:** Treat the plan/spec text on this point as
+superseded by the implementation; do not "fix" the divergence by
+re-introducing the split keys. Future PRs that add command-specific
+spool knobs should weigh this same trade-off; default to one shared
+key unless there is a concrete operator-facing reason to split.
+Per-invocation asymmetry is still reachable via CLI flags (`apply
+--memory-budget=4GiB` overrides the shared config value for that one
+invocation).
+
+**A16. Baseline-only reuse still buffers entire blob in RAM via
+`os.ReadFile`.**
+`pkg/importer/compose.go::fetchVerifiedBaselineBlob` (lines 307-321)
+reads the spooled file with `os.ReadFile` and returns `[]byte`; the
+helper's own TODO at lines 298-301 acknowledges this as a known
+follow-up but the gap never made it into this lessons doc, so the
+post-merge retrospective surfaced it as if it were new. The
+per-image admission estimator at `pkg/importer/admission.go:55-60`
+skips baseline-only layers entirely (`continue` in the loop), so
+the worst case is `Workers × max-baseline-only-blob-size` of
+unaccounted heap: 8 workers each touching a 4 GiB baseline-only
+layer can allocate ~32 GiB while the budget gate reports near-zero
+estimate. The headline `--memory-budget` UX is therefore false in
+any bundle that exercises baseline reuse on multi-GiB layers — the
+disk-spool acceptance the plan claimed is necessary but not
+sufficient for the budget contract.
+**How to apply:** Follow-up PR must (a) change
+`fetchVerifiedBaselineBlob` return type from `([]byte, error)` to
+`(io.ReadCloser, int64, error)` backed by `os.Open(path)` + `Stat`,
+propagating through `bundleImageSource.GetBlob` so callers stream
+rather than slurp; (b) extend `estimatePerImageRSS` to include
+baseline-only layer sizes from the target manifest — those bytes
+still hit the OS page cache and contribute to apply-time RSS even
+though no zstd decoder window is live; (c) add an apply-side
+scale-bench fixture that exercises a baseline-only-reuse layer
+≥ 4 GiB so the existing nightly bench actually proves the
+baseline-reuse path respects the budget, not just the patch path.
+Spec §13 acceptance must be augmented with this scenario before
+this gap can be considered closed.
+
 ---
 
 (End of current amendments. Future PRs append below.)
