@@ -137,7 +137,9 @@ work at any worker count. Tracked here so PR6/PR7 reviewers don't lose
 the breadcrumb.
 **How to apply:** When implementing per-image baseline preflight
 (future), revisit `cmd/unbundle_preflight_integration_test.go`'s
-`--workers=1` pins and remove them.
+`--workers=1` pins and remove them. **Closure: A10 follow-up landed in
+hardening PR4 (`feat/hardening-pr4-baseline-preflight`); the
+`--workers=1` pins are removed.**
 
 ## Post-PR-6 amendments
 

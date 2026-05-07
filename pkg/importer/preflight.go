@@ -31,6 +31,10 @@ const (
 	// a layer the delta did not ship and the baseline does not contain.
 	// Apply cannot satisfy that layer from any source.
 	PreflightMissingReuseLayer
+	// PreflightBaselineMissing means the per-image baseline-completeness
+	// preflight could not fetch a required baseline-only layer from that
+	// image's own resolved baseline source.
+	PreflightBaselineMissing
 	// PreflightError covers transport / I/O failures encountered during
 	// the scan itself (baseline manifest fetch failure, etc.). Not a
 	// content classification — partial mode treats it the same as a
@@ -49,6 +53,7 @@ const (
 type PreflightResult struct {
 	ImageName           string
 	Status              PreflightStatus
+	LayerDigest         digest.Digest
 	MissingPatchSources []digest.Digest
 	MissingReuseLayers  []digest.Digest
 	Err                 error
@@ -219,6 +224,8 @@ func (s PreflightStatus) String() string {
 		return "missing-patch-source"
 	case PreflightMissingReuseLayer:
 		return "missing-reuse-layer"
+	case PreflightBaselineMissing:
+		return "baseline-missing"
 	case PreflightError:
 		return "error"
 	case PreflightSchemaError:

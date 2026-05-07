@@ -17,8 +17,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/leosocy/diffah/pkg/diff"
 	"github.com/stretchr/testify/require"
+
+	"github.com/leosocy/diffah/pkg/diff"
 )
 
 // mustProduceSignedDelta runs `diffah diff --sign-key <fixture>` on the

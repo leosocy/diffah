@@ -365,10 +365,11 @@ The spec is satisfied when **all of the following** are demonstrable on master:
 9. I6: `testdata/fixtures/phase3-bundle-min.tar` is committed and `pkg/importer/compose_phase3_test.go` passes against it.
 10. `.github/workflows/scale-bench.yml` includes an apply phase asserting RSS ≤ 8 GiB via `/usr/bin/time -v`; nightly run on master green for at least one full nightly cycle before this spec is closed.
 11. Pre-PR-7 amendments doc exists at `docs/superpowers/lessons-learned/2026-05-04-import-streaming-lessons.md`; future implementers find amendments in the dedicated doc, not in the plan body.
-12. **Bandwidth parity (Goal 3).** A `cmd/apply_registry_integration_test.go` (or sibling) test asserts that for an N-image bundle sharing K distinct baseline digests across patch entries, the registry sees exactly K `GetBlob` calls (not K × patch-count). Tightens the existing loose `≤6` slack assertions to "exactly K" (closes a gap that was already on the queue from `phase234_review_findings_2026-04-25.md`).
+12. **Bandwidth parity (Goal 3).** A `cmd/apply_registry_integration_test.go` (or sibling) test asserts that for an N-image bundle sharing K distinct baseline digests across patch entries, apply-time registry reads still deduplicate to exactly K shared-spool `GetBlob` calls (not K × patch-count). Hardening PR4 adds one per-image baseline preflight probe before the shared spool exists, so observable registry smoke tests account for `N` preflight probes plus `K` apply-spool fetches.
 13. **Cleanup contract (Goal 5).** Integration tests cover three of the §7 cleanup paths and assert `os.Stat(workdir) == NotExist`: (a) successful `Import()`, (b) ctx-cancel mid-apply, (c) injected worker-goroutine panic. The remaining paths (partial mode, all-fail, disk-full simulation) are covered by unit tests on the relevant components.
+14. **Per-image baseline-completeness preflight (hardening PR4).** Before `importEachImage` constructs its admission pool, every image in `applyList` is checked against its resolved baseline source for the presence of all baseline-only layer digests declared in its target manifest. Cross-image masking through the digest-keyed shared spool is impossible at any worker count. Failures surface as `*ErrMissingBaselineReuseLayer` in the apply report under `PreflightBaselineMissing` status.
 
-When all 13 hold, set this spec's `Status:` field to `Done`.
+When all 14 hold, set this spec's `Status:` field to `Done`.
 
 ---
 

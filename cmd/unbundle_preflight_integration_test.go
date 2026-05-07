@@ -15,20 +15,11 @@ import (
 	"github.com/leosocy/diffah/pkg/diff"
 )
 
-// TestUnbundleCLI_PartialModeRecordsApplyTimeB2 proves that without --strict,
-// when one image's apply path raises B2 (missing baseline reuse layer), the
-// importer records the failure and continues; other images still apply.
-// Exit 0; final summary reports "applied 1/2 images" and names the failing
-// service.
-//
-// Note: this test exercises the apply-time B2 fallback rather than the
-// preflight scan. stripLayerFromOCIArchive removes the blob without
-// rewriting the manifest descriptor, so RunPreflight sees the manifest
-// still listing the layer and classifies as PreflightOK; the missing-blob
-// condition is detected at GetBlob time during composeImage. The
-// preflight-driven B1/B2 classification is covered at unit level in
-// pkg/importer/preflight_test.go (TestScanOneImage_*).
-func TestUnbundleCLI_PartialModeRecordsApplyTimeB2(t *testing.T) {
+// TestUnbundleCLI_PartialModeRecordsPreflightB2 proves that without --strict,
+// per-image baseline preflight detects a missing baseline-only reuse blob,
+// records the failure, and still applies other images at the default worker
+// count.
+func TestUnbundleCLI_PartialModeRecordsPreflightB2(t *testing.T) {
 	root := findRepoRoot(t)
 	bin := integrationBinary(t)
 	tmp := t.TempDir()
@@ -56,18 +47,7 @@ func TestUnbundleCLI_PartialModeRecordsApplyTimeB2(t *testing.T) {
 		},
 	})
 
-	// --workers=1 pins serial execution. See buildTwoImageBundleWithB2's
-	// comment: the importer's shared BaselineSpool dedups blob fetches by
-	// digest across images, so if svc-a (with the complete baseline) ran
-	// concurrently with svc-b, svc-a's successful fetch of the shared
-	// reuse-layer digest would prime the spool and mask svc-b's B2. The
-	// "svc-b first" ordering trick from PR3 only works under serial; PR5's
-	// admission pool removes that ordering guarantee. Whether to enforce
-	// per-image baseline completeness in a multi-baseline scenario is a
-	// follow-up; this test continues to assert the per-image error path
-	// when serial ordering is preserved.
 	_, stderr, exit := runDiffahBin(t, bin, "unbundle",
-		"--workers", "1",
 		bundlePath, baselinesPath, outputsPath)
 
 	require.Equalf(t, 0, exit, "partial mode: exit = %d, want 0; stderr=%s", exit, stderr)
@@ -84,18 +64,9 @@ func TestUnbundleCLI_PartialModeRecordsApplyTimeB2(t *testing.T) {
 	}
 }
 
-// TestUnbundleCLI_StrictAbortsOnFirstApplyFailure proves --strict + an
-// apply-time B2 produces exit 4 and prevents subsequent images from being
-// written. The summary on stderr lists the failing image.
-//
-// Note: as with TestUnbundleCLI_PartialModeRecordsApplyTimeB2, the failure
-// path here is the apply-time B2 fallback (compose-side GetBlob ENOENT)
-// rather than preflight; importEachImage's strict early-return aborts the
-// loop before svc-a's apply runs. The plan's "scan-all-then-abort" name
-// applies to PreflightStrict, which is covered by the
-// abortWithPreflightSummary code path and the unit-level scan tests in
-// preflight_test.go.
-func TestUnbundleCLI_StrictAbortsOnFirstApplyFailure(t *testing.T) {
+// TestUnbundleCLI_StrictAbortsOnPreflightB2 proves --strict + a per-image
+// baseline-preflight B2 produces exit 4 and prevents any output writes.
+func TestUnbundleCLI_StrictAbortsOnPreflightB2(t *testing.T) {
 	root := findRepoRoot(t)
 	bin := integrationBinary(t)
 	tmp := t.TempDir()
@@ -119,11 +90,7 @@ func TestUnbundleCLI_StrictAbortsOnFirstApplyFailure(t *testing.T) {
 		},
 	})
 
-	// --workers=1 pins serial execution; same rationale as
-	// TestUnbundleCLI_PartialModeRecordsApplyTimeB2: shared BaselineSpool
-	// would otherwise let svc-a satisfy svc-b's B2-trigger fetch.
 	_, stderr, exit := runDiffahBin(t, bin, "unbundle", "--strict",
-		"--workers", "1",
 		bundlePath, baselinesPath, outputsPath)
 
 	require.Equalf(t, 4, exit, "strict mode: exit = %d, want 4; stderr=%s", exit, stderr)
@@ -138,12 +105,6 @@ func TestUnbundleCLI_StrictAbortsOnFirstApplyFailure(t *testing.T) {
 // baseline archives, the second of which has had its first reuse layer
 // stripped to simulate a B2 condition. Returns (bundlePath, svcABaseline,
 // svcBBaselineStripped). All artifacts live under tmp.
-//
-// The implementation runs the project's own `diffah bundle` against a
-// synthesized 2-image bundle spec built on the existing v1/v2 OCI fixtures
-// (the same ones used by apply_resilience_integration_test.go). This keeps
-// the test resilient to upstream sidecar shape changes — whatever the
-// official bundler emits, the test consumes.
 func buildTwoImageBundleWithB2(t *testing.T, bin, root, tmp string) (
 	bundlePath, svcABaseline, svcBBaselineStripped string,
 ) {

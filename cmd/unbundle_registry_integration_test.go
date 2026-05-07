@@ -96,16 +96,14 @@ func TestUnbundleCLI_MixedDestinations(t *testing.T) {
 	require.Greater(t, info.Size(), int64(0))
 }
 
-// TestUnbundleCLI_BaselineBlobsFetchedExactlyOnce_MultiImage builds
-// a two-pair bundle whose pairs share identical baseline content
+// TestUnbundleCLI_BaselineBlobsFetchedOncePerPreflightPlusApply_MultiImage
+// builds a two-pair bundle whose pairs share identical baseline content
 // (same fixture pushed to two distinct registry repos, app-a/v1 and
-// app-b/v1). After diffah unbundle, every distinct baseline blob
-// digest must appear in BlobHits exactly once total across both
-// repos — proving the per-Import BaselineSpool deduplicates
-// fetches across images. Without the cache this assertion fails
-// because each bundleImageSource opens an independent ImageSource
-// and re-fetches every required blob.
-func TestUnbundleCLI_BaselineBlobsFetchedExactlyOnce_MultiImage(t *testing.T) {
+// app-b/v1). PR4's per-image baseline preflight probes each image's own
+// baseline source once before the shared spool exists; apply-time fetches
+// should still be deduplicated to one additional cross-image fetch by the
+// per-Import BaselineSpool.
+func TestUnbundleCLI_BaselineBlobsFetchedOncePerPreflightPlusApply_MultiImage(t *testing.T) {
 	root := findRepoRoot(t)
 	bin := integrationBinary(t)
 	srv := registrytest.New(t)
@@ -173,10 +171,12 @@ func TestUnbundleCLI_BaselineBlobsFetchedExactlyOnce_MultiImage(t *testing.T) {
 	}
 	require.NotEmptyf(t, totalPerDigest,
 		"expected at least one baseline-blob fetch across app-a/v1 and app-b/v1 — fixture must exercise the baseline-fetch path")
+	wantHitsPerDigest := len(baselineSpec["baselines"].(map[string]string)) + 1
 	for d, n := range totalPerDigest {
 		t.Logf("baseline blob %s total cross-repo hits=%d", d, n)
-		require.Equalf(t, 1, n,
-			"baseline blob %s fetched %d times across app-a/v1 + app-b/v1; want exactly 1 — dedup regression", d, n)
+		require.Equalf(t, wantHitsPerDigest, n,
+			"baseline blob %s fetched %d times across app-a/v1 + app-b/v1; want %d (one per-image preflight probe plus one shared apply-spool fetch)",
+			d, n, wantHitsPerDigest)
 	}
 
 	for _, name := range []string{"restored-a.tar", "restored-b.tar"} {

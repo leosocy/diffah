@@ -15,8 +15,9 @@ import (
 )
 
 const (
-	testPreflightSvcA = "svc-a"
-	testPreflightSvcB = "svc-b"
+	testPreflightSvcA  = "svc-a"
+	testPreflightSvcB  = "svc-b"
+	testPreflightReuse = digest.Digest("sha256:reuse")
 )
 
 func TestComputeRequiredBaselineDigests(t *testing.T) {
@@ -48,7 +49,7 @@ func TestComputeRequiredBaselineDigests(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	wantReuse := []digest.Digest{"sha256:reuse"}
+	wantReuse := []digest.Digest{testPreflightReuse}
 	wantPatchSrcs := []digest.Digest{"sha256:patch-src"}
 	if !equalDigestSets(reuse, wantReuse) {
 		t.Errorf("reuse = %v, want %v", reuse, wantReuse)
@@ -76,7 +77,7 @@ func equalDigestSets(a, b []digest.Digest) bool {
 
 func TestScanOneImage_AllOK(t *testing.T) {
 	bundle, img, rb := buildPreflightFixture(t, []digest.Digest{
-		"sha256:patch-src", "sha256:reuse", "sha256:cfg",
+		"sha256:patch-src", testPreflightReuse, "sha256:cfg",
 	})
 	r := scanOneImage(context.Background(), bundle, img, rb)
 	if r.Status != PreflightOK {
@@ -86,7 +87,7 @@ func TestScanOneImage_AllOK(t *testing.T) {
 
 func TestScanOneImage_B1_OnlyPatchSrcMissing(t *testing.T) {
 	bundle, img, rb := buildPreflightFixture(t, []digest.Digest{
-		"sha256:reuse", "sha256:cfg",
+		testPreflightReuse, "sha256:cfg",
 	})
 	r := scanOneImage(context.Background(), bundle, img, rb)
 	if r.Status != PreflightMissingPatchSource {
@@ -105,7 +106,7 @@ func TestScanOneImage_B2_OnlyReuseMissing(t *testing.T) {
 	if r.Status != PreflightMissingReuseLayer {
 		t.Errorf("Status = %v, want PreflightMissingReuseLayer", r.Status)
 	}
-	if len(r.MissingReuseLayers) != 1 || r.MissingReuseLayers[0] != "sha256:reuse" {
+	if len(r.MissingReuseLayers) != 1 || r.MissingReuseLayers[0] != testPreflightReuse {
 		t.Errorf("MissingReuseLayers = %v", r.MissingReuseLayers)
 	}
 }
@@ -287,6 +288,7 @@ func TestPreflightStatusString(t *testing.T) {
 		{PreflightOK, "ok"},
 		{PreflightMissingPatchSource, "missing-patch-source"},
 		{PreflightMissingReuseLayer, "missing-reuse-layer"},
+		{PreflightBaselineMissing, "baseline-missing"},
 		{PreflightError, "error"},
 		{PreflightSchemaError, "schema-error"},
 	}
@@ -320,15 +322,44 @@ func TestPreflightResultToErr_B2RoundTrip(t *testing.T) {
 	r := PreflightResult{
 		ImageName:          testPreflightSvcB,
 		Status:             PreflightMissingReuseLayer,
-		MissingReuseLayers: []digest.Digest{"sha256:reuse"},
+		MissingReuseLayers: []digest.Digest{testPreflightReuse},
 	}
 	err := preflightResultToErr(r)
 	var be *ErrMissingBaselineReuseLayer
 	if !errors.As(err, &be) {
 		t.Fatalf("got %T, want *ErrMissingBaselineReuseLayer", err)
 	}
-	if be.ImageName != testPreflightSvcB || be.LayerDigest != "sha256:reuse" {
-		t.Errorf("got %+v, want svc-b/sha256:reuse", be)
+	if be.ImageName != testPreflightSvcB || be.LayerDigest != testPreflightReuse {
+		t.Errorf("got %+v, want svc-b/%s", be, testPreflightReuse)
+	}
+}
+
+func TestPreflightResultToErr_BaselineMissingRoundTrip(t *testing.T) {
+	r := PreflightResult{
+		ImageName:   testPreflightSvcB,
+		Status:      PreflightBaselineMissing,
+		LayerDigest: testPreflightReuse,
+	}
+	err := preflightResultToErr(r)
+	var be *ErrMissingBaselineReuseLayer
+	if !errors.As(err, &be) {
+		t.Fatalf("got %T, want *ErrMissingBaselineReuseLayer", err)
+	}
+	if be.ImageName != testPreflightSvcB || be.LayerDigest != testPreflightReuse {
+		t.Errorf("got %+v, want svc-b/%s", be, testPreflightReuse)
+	}
+}
+
+func TestPreflightResultToErr_BaselineMissingPreservesCause(t *testing.T) {
+	cause := errors.New("registry unavailable")
+	r := PreflightResult{
+		ImageName:   testPreflightSvcB,
+		Status:      PreflightBaselineMissing,
+		LayerDigest: testPreflightReuse,
+		Err:         cause,
+	}
+	if got := preflightResultToErr(r); !errors.Is(got, cause) {
+		t.Fatalf("got %v, want preserved cause %v", got, cause)
 	}
 }
 

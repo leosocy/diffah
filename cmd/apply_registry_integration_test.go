@@ -313,16 +313,11 @@ func TestApplyCLI_MissingManifestExit4(t *testing.T) {
 	require.True(t, manifestOrNotFound, "expected manifest-related error in stderr; got: %s", stderr)
 }
 
-// TestApplyCLI_BaselineBlobsFetchedExactlyOnce_SingleImage runs the
-// standard v1→v2 fixture through the apply path against a docker://
-// baseline and asserts every distinct baseline blob digest was
-// fetched at most once. This is forward-protection: even if the
-// current fixture happens not to expose duplicate baseline-blob
-// fetches (it depends on which target layers reduce against which
-// baseline layers), the assertion locks in the per-Import cache
-// guarantee for any future fixture evolution that might reintroduce
-// the regression.
-func TestApplyCLI_BaselineBlobsFetchedExactlyOnce_SingleImage(t *testing.T) {
+// TestApplyCLI_BaselineBlobsFetchedOnceForPreflightAndApply_SingleImage runs
+// the standard v1→v2 fixture through the apply path against a docker://
+// baseline and asserts every distinct baseline blob digest is fetched no more
+// than once by PR4's per-image preflight and once by the apply-time spool.
+func TestApplyCLI_BaselineBlobsFetchedOnceForPreflightAndApply_SingleImage(t *testing.T) {
 	root := findRepoRoot(t)
 	bin := integrationBinary(t)
 	srv := registrytest.New(t)
@@ -353,7 +348,8 @@ func TestApplyCLI_BaselineBlobsFetchedExactlyOnce_SingleImage(t *testing.T) {
 		"expected at least one baseline-blob fetch from app/v1 — fixture must exercise the baseline-fetch path")
 	for d, n := range hits {
 		t.Logf("baseline blob %s hits=%d", d, n)
-		require.Equalf(t, 1, n,
-			"baseline blob %s fetched %d times; want exactly 1 — dedup regression", d, n)
+		require.LessOrEqualf(t, n, 2,
+			"baseline blob %s fetched %d times; want at most 2 (one preflight probe plus one apply-spool fetch)",
+			d, n)
 	}
 }

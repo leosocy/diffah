@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"sort"
@@ -116,27 +117,23 @@ func Import(ctx context.Context, opts Options) error {
 	rep := opts.reporter()
 	rep.Phase("extracting")
 
-	resolvedByName := make(map[string]resolvedBaseline, len(resolved))
-	for _, r := range resolved {
-		resolvedByName[r.Name] = r
-	}
+	resolvedByName := resolvedBaselinesByName(resolved)
 
 	preflightResults, anyPreflightFail, perr := RunPreflight(ctx, bundle, resolved, rep)
 	if perr != nil {
-		// Schema-error: bundle-internal manifest failed to parse. Fatal in
-		// every mode — never produce a partial success when the delta
-		// itself is malformed.
 		return perr
 	}
 	if opts.Strict && anyPreflightFail {
-		// Strict mode performs a scan-all-then-abort: every image is
-		// classified before we exit, so the operator sees the complete
-		// failure picture rather than discovering issues one --strict
-		// run at a time.
 		return abortWithPreflightSummary(preflightResults)
 	}
 
 	applyList, skippedByPreflight := splitPreflightResults(preflightResults)
+	if applyList, err = runAndMergeBaselinePreflight(
+		ctx, opts.Strict, applyList, skippedByPreflight, preflightResults, bundle, resolvedByName,
+	); err != nil {
+		return err
+	}
+
 	spool, err := newImportSpool(wd)
 	if err != nil {
 		return err
@@ -154,6 +151,47 @@ func Import(ctx context.Context, opts Options) error {
 		return firstNonOKError(report)
 	}
 	return nil
+}
+
+func resolvedBaselinesByName(resolved []resolvedBaseline) map[string]resolvedBaseline {
+	out := make(map[string]resolvedBaseline, len(resolved))
+	for _, r := range resolved {
+		out[r.Name] = r
+	}
+	return out
+}
+
+func runAndMergeBaselinePreflight(
+	ctx context.Context,
+	strict bool,
+	applyList []string,
+	skippedByPreflight map[string]PreflightResult,
+	preflightResults []PreflightResult,
+	bundle *extractedBundle,
+	resolvedByName map[string]resolvedBaseline,
+) ([]string, error) {
+	applyList, baselineSkipped := runBaselinePreflight(ctx, applyList, bundle, resolvedByName)
+	maps.Copy(skippedByPreflight, baselineSkipped)
+	if strict && len(baselineSkipped) > 0 {
+		return nil, abortWithPreflightSummary(
+			mergeBaselinePreflightResults(preflightResults, baselineSkipped),
+		)
+	}
+	return applyList, nil
+}
+
+func mergeBaselinePreflightResults(
+	results []PreflightResult, baselineSkipped map[string]PreflightResult,
+) []PreflightResult {
+	merged := make([]PreflightResult, 0, len(results))
+	for _, r := range results {
+		if b, ok := baselineSkipped[r.ImageName]; ok {
+			merged = append(merged, b)
+			continue
+		}
+		merged = append(merged, r)
+	}
+	return merged
 }
 
 // mergePreflightSkips appends one ApplyImageSkippedPreflight entry per
@@ -579,10 +617,27 @@ func preflightResultToErr(r PreflightResult) error {
 			ImageName:   r.ImageName,
 			LayerDigest: firstOrEmptyDigest(r.MissingReuseLayers),
 		}
+	case PreflightBaselineMissing:
+		if r.Err != nil {
+			return r.Err
+		}
+		return &ErrMissingBaselineReuseLayer{
+			ImageName:   r.ImageName,
+			LayerDigest: firstNonEmptyDigest(r.LayerDigest, firstOrEmptyDigest(r.MissingReuseLayers)),
+		}
 	case PreflightError, PreflightSchemaError:
 		return r.Err
 	}
 	return nil
+}
+
+func firstNonEmptyDigest(ds ...digest.Digest) digest.Digest {
+	for _, d := range ds {
+		if d != "" {
+			return d
+		}
+	}
+	return ""
 }
 
 func firstOrEmptyDigest(ds []digest.Digest) digest.Digest {
