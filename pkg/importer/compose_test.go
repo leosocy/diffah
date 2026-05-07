@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
 
@@ -473,6 +474,32 @@ func TestGetBlob_BaselineReuse_StreamsFromFile(t *testing.T) {
 	st, err := f.Stat()
 	require.NoError(t, err)
 	require.Equal(t, st.Size(), size, "reported size must match file stat, not len([]byte)")
+}
+
+func TestGetBlob_BaselineReuse_CloseWithoutReadClosesFileDescriptor(t *testing.T) {
+	payload := []byte("baseline-only-reuse-layer-fd-check")
+	d := digest.FromBytes(payload)
+
+	src := &bundleImageSource{
+		blobDir:   t.TempDir(),
+		imageName: "svc-fd",
+		baseline:  &fakeFixedBytesSource{bytes: payload},
+		spool:     NewBaselineSpool(t.TempDir()),
+		sidecar:   &diff.Sidecar{Blobs: map[digest.Digest]diff.BlobEntry{}},
+	}
+
+	rc, _, err := src.GetBlob(context.Background(), types.BlobInfo{Digest: d}, nil)
+	require.NoError(t, err)
+	f, ok := rc.(*os.File)
+	require.True(t, ok, "expected *os.File, got %T", rc)
+	path := f.Name()
+
+	var st syscall.Stat_t
+	fd := int(f.Fd())
+	require.NoError(t, syscall.Fstat(fd, &st), "expected %s file descriptor to be open", path)
+	require.NoError(t, rc.Close())
+	require.ErrorIs(t, syscall.Fstat(fd, &st), syscall.EBADF,
+		"early Close must release the baseline-only file descriptor")
 }
 
 // TestFetchVerifiedBaselineBlob_ReturnsReadCloser verifies that

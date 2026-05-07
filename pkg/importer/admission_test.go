@@ -180,6 +180,29 @@ func TestCheckSingleImageFitsInBudget_RejectsOversize(t *testing.T) {
 	}
 }
 
+func TestCheckSingleImageFitsInBudget_RejectsAllOversizeImages(t *testing.T) {
+	tmp := t.TempDir()
+	blobDir := filepath.Join(tmp, "blobs")
+
+	bigDigest := fakeShippedDigest("shared-4g")
+	mfDigest := writeFakeManifest(t, blobDir, []digest.Digest{bigDigest})
+	images := []diff.ImageEntry{
+		{Name: "svc-a", Target: diff.TargetRef{ManifestDigest: mfDigest}},
+		{Name: "svc-b", Target: diff.TargetRef{ManifestDigest: mfDigest}},
+	}
+	blobs := map[digest.Digest]diff.BlobEntry{
+		bigDigest: {Size: 4 << 30, Encoding: diff.EncodingFull, ArchiveSize: 4 << 30},
+	}
+
+	err := checkSingleImageFitsInBudget(images, blobDir, blobs, 0, 256<<20)
+	if err == nil {
+		t.Fatal("expected user-facing error for oversized images, got nil")
+	}
+	if !strings.Contains(err.Error(), "svc-a") || !strings.Contains(err.Error(), "svc-b") {
+		t.Fatalf("expected error to mention both oversized images; got %q", err.Error())
+	}
+}
+
 func TestCheckSingleImageFitsInBudget_BudgetZeroOptsOut(t *testing.T) {
 	tmp := t.TempDir()
 	blobDir := filepath.Join(tmp, "blobs")

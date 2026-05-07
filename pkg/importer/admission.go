@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/opencontainers/go-digest"
 
@@ -91,19 +92,23 @@ func checkSingleImageFitsInBudget(
 	if memBudget <= 0 {
 		return nil
 	}
+	var oversized []string
 	for _, img := range images {
 		est, err := estimatePerImageRSS(img, blobDir, blobs, userWindowLog)
 		if err != nil {
 			return err
 		}
 		if est > memBudget {
-			return &errs.UserError{
-				Cat: errs.CategoryUser,
-				Msg: fmt.Sprintf(
-					"image %q requires %d byte(s) of admission budget; --memory-budget is %d",
-					img.Name, est, memBudget),
-				Hint: "increase --memory-budget or set --memory-budget=0 to disable admission",
-			}
+			oversized = append(oversized, fmt.Sprintf("%q (%d byte(s))", img.Name, est))
+		}
+	}
+	if len(oversized) > 0 {
+		return &errs.UserError{
+			Cat: errs.CategoryUser,
+			Msg: fmt.Sprintf(
+				"image(s) %s require more admission budget than --memory-budget %d",
+				strings.Join(oversized, ", "), memBudget),
+			Hint: "increase --memory-budget or set --memory-budget=0 to disable admission",
 		}
 	}
 	return nil

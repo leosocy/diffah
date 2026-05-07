@@ -3,14 +3,18 @@
 package importer
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/opencontainers/go-digest"
 
+	"github.com/leosocy/diffah/internal/archive"
+	"github.com/leosocy/diffah/internal/imageio"
 	"github.com/leosocy/diffah/pkg/diff"
 	"github.com/leosocy/diffah/pkg/diff/errs"
 )
@@ -60,22 +64,141 @@ func TestImport_ScaleBaselineOnlyReuse4GiB(t *testing.T) {
 		t.Skip("set DIFFAH_SCALE_BENCH=1 to run")
 	}
 
-	blobDir := filepath.Join(t.TempDir(), "blobs")
-	layerDigest := digest.FromBytes([]byte("baseline-only-4g-layer"))
-	manifestDigest := writeScaleManifest(t, blobDir, layerDigest, 4<<30)
-	images := []diff.ImageEntry{
-		{Name: "svc-a", Target: diff.TargetRef{ManifestDigest: manifestDigest}},
-		{Name: "svc-b", Target: diff.TargetRef{ManifestDigest: manifestDigest}},
-	}
+	bundlePath, baselineRef := buildBaselineOnlyScaleBundle(t, 4<<30)
 
-	err := checkSingleImageFitsInBudget(images, blobDir, map[digest.Digest]diff.BlobEntry{}, 0, 2<<30)
+	err := Import(context.Background(), Options{
+		DeltaPath: bundlePath,
+		Baselines: map[string]string{
+			"svc-a": baselineRef,
+			"svc-b": baselineRef,
+		},
+		Outputs: map[string]string{
+			"svc-a": "oci-archive:" + filepath.Join(t.TempDir(), "svc-a.tar"),
+			"svc-b": "oci-archive:" + filepath.Join(t.TempDir(), "svc-b.tar"),
+		},
+		Workers:      2,
+		MemoryBudget: 2 << 30,
+	})
 	var userErr *errs.UserError
 	if !errors.As(err, &userErr) || userErr.Cat != errs.CategoryUser {
 		t.Fatalf("expected CategoryUser budget rejection, got %T: %v", err, err)
 	}
-	if err := checkSingleImageFitsInBudget(images, blobDir, map[digest.Digest]diff.BlobEntry{}, 0, 8<<30); err != nil {
-		t.Fatalf("expected 8 GiB budget to admit baseline-only reuse fixture: %v", err)
+	if !strings.Contains(err.Error(), "svc-a") || !strings.Contains(err.Error(), "svc-b") {
+		t.Fatalf("budget rejection should mention both oversized images, got %q", err.Error())
 	}
+}
+
+func buildBaselineOnlyScaleBundle(t *testing.T, layerSize int64) (bundlePath, baselineRef string) {
+	t.Helper()
+
+	baselineRef = "oci-archive:../../testdata/fixtures/v1_oci.tar"
+	ref, err := imageio.ParseReference(baselineRef)
+	if err != nil {
+		t.Fatalf("parse baseline ref: %v", err)
+	}
+	src, err := ref.NewImageSource(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("open baseline source: %v", err)
+	}
+	t.Cleanup(func() { _ = src.Close() })
+
+	baselineManifest, baselineMime, err := src.GetManifest(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("read baseline manifest: %v", err)
+	}
+	layers, _, targetMime, err := parseManifest(baselineManifest, baselineMime)
+	if err != nil {
+		t.Fatalf("parse baseline manifest: %v", err)
+	}
+	if len(layers) == 0 {
+		t.Fatal("baseline fixture has no layers")
+	}
+
+	targetManifest := withFirstLayerSize(t, baselineManifest, layerSize)
+	targetDigest := digest.FromBytes(targetManifest)
+	baselineDigest := digest.FromBytes(baselineManifest)
+
+	root := t.TempDir()
+	blobDir := filepath.Join(root, "blobs", targetDigest.Algorithm().String())
+	if err := os.MkdirAll(blobDir, 0o700); err != nil {
+		t.Fatalf("mkdir blob dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(blobDir, targetDigest.Encoded()), targetManifest, 0o600); err != nil {
+		t.Fatalf("write target manifest: %v", err)
+	}
+
+	sc := diff.Sidecar{
+		Version:     diff.SchemaVersionV1,
+		Feature:     diff.FeatureBundle,
+		Tool:        "diffah-test",
+		ToolVersion: "test",
+		Platform:    "linux/amd64",
+		Images: []diff.ImageEntry{
+			scaleImageEntry("svc-a", baselineDigest, targetDigest, int64(len(targetManifest)), targetMime),
+			scaleImageEntry("svc-b", baselineDigest, targetDigest, int64(len(targetManifest)), targetMime),
+		},
+		Blobs: map[digest.Digest]diff.BlobEntry{
+			targetDigest: {
+				Size:        int64(len(targetManifest)),
+				MediaType:   targetMime,
+				Encoding:    diff.EncodingFull,
+				ArchiveSize: int64(len(targetManifest)),
+			},
+		},
+	}
+	sidecar, err := sc.Marshal()
+	if err != nil {
+		t.Fatalf("marshal sidecar: %v", err)
+	}
+	bundlePath = filepath.Join(t.TempDir(), "baseline-only-scale.tar")
+	if err := archive.Pack(root, sidecar, bundlePath, archive.CompressNone); err != nil {
+		t.Fatalf("pack bundle: %v", err)
+	}
+	return bundlePath, baselineRef
+}
+
+func scaleImageEntry(
+	name string,
+	baselineDigest digest.Digest,
+	targetDigest digest.Digest,
+	targetSize int64,
+	mediaType string,
+) diff.ImageEntry {
+	return diff.ImageEntry{
+		Name: name,
+		Baseline: diff.BaselineRef{
+			ManifestDigest: baselineDigest,
+			MediaType:      mediaType,
+		},
+		Target: diff.TargetRef{
+			ManifestDigest: targetDigest,
+			ManifestSize:   targetSize,
+			MediaType:      mediaType,
+		},
+	}
+}
+
+func withFirstLayerSize(t *testing.T, manifest []byte, size int64) []byte {
+	t.Helper()
+
+	var raw map[string]any
+	if err := json.Unmarshal(manifest, &raw); err != nil {
+		t.Fatalf("unmarshal manifest: %v", err)
+	}
+	layers, ok := raw["layers"].([]any)
+	if !ok || len(layers) == 0 {
+		t.Fatal("manifest layers field missing or empty")
+	}
+	first, ok := layers[0].(map[string]any)
+	if !ok {
+		t.Fatal("manifest first layer is not an object")
+	}
+	first["size"] = size
+	out, err := json.Marshal(raw)
+	if err != nil {
+		t.Fatalf("marshal target manifest: %v", err)
+	}
+	return out
 }
 
 func writeScaleManifest(t *testing.T, blobDir string, layerDigest digest.Digest, size int64) digest.Digest {
