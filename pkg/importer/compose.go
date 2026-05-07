@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/opencontainers/go-digest"
 	"go.podman.io/image/v5/copy"
@@ -51,12 +52,29 @@ type bundleImageSource struct {
 	ref          types.ImageReference
 	spool        *BaselineSpool
 	scratchDir   string
+	mu           sync.Mutex
+	closeErr     error
 }
 
 var _ types.ImageSource = (*bundleImageSource)(nil)
 
 func (s *bundleImageSource) Reference() types.ImageReference { return s.ref }
-func (s *bundleImageSource) Close() error                    { return nil }
+func (s *bundleImageSource) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.closeErr
+}
+
+func (s *bundleImageSource) recordBlobCloseError(err error) {
+	if err == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closeErr == nil {
+		s.closeErr = err
+	}
+}
 
 func (s *bundleImageSource) GetManifest(_ context.Context, instance *digest.Digest) ([]byte, string, error) {
 	if instance != nil {
@@ -151,6 +169,7 @@ func (s *bundleImageSource) serveFull(d digest.Digest) (io.ReadCloser, int64, er
 	return &verifyingReadCloser{
 		f: f, expected: d, hasher: d.Algorithm().Hash(),
 		imageName: s.imageName, kind: kindShipped,
+		onCloseError: s.recordBlobCloseError,
 	}, st.Size(), nil
 }
 
@@ -232,6 +251,7 @@ func (s *bundleImageSource) servePatch(
 	return &verifyingReadCloser{
 		f: f, expected: target, hasher: target.Algorithm().Hash(),
 		imageName: s.imageName, kind: kindAssembled, scratchPath: scratchPath,
+		onCloseError: s.recordBlobCloseError,
 	}, st.Size(), nil
 }
 
@@ -253,13 +273,14 @@ const (
 // closes the underlying file and (for kindAssembled) removes the scratch
 // path.
 type verifyingReadCloser struct {
-	f           *os.File
-	expected    digest.Digest
-	hasher      hash.Hash
-	imageName   string
-	kind        readerKind
-	scratchPath string // non-empty iff kind == kindAssembled
-	verified    bool   // set only after EOF triggers digest verification
+	f            *os.File
+	expected     digest.Digest
+	hasher       hash.Hash
+	imageName    string
+	kind         readerKind
+	scratchPath  string // non-empty iff kind == kindAssembled
+	verified     bool   // set only after EOF triggers digest verification
+	onCloseError func(error)
 }
 
 func (r *verifyingReadCloser) Read(p []byte) (int, error) {
@@ -300,7 +321,10 @@ func (r *verifyingReadCloser) Close() error {
 		_ = os.Remove(r.scratchPath)
 	}
 	if err == nil && !r.verified {
-		return r.incompleteErr()
+		err = r.incompleteErr()
+	}
+	if r.onCloseError != nil {
+		r.onCloseError(err)
 	}
 	return err
 }

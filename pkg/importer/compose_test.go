@@ -557,6 +557,27 @@ func TestVerifyingReadCloser_CloseBeforeEOFSurfacesError(t *testing.T) {
 	require.Equal(t, expected.String(), incomplete.Digest)
 }
 
+func TestBundleImageSource_CloseSurfacesReaderCloseError(t *testing.T) {
+	payload := []byte("source-close-observes-reader-close")
+	d := digest.FromBytes(payload)
+	blobDir := filepath.Join(t.TempDir(), "blobs")
+	digestDir := filepath.Join(blobDir, d.Algorithm().String())
+	require.NoError(t, os.MkdirAll(digestDir, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(digestDir, d.Encoded()), payload, 0o600))
+
+	src := &bundleImageSource{blobDir: blobDir, imageName: "svc-close"}
+	rc, _, err := src.serveFull(d)
+	require.NoError(t, err)
+	buf := make([]byte, 4)
+	_, err = rc.Read(buf)
+	require.NoError(t, err)
+
+	require.Error(t, rc.Close())
+	var incomplete *diff.ErrBlobIncompletelyConsumed
+	require.ErrorAs(t, src.Close(), &incomplete)
+	require.Equal(t, "svc-close", incomplete.ImageName)
+}
+
 func TestVerifyingReadCloser_CloseAfterEOFReturnsNil(t *testing.T) {
 	payload := []byte("verify-after-eof-payload")
 	expected := digest.FromBytes(payload)

@@ -280,6 +280,8 @@ func TestWriteFile_TruncatedTarEntryRejected(t *testing.T) {
 	err := writeFile(filepath.Join(t.TempDir(), "blob.bin"), strings.NewReader("short"), 1024)
 
 	require.Error(t, err)
+	var truncated *ErrTruncatedEntry
+	require.ErrorAs(t, err, &truncated)
 	require.ErrorContains(t, err, "truncated tar entry")
 }
 
@@ -303,6 +305,8 @@ func TestExtract_TruncatedTarEntryRejected(t *testing.T) {
 
 	_, err = Extract(out, t.TempDir())
 	require.Error(t, err)
+	var truncated *ErrTruncatedEntry
+	require.ErrorAs(t, err, &truncated)
 	require.ErrorContains(t, err, "truncated tar entry")
 	require.ErrorContains(t, err, "blob.bin")
 }

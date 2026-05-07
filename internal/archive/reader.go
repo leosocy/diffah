@@ -133,9 +133,24 @@ func writeFile(path string, r io.Reader, size int64) error {
 	}
 	defer f.Close()
 	if _, err := io.CopyN(f, r, size); err != nil {
-		return fmt.Errorf("write %s (truncated tar entry?): %w", path, err)
+		return &ErrTruncatedEntry{Path: path, Err: err}
 	}
 	return nil
+}
+
+// ErrTruncatedEntry is returned when a tar entry body is shorter than the
+// size declared in its header.
+type ErrTruncatedEntry struct {
+	Path string
+	Err  error
+}
+
+func (e *ErrTruncatedEntry) Error() string {
+	return fmt.Sprintf("write %s (truncated tar entry?): %v", e.Path, e.Err)
+}
+
+func (e *ErrTruncatedEntry) Unwrap() error {
+	return e.Err
 }
 
 // openDecompressed sniffs the magic bytes and returns a ready-to-read
