@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"testing"
@@ -129,6 +130,29 @@ func TestRunBaselinePreflight_BaselineDigestMismatchRecordsCause(t *testing.T) {
 	var mismatch *diff.ErrBaselineBlobDigestMismatch
 	if !errors.As(got.Err, &mismatch) {
 		t.Fatalf("svc-b Err = %T %v, want ErrBaselineBlobDigestMismatch", got.Err, got.Err)
+	}
+	if mismatch.ImageName != testPreflightSvcB {
+		t.Fatalf("mismatch ImageName = %q, want %q", mismatch.ImageName, testPreflightSvcB)
+	}
+}
+
+func TestRunBaselinePreflight_ClassifiesTransportErrors(t *testing.T) {
+	fixture := newBaselinePreflightFixture(t)
+	transportErr := &url.Error{Op: "Get", URL: "https://registry.example/v2/blob", Err: errors.New("reset")}
+
+	_, skipped := runBaselinePreflight(
+		context.Background(),
+		[]string{testPreflightSvcB},
+		fixture.bundle,
+		map[string]resolvedBaseline{
+			testPreflightSvcB: {Name: testPreflightSvcB, Src: &baselinePreflightFakeSource{err: transportErr}},
+		},
+	)
+
+	got := skipped[testPreflightSvcB]
+	var network *diff.ErrRegistryNetwork
+	if !errors.As(got.Err, &network) {
+		t.Fatalf("svc-b Err = %T %v, want ErrRegistryNetwork", got.Err, got.Err)
 	}
 }
 
