@@ -26,8 +26,8 @@ func TestRunBaselinePreflight_AllComplete(t *testing.T) {
 		[]string{testPreflightSvcA, testPreflightSvcB},
 		fixture.bundle,
 		map[string]resolvedBaseline{
-			testPreflightSvcA: {Name: testPreflightSvcA, Src: baselinePreflightSourceWith(fixture.layerA)},
-			testPreflightSvcB: {Name: testPreflightSvcB, Src: baselinePreflightSourceWith(fixture.layerB)},
+			testPreflightSvcA: {Name: testPreflightSvcA, Src: baselinePreflightSourceWith(fixture.layerABytes)},
+			testPreflightSvcB: {Name: testPreflightSvcB, Src: baselinePreflightSourceWith(fixture.layerBBytes)},
 		},
 	)
 
@@ -47,7 +47,7 @@ func TestRunBaselinePreflight_OneImageBaselineMissing(t *testing.T) {
 		[]string{testPreflightSvcA, testPreflightSvcB},
 		fixture.bundle,
 		map[string]resolvedBaseline{
-			testPreflightSvcA: {Name: testPreflightSvcA, Src: baselinePreflightSourceWith(fixture.layerA)},
+			testPreflightSvcA: {Name: testPreflightSvcA, Src: baselinePreflightSourceWith(fixture.layerABytes)},
 			testPreflightSvcB: {Name: testPreflightSvcB, Src: baselinePreflightSourceWith()},
 		},
 	)
@@ -79,7 +79,7 @@ func TestRunBaselinePreflight_TransportErrorRecordsCause(t *testing.T) {
 		[]string{testPreflightSvcA, testPreflightSvcB},
 		fixture.bundle,
 		map[string]resolvedBaseline{
-			testPreflightSvcA: {Name: testPreflightSvcA, Src: baselinePreflightSourceWith(fixture.layerA)},
+			testPreflightSvcA: {Name: testPreflightSvcA, Src: baselinePreflightSourceWith(fixture.layerABytes)},
 			testPreflightSvcB: {Name: testPreflightSvcB, Src: &baselinePreflightFakeSource{err: transportErr}},
 		},
 	)
@@ -102,10 +102,42 @@ func TestRunBaselinePreflight_TransportErrorRecordsCause(t *testing.T) {
 	}
 }
 
+func TestRunBaselinePreflight_BaselineDigestMismatchRecordsCause(t *testing.T) {
+	fixture := newBaselinePreflightFixture(t)
+	corruptB := baselinePreflightBlob{digest: fixture.layerB, raw: []byte("wrong-bytes")}
+
+	filtered, skipped := runBaselinePreflight(
+		context.Background(),
+		[]string{testPreflightSvcA, testPreflightSvcB},
+		fixture.bundle,
+		map[string]resolvedBaseline{
+			testPreflightSvcA: {Name: testPreflightSvcA, Src: baselinePreflightSourceWith(fixture.layerABytes)},
+			testPreflightSvcB: {Name: testPreflightSvcB, Src: baselinePreflightSourceWith(corruptB)},
+		},
+	)
+
+	if !sameStrings(filtered, []string{testPreflightSvcA}) {
+		t.Fatalf("filtered = %v, want only svc-a", filtered)
+	}
+	got, ok := skipped[testPreflightSvcB]
+	if !ok {
+		t.Fatalf("svc-b was not skipped: %v", skipped)
+	}
+	if got.LayerDigest != fixture.layerB {
+		t.Fatalf("svc-b LayerDigest = %s, want %s", got.LayerDigest, fixture.layerB)
+	}
+	var mismatch *diff.ErrBaselineBlobDigestMismatch
+	if !errors.As(got.Err, &mismatch) {
+		t.Fatalf("svc-b Err = %T %v, want ErrBaselineBlobDigestMismatch", got.Err, got.Err)
+	}
+}
+
 type baselinePreflightFixture struct {
 	bundle       *extractedBundle
 	layerA       digest.Digest
+	layerABytes  baselinePreflightBlob
 	layerB       digest.Digest
+	layerBBytes  baselinePreflightBlob
 	manifestADig digest.Digest
 	manifestBDig digest.Digest
 }
@@ -113,8 +145,10 @@ type baselinePreflightFixture struct {
 func newBaselinePreflightFixture(t *testing.T) baselinePreflightFixture {
 	t.Helper()
 
-	layerA := digest.FromBytes([]byte("baseline-preflight-layer-a"))
-	layerB := digest.FromBytes([]byte("baseline-preflight-layer-b"))
+	layerARaw := []byte("baseline-preflight-layer-a")
+	layerBRaw := []byte("baseline-preflight-layer-b")
+	layerA := digest.FromBytes(layerARaw)
+	layerB := digest.FromBytes(layerBRaw)
 	configA := digest.FromBytes([]byte("baseline-preflight-config-a"))
 	configB := digest.FromBytes([]byte("baseline-preflight-config-b"))
 	manifestA := synthBaselinePreflightManifest(t, configA, layerA)
@@ -148,7 +182,9 @@ func newBaselinePreflightFixture(t *testing.T) baselinePreflightFixture {
 	return baselinePreflightFixture{
 		bundle:       &extractedBundle{blobDir: blobDir, sidecar: sidecar},
 		layerA:       layerA,
+		layerABytes:  baselinePreflightBlob{digest: layerA, raw: layerARaw},
 		layerB:       layerB,
+		layerBBytes:  baselinePreflightBlob{digest: layerB, raw: layerBRaw},
 		manifestADig: manifestADig,
 		manifestBDig: manifestBDig,
 	}
@@ -205,16 +241,21 @@ func writeBaselinePreflightBlob(t *testing.T, blobDir string, d digest.Digest, r
 	}
 }
 
-func baselinePreflightSourceWith(digests ...digest.Digest) *baselinePreflightFakeSource {
-	available := make(map[digest.Digest]struct{}, len(digests))
-	for _, d := range digests {
-		available[d] = struct{}{}
+type baselinePreflightBlob struct {
+	digest digest.Digest
+	raw    []byte
+}
+
+func baselinePreflightSourceWith(blobs ...baselinePreflightBlob) *baselinePreflightFakeSource {
+	available := make(map[digest.Digest][]byte, len(blobs))
+	for _, b := range blobs {
+		available[b.digest] = b.raw
 	}
 	return &baselinePreflightFakeSource{available: available}
 }
 
 type baselinePreflightFakeSource struct {
-	available map[digest.Digest]struct{}
+	available map[digest.Digest][]byte
 	err       error
 }
 
@@ -236,10 +277,11 @@ func (s *baselinePreflightFakeSource) GetBlob(
 	if s.err != nil {
 		return nil, 0, s.err
 	}
-	if _, ok := s.available[info.Digest]; !ok {
+	raw, ok := s.available[info.Digest]
+	if !ok {
 		return nil, 0, os.ErrNotExist
 	}
-	return io.NopCloser(bytes.NewReader([]byte("x"))), 1, nil
+	return io.NopCloser(bytes.NewReader(raw)), int64(len(raw)), nil
 }
 
 func sameStrings(a, b []string) bool {

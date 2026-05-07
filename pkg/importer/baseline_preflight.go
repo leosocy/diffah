@@ -83,9 +83,16 @@ func checkBaselineBlobAvailable(
 	}
 	defer rc.Close()
 
-	var one [1]byte
-	if _, err := rc.Read(one[:]); err != nil && err != io.EOF {
+	h := d.Algorithm().Hash()
+	if _, err := io.Copy(h, rc); err != nil {
 		return err
+	}
+	got := digest.NewDigest(d.Algorithm(), h)
+	if got != d {
+		return &diff.ErrBaselineBlobDigestMismatch{
+			Digest: d.String(),
+			Got:    got.String(),
+		}
 	}
 	return nil
 }
