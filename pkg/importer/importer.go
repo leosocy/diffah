@@ -134,6 +134,9 @@ func Import(ctx context.Context, opts Options) error {
 	mergePreflightSkips(&report, bundle.sidecar.Images, skippedByPreflight)
 	finalizeImportReport(ctx, rep, report, len(skippedByPreflight))
 
+	if opts.Strict && report.Successful() < report.Total {
+		return firstNonOKError(report)
+	}
 	// Partial-mode contract: at least one image must succeed for an
 	// exit-0 outcome. Returning the first non-OK image's error keeps
 	// classification (CategoryContent for B1/B2/invariant) intact for

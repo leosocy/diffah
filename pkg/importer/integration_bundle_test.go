@@ -379,6 +379,34 @@ func TestIntegration_MultiImageBundle_PartialSkip(t *testing.T) {
 	require.ErrorIs(t, err, os.ErrNotExist, "svc-b.tar must not exist")
 }
 
+func TestImport_StrictReturnsApplyTimeFailureWithSiblingSuccess(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	h := newMultiImageBundleHarness(t)
+	outDir := filepath.Join(h.tmpDir, "strict-apply-failure")
+	opts := Options{
+		DeltaPath: h.bundlePath,
+		Baselines: map[string]string{
+			"svc-a": "oci-archive:../../testdata/fixtures/v1_oci.tar",
+			"svc-b": "oci-archive:../../testdata/fixtures/v1_oci.tar",
+		},
+		Outputs: map[string]string{
+			"svc-a": "oci-archive:" + filepath.Join(outDir, "svc-a.tar"),
+			"svc-b": "not-a-valid-reference",
+		},
+		Strict:  true,
+		Workers: 1,
+	}
+
+	err := Import(h.ctx, opts)
+	require.Error(t, err)
+	require.ErrorContains(t, err, "svc-b")
+	require.ErrorContains(t, err, "output")
+	_, statErr := os.Stat(filepath.Join(outDir, "svc-a.tar"))
+	require.NoError(t, statErr, "strict does not cancel already-applied siblings")
+}
+
 func TestImport_BudgetCheckUsesApplyList(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
