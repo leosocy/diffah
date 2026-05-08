@@ -34,7 +34,7 @@ func openBaseline(t *testing.T, path string) types.ImageSource {
 
 func TestBundleImageSource_GetManifest_ReturnsStoredBytes(t *testing.T) {
 	bundlePath := buildTestBundle(t, "svc-a")
-	b, err := extractBundle(bundlePath)
+	b, err := extractBundle(bundlePath, t.TempDir())
 	require.NoError(t, err)
 	t.Cleanup(b.cleanup)
 
@@ -63,7 +63,7 @@ func TestBundleImageSource_GetManifest_ReturnsStoredBytes(t *testing.T) {
 
 func TestBundleImageSource_GetBlob_FullEncoding_ReturnsVerifiedBytes(t *testing.T) {
 	bundlePath := buildTestBundle(t, "svc-a")
-	b, err := extractBundle(bundlePath)
+	b, err := extractBundle(bundlePath, t.TempDir())
 	require.NoError(t, err)
 	t.Cleanup(b.cleanup)
 
@@ -117,7 +117,7 @@ func TestBundleImageSource_GetBlob_PatchEncoding_DecodesAndVerifies(t *testing.T
 		CreatedAt:   time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 	})
 	require.NoError(t, err)
-	b, err := extractBundle(bp)
+	b, err := extractBundle(bp, t.TempDir())
 	require.NoError(t, err)
 	t.Cleanup(b.cleanup)
 
@@ -174,7 +174,7 @@ func TestBundleImageSource_GetBlob_PatchEncoding_CorruptedBlob_RaisesAssemblyMis
 		CreatedAt:   time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 	})
 	require.NoError(t, err)
-	b, err := extractBundle(bp)
+	b, err := extractBundle(bp, t.TempDir())
 	require.NoError(t, err)
 	t.Cleanup(b.cleanup)
 
@@ -235,7 +235,7 @@ func TestBundleImageSource_GetBlob_BaselineDelegation_Verified(t *testing.T) {
 		CreatedAt:   time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 	})
 	require.NoError(t, err)
-	b, err := extractBundle(bp)
+	b, err := extractBundle(bp, t.TempDir())
 	require.NoError(t, err)
 	t.Cleanup(b.cleanup)
 

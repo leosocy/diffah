@@ -16,10 +16,12 @@ import (
 
 func TestExtractBundle_ParsesSidecar(t *testing.T) {
 	bundlePath := buildTestBundle(t, "svc-a")
-	b, err := extractBundle(bundlePath)
+	wd := t.TempDir()
+	b, err := extractBundle(bundlePath, wd)
 	require.NoError(t, err)
 	defer b.cleanup()
 
+	require.Equal(t, filepath.Join(wd, "bundle"), b.tmpDir)
 	require.Equal(t, diff.SchemaVersionV1, b.sidecar.Version)
 	require.Equal(t, diff.FeatureBundle, b.sidecar.Feature)
 	require.Len(t, b.sidecar.Images, 1)
@@ -39,7 +41,7 @@ func TestExtractBundle_RejectsLegacyArchive(t *testing.T) {
 	require.NoError(t, tw.Close())
 	f.Close()
 
-	_, err = extractBundle(legacyPath)
+	_, err = extractBundle(legacyPath, t.TempDir())
 	require.Error(t, err)
 	var p1 *diff.ErrPhase1Archive
 	require.ErrorAs(t, err, &p1, "must reject Phase 1 archive")

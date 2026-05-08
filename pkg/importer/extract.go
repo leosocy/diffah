@@ -20,10 +20,13 @@ type extractedBundle struct {
 	sidecarRawBytes []byte
 }
 
-func extractBundle(deltaPath string) (*extractedBundle, error) {
-	tmpDir, err := os.MkdirTemp("", "diffah-import-")
-	if err != nil {
-		return nil, fmt.Errorf("create tmp dir: %w", err)
+func extractBundle(deltaPath, workdir string) (*extractedBundle, error) {
+	tmpDir := filepath.Join(workdir, "bundle")
+	if err := os.RemoveAll(tmpDir); err != nil {
+		return nil, fmt.Errorf("reset bundle dir: %w", err)
+	}
+	if err := os.MkdirAll(tmpDir, 0o700); err != nil {
+		return nil, fmt.Errorf("create bundle dir: %w", err)
 	}
 	raw, err := archive.Extract(deltaPath, tmpDir)
 	if err != nil {

@@ -212,7 +212,11 @@ func (s *bundleImageSource) servePatch(
 		}
 		var mismatch *diff.ErrBaselineBlobDigestMismatch
 		if errors.As(err, &mismatch) && mismatch.ImageName == "" {
-			mismatch.ImageName = s.imageName
+			err = &diff.ErrBaselineBlobDigestMismatch{
+				ImageName: s.imageName,
+				Digest:    mismatch.Digest,
+				Got:       mismatch.Got,
+			}
 		}
 		return nil, 0, fmt.Errorf("baseline spool %s: %w", entry.PatchFromDigest, err)
 	}
@@ -380,7 +384,11 @@ func (s *bundleImageSource) fetchVerifiedBaselineBlob(
 	if err != nil {
 		var mismatch *diff.ErrBaselineBlobDigestMismatch
 		if errors.As(err, &mismatch) && mismatch.ImageName == "" {
-			mismatch.ImageName = s.imageName
+			err = &diff.ErrBaselineBlobDigestMismatch{
+				ImageName: s.imageName,
+				Digest:    mismatch.Digest,
+				Got:       mismatch.Got,
+			}
 		}
 		return nil, 0, err
 	}
