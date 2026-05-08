@@ -11,7 +11,7 @@ import (
 
 func TestResolveBaselines_HappyPath(t *testing.T) {
 	bundlePath := buildTestBundle(t, "svc-a")
-	b, err := extractBundle(bundlePath)
+	b, err := extractBundle(bundlePath, t.TempDir())
 	require.NoError(t, err)
 	defer b.cleanup()
 
@@ -28,7 +28,7 @@ func TestResolveBaselines_HappyPath(t *testing.T) {
 
 func TestResolveBaselines_StrictRejectsMissing(t *testing.T) {
 	bundlePath := buildTestBundle(t, "svc-a")
-	b, err := extractBundle(bundlePath)
+	b, err := extractBundle(bundlePath, t.TempDir())
 	require.NoError(t, err)
 	defer b.cleanup()
 
@@ -38,7 +38,7 @@ func TestResolveBaselines_StrictRejectsMissing(t *testing.T) {
 
 func TestResolveBaselines_MismatchDigest(t *testing.T) {
 	bundlePath := buildTestBundle(t, "svc-a")
-	b, err := extractBundle(bundlePath)
+	b, err := extractBundle(bundlePath, t.TempDir())
 	require.NoError(t, err)
 	defer b.cleanup()
 

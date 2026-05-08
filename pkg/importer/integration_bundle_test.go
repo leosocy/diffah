@@ -1,13 +1,17 @@
 package importer
 
 import (
+	"archive/tar"
 	"bytes"
 	"context"
+	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/opencontainers/go-digest"
 	"github.com/stretchr/testify/require"
 
 	"github.com/leosocy/diffah/pkg/diff"
@@ -36,7 +40,7 @@ func newBundleHarness(t *testing.T, pairs []exporter.Pair) *bundleHarness {
 		CreatedAt:   time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 	})
 	require.NoError(t, err)
-	b, err := extractBundle(bundlePath)
+	b, err := extractBundle(bundlePath, t.TempDir())
 	require.NoError(t, err)
 	defer b.cleanup()
 	return &bundleHarness{t: t, ctx: ctx, tmpDir: tmpDir, bundlePath: bundlePath, sidecar: b.sidecar}
@@ -375,6 +379,176 @@ func TestIntegration_MultiImageBundle_PartialSkip(t *testing.T) {
 	require.ErrorIs(t, err, os.ErrNotExist, "svc-b.tar must not exist")
 }
 
+func TestImport_StrictReturnsApplyTimeFailureWithSiblingSuccess(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	h := newMultiImageBundleHarness(t)
+	outDir := filepath.Join(h.tmpDir, "strict-apply-failure")
+	opts := Options{
+		DeltaPath: h.bundlePath,
+		Baselines: map[string]string{
+			"svc-a": "oci-archive:../../testdata/fixtures/v1_oci.tar",
+			"svc-b": "oci-archive:../../testdata/fixtures/v1_oci.tar",
+		},
+		Outputs: map[string]string{
+			"svc-a": "oci-archive:" + filepath.Join(outDir, "svc-a.tar"),
+			"svc-b": "not-a-valid-reference",
+		},
+		Strict:  true,
+		Workers: 1,
+	}
+
+	err := Import(h.ctx, opts)
+	require.Error(t, err)
+	require.ErrorContains(t, err, "svc-b")
+	require.ErrorContains(t, err, "output")
+	_, statErr := os.Stat(filepath.Join(outDir, "svc-a.tar"))
+	require.NoError(t, statErr, "strict does not cancel already-applied siblings")
+}
+
+func TestImport_BudgetCheckUsesApplyList(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	h := newMultiImageBundleHarness(t)
+	bundlePath := makeFirstImageOversizedBaselineOnly(t, h.bundlePath)
+
+	outDir := filepath.Join(h.tmpDir, "out-apply-list-budget")
+	opts := Options{
+		DeltaPath: bundlePath,
+		Baselines: map[string]string{
+			"svc-b": "oci-archive:../../testdata/fixtures/v1_oci.tar",
+		},
+		Outputs: map[string]string{
+			"svc-b": "oci-archive:" + filepath.Join(outDir, "svc-b.tar"),
+		},
+		MemoryBudget: 512 << 20,
+		Workers:      1,
+	}
+
+	err := Import(h.ctx, opts)
+	require.NoError(t, err)
+	_, err = os.Stat(filepath.Join(outDir, "svc-b.tar"))
+	require.NoError(t, err, "svc-b should import even though preflight-skipped svc-a exceeds budget")
+}
+
+func makeFirstImageOversizedBaselineOnly(t *testing.T, bundlePath string) string {
+	t.Helper()
+
+	b, err := extractBundle(bundlePath, t.TempDir())
+	require.NoError(t, err)
+	defer b.cleanup()
+	require.GreaterOrEqual(t, len(b.sidecar.Images), 2)
+
+	hugeLayer := digest.FromBytes([]byte("oversized-preflight-skipped-layer"))
+	config := digest.FromBytes([]byte("oversized-preflight-skipped-config"))
+	manifestRaw := marshalSyntheticManifest(t, config, hugeLayer, 4<<30)
+	manifestDigest := digest.FromBytes(manifestRaw)
+	writeBundleBlob(t, b.tmpDir, manifestDigest, manifestRaw)
+
+	b.sidecar.Images[0].Target.ManifestDigest = manifestDigest
+	b.sidecar.Images[0].Target.ManifestSize = int64(len(manifestRaw))
+	b.sidecar.Blobs[manifestDigest] = diff.BlobEntry{
+		Size:        int64(len(manifestRaw)),
+		MediaType:   "application/vnd.oci.image.manifest.v1+json",
+		Encoding:    diff.EncodingFull,
+		ArchiveSize: int64(len(manifestRaw)),
+	}
+
+	sidecarRaw, err := b.sidecar.Marshal()
+	require.NoError(t, err)
+	outPath := filepath.Join(t.TempDir(), "apply-list-budget.tar")
+	writeBundleTar(t, outPath, b.tmpDir, sidecarRaw)
+	return outPath
+}
+
+func marshalSyntheticManifest(t *testing.T, config, layer digest.Digest, layerSize int64) []byte {
+	t.Helper()
+	type descriptor struct {
+		MediaType string        `json:"mediaType"`
+		Digest    digest.Digest `json:"digest"`
+		Size      int64         `json:"size"`
+	}
+	type manifest struct {
+		SchemaVersion int          `json:"schemaVersion"`
+		MediaType     string       `json:"mediaType"`
+		Config        descriptor   `json:"config"`
+		Layers        []descriptor `json:"layers"`
+	}
+	raw, err := json.Marshal(manifest{
+		SchemaVersion: 2,
+		MediaType:     "application/vnd.oci.image.manifest.v1+json",
+		Config: descriptor{
+			MediaType: "application/vnd.oci.image.config.v1+json",
+			Digest:    config,
+			Size:      2,
+		},
+		Layers: []descriptor{{
+			MediaType: "application/vnd.oci.image.layer.v1.tar",
+			Digest:    layer,
+			Size:      layerSize,
+		}},
+	})
+	require.NoError(t, err)
+	return raw
+}
+
+func writeBundleBlob(t *testing.T, root string, d digest.Digest, raw []byte) {
+	t.Helper()
+	dir := filepath.Join(root, "blobs", d.Algorithm().String())
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, d.Encoded()), raw, 0o644))
+}
+
+func writeBundleTar(t *testing.T, outPath, root string, sidecarRaw []byte) {
+	t.Helper()
+	f, err := os.Create(outPath)
+	require.NoError(t, err)
+	defer f.Close()
+
+	tw := tar.NewWriter(f)
+	defer tw.Close()
+	require.NoError(t, tw.WriteHeader(&tar.Header{
+		Name: diff.SidecarFilename,
+		Mode: 0o644,
+		Size: int64(len(sidecarRaw)),
+	}))
+	_, err = tw.Write(sidecarRaw)
+	require.NoError(t, err)
+
+	require.NoError(t, filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		if err := tw.WriteHeader(&tar.Header{
+			Name: filepath.ToSlash(rel),
+			Mode: 0o644,
+			Size: info.Size(),
+		}); err != nil {
+			return err
+		}
+		in, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer in.Close()
+		_, err = io.Copy(tw, in)
+		return err
+	}))
+}
+
 func TestDryRun_PopulatesAllFields(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
@@ -453,7 +627,7 @@ func TestIntegration_AutoDowngradesUnderReducedPATH(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	b, err := extractBundle(bundlePath)
+	b, err := extractBundle(bundlePath, t.TempDir())
 	require.NoError(t, err)
 	defer b.cleanup()
 	for d, b := range b.sidecar.Blobs {

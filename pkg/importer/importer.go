@@ -25,12 +25,6 @@ import (
 	"github.com/leosocy/diffah/pkg/signer"
 )
 
-// budgetSentinelName is the synthetic ImageName recorded in the apply
-// report when checkSingleImageFitsInBudget rejects the bundle pre-pool.
-// Quoted so renderSummary's per-image row doesn't conflate it with a
-// real image name (no real name can contain '<' per the sidecar regex).
-const budgetSentinelName = "<budget>"
-
 type Options struct {
 	DeltaPath        string
 	Baselines        map[string]string // transport-prefixed refs
@@ -89,18 +83,12 @@ func (o *Options) probeOrDefault() func(context.Context) (bool, string) {
 func Import(ctx context.Context, opts Options) error {
 	defer opts.reporter().Finish()
 
-	wd, cleanupWorkdir, werr := ensureImportWorkdir(opts)
-	if werr != nil {
-		return werr
-	}
-	defer cleanupWorkdir()
-	opts.Workdir = wd
-
-	bundle, err := extractBundle(opts.DeltaPath)
+	wd, bundle, cleanup, err := prepareImportBundle(opts)
 	if err != nil {
 		return err
 	}
-	defer bundle.cleanup()
+	defer cleanup()
+	opts.Workdir = wd
 
 	if err := preApplyChecks(ctx, opts, bundle); err != nil {
 		return err
@@ -133,6 +121,9 @@ func Import(ctx context.Context, opts Options) error {
 	); err != nil {
 		return err
 	}
+	if err := checkApplyListFitsInBudget(applyList, bundle, opts); err != nil {
+		return err
+	}
 
 	spool, err := newImportSpool(wd)
 	if err != nil {
@@ -143,6 +134,9 @@ func Import(ctx context.Context, opts Options) error {
 	mergePreflightSkips(&report, bundle.sidecar.Images, skippedByPreflight)
 	finalizeImportReport(ctx, rep, report, len(skippedByPreflight))
 
+	if opts.Strict && report.Successful() < report.Total {
+		return firstNonOKError(report)
+	}
 	// Partial-mode contract: at least one image must succeed for an
 	// exit-0 outcome. Returning the first non-OK image's error keeps
 	// classification (CategoryContent for B1/B2/invariant) intact for
@@ -151,6 +145,23 @@ func Import(ctx context.Context, opts Options) error {
 		return firstNonOKError(report)
 	}
 	return nil
+}
+
+func prepareImportBundle(opts Options) (string, *extractedBundle, func(), error) {
+	wd, cleanupWorkdir, err := ensureImportWorkdir(opts)
+	if err != nil {
+		return "", nil, func() {}, err
+	}
+	bundle, err := extractBundle(opts.DeltaPath, wd)
+	if err != nil {
+		cleanupWorkdir()
+		return "", nil, func() {}, err
+	}
+	cleanup := func() {
+		bundle.cleanup()
+		cleanupWorkdir()
+	}
+	return wd, bundle, cleanup, nil
 }
 
 func resolvedBaselinesByName(resolved []resolvedBaseline) map[string]resolvedBaseline {
@@ -253,10 +264,6 @@ func splitPreflightResults(results []PreflightResult) ([]string, map[string]Pref
 // they produce; the final report is post-sorted to applyList order so the
 // per-image rows are byte-identical regardless of worker count.
 //
-// Pre-pool, checkSingleImageFitsInBudget rejects bundles whose largest
-// image cannot fit under MemoryBudget — surfaces a CategoryUser error
-// before any worker starts.
-//
 // Partial mode (opts.Strict=false): submitted closures always return nil
 // so errgroup never cancels queued siblings; per-image errors are
 // recorded under the report mutex.
@@ -278,29 +285,12 @@ func importEachImage(
 ) ApplyReport {
 	report := ApplyReport{}
 
-	// Pre-pool admission gate: fail fast with the offending image's name
-	// when the operator's budget cannot fit even a single image. The
-	// admission pool's memSem clamps oversized estimates internally to
-	// avoid deadlock, but that's a safety net — the operator-facing
-	// contract is "you'll learn before any image starts."
-	if err := checkSingleImageFitsInBudget(
-		bundle.sidecar.Images, bundle.blobDir, bundle.sidecar.Blobs,
-		opts.WindowLog, opts.MemoryBudget,
-	); err != nil {
-		report.Results = append(report.Results, ApplyImageResult{
-			ImageName: budgetSentinelName,
-			Status:    ApplyImageFailedCompose,
-			Err:       err,
-		})
-		return report
-	}
-
 	// Serial path: with Workers<=1 the admission pool's errgroup.Go
 	// scheduling is non-deterministic — observable order of the shared
 	// BaselineSpool's first-touches depends on which task's goroutine
 	// reaches workerSem.Acquire first, not on submission order. Run
 	// inline in applyList order to give the spool a deterministic
-	// view of who fetches first. checkSingleImageFitsInBudget already
+	// view of who fetches first. Import's apply-list budget gate already
 	// capped each image at the budget, so a single-task-at-a-time
 	// sequence cannot exceed it.
 	if opts.Workers <= 1 {
@@ -448,6 +438,27 @@ func sortResultsByApplyList(report *ApplyReport, applyList []string) {
 		}
 		return ri < rj
 	})
+}
+
+func imageEntriesFor(applyList []string, images []diff.ImageEntry) []diff.ImageEntry {
+	wanted := make(map[string]struct{}, len(applyList))
+	for _, name := range applyList {
+		wanted[name] = struct{}{}
+	}
+	filtered := make([]diff.ImageEntry, 0, len(applyList))
+	for _, img := range images {
+		if _, ok := wanted[img.Name]; ok {
+			filtered = append(filtered, img)
+		}
+	}
+	return filtered
+}
+
+func checkApplyListFitsInBudget(applyList []string, bundle *extractedBundle, opts Options) error {
+	return checkSingleImageFitsInBudget(
+		imageEntriesFor(applyList, bundle.sidecar.Images), bundle.blobDir, bundle.sidecar.Blobs,
+		opts.WindowLog, opts.MemoryBudget,
+	)
 }
 
 // applyOneImage runs the full per-image pipeline (resolve output, compose,
@@ -682,11 +693,11 @@ func firstNonOKError(report ApplyReport) error {
 }
 
 func DryRun(ctx context.Context, opts Options) (DryRunReport, error) {
-	bundle, err := extractBundle(opts.DeltaPath)
+	bundle, cleanup, err := prepareDryRunBundle(opts)
 	if err != nil {
 		return DryRunReport{}, err
 	}
-	defer bundle.cleanup()
+	defer cleanup()
 
 	if err := validatePositionalBaseline(bundle.sidecar, opts.Baselines); err != nil {
 		return DryRunReport{}, err
@@ -745,6 +756,11 @@ func DryRun(ctx context.Context, opts Options) (DryRunReport, error) {
 		RequiresZstd:  requiresZstd,
 		ZstdAvailable: zstdAvailable,
 	}, nil
+}
+
+func prepareDryRunBundle(opts Options) (*extractedBundle, func(), error) {
+	_, bundle, cleanup, err := prepareImportBundle(opts)
+	return bundle, cleanup, err
 }
 
 func buildImageDryRuns(bundle *extractedBundle, resolved []resolvedBaseline) ([]ImageDryRun, error) {
